@@ -36,11 +36,11 @@ HELPER_CWD=""
 # shellcheck disable=SC1090
 . "$conf"
 
-[ -n "$HELPER_AGENT" ] || die "set HELPER_AGENT in $conf (codex, claude, or grok)"
+[ -n "$HELPER_AGENT" ] || die "set HELPER_AGENT in $conf (codex, claude, grok, or devin)"
 
 case "$HELPER_AGENT" in
-codex | claude | grok) ;;
-*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use codex, claude, or grok)" ;;
+codex | claude | grok | devin) ;;
+*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use codex, claude, grok, or devin)" ;;
 esac
 
 command -v "$HELPER_AGENT" >/dev/null 2>&1 ||
@@ -69,8 +69,16 @@ fi
 if [ "$HELPER_AGENT" = "grok" ]; then
     set -- "$@" --no-subagents
 fi
+if [ "$HELPER_AGENT" = "devin" ]; then
+    # create/focus/start must run without a TUI approval prompt
+    set -- "$@" --permission-mode dangerous
+fi
 if [ -n "$prompt" ]; then
-    set -- "$@" "$prompt"
+    if [ "$HELPER_AGENT" = "devin" ]; then
+        set -- "$@" -- "$prompt"
+    else
+        set -- "$@" "$prompt"
+    fi
 fi
 
 cd "$cwd" || die "could not change to $cwd"

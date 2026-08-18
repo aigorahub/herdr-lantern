@@ -1,16 +1,20 @@
 # Session helper configuration. This file is sourced by launch.sh as POSIX
 # shell, so keep values quoted and avoid other shell syntax.
 
-# Required: which agent CLI runs the helper chat. One of: codex, claude, grok.
+# Required: which agent CLI runs the helper chat.
+# One of: codex, claude, grok, devin.
 HELPER_AGENT=""
 
 # Optional: model to pass to the agent (--model).
+# For devin, leave empty so it uses ~/.config/devin/config.json
+# (CLI --model swe-1-7-lightning is gated on some plans).
 HELPER_MODEL=""
 
 # Optional: reasoning effort. Mapped per agent:
 #   codex  -> --config model_reasoning_effort="<value>"
 #   claude -> --effort <value>
 #   grok   -> --reasoning-effort <value>
+#   devin -> unused (model comes from devin config)
 HELPER_EFFORT=""
 
 # Optional: working directory for the helper agent. Defaults to $HOME so the
