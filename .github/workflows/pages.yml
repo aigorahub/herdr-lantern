@@ -2,7 +2,7 @@ name: pages
 
 on:
   push:
-    branches: [main, feat/devin-helper-and-prompt-guardrails]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
