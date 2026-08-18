@@ -114,7 +114,11 @@ printf '%s\n' "$full_prompt" >"$workdir/.windsurf/rules/session-helper.md" ||
 
 set -- "$HELPER_AGENT"
 if [ -n "$HELPER_MODEL" ]; then
-    set -- "$@" --model "$HELPER_MODEL"
+    if [ "$HELPER_AGENT" = "devin" ]; then
+        printf 'session-helper: ignoring HELPER_MODEL for devin (use devin config)\n' >&2
+    else
+        set -- "$@" --model "$HELPER_MODEL"
+    fi
 fi
 if [ -n "$HELPER_EFFORT" ]; then
     case $HELPER_AGENT in
