@@ -6,9 +6,8 @@ the directory and spawns an agent there; ask about your open agents and it
 tells you who is blocked, done, or still working, and jumps you to them.
 
 The helper is not a new chat UI. It launches the agent CLI you already use
-(Codex, Claude Code, Grok, or Devin) in a 90% session popup, primed with a prompt
-that teaches it to drive the Herdr CLI: `herdr workspace create`,
-`herdr agent start`, `herdr agent list`, `herdr agent focus`, and friends.
+(Devin, Codex, Claude Code, or Grok) in a 90% session popup, primed with a
+prompt that teaches it to drive the Herdr CLI.
 
 ## Install
 
@@ -24,31 +23,37 @@ herdr plugin link /path/to/herdr-session-helper
 
 ## Configure
 
-Set the agent that powers the helper:
-
 ```bash
 $EDITOR "$(herdr plugin config-dir aigora.session-helper)/helper.conf"
 ```
 
 ```sh
-HELPER_AGENT="devin"  # required: devin, claude, codex, or grok
-HELPER_MODEL=""         # optional --model; leave empty for devin
-HELPER_EFFORT=""        # optional; unused for devin
-HELPER_CWD="~"          # working directory for the helper
+HELPER_AGENT="devin"         # devin, claude, codex, grok; empty = first on PATH
+HELPER_MODEL=""              # optional --model; leave empty for devin
+HELPER_EFFORT=""             # unused for devin
+HELPER_CWD="~"               # search root mentioned to the helper
+HELPER_SPAWN_KIND="claude"   # default --kind for herdr agent start
+HELPER_PERMISSION="smart"    # devin: auto | accept-edits | smart | dangerous
+HELPER_EXTRA_ARGS=""         # extra unquoted CLI tokens
 ```
 
+`launch.sh` parses `KEY=value` only; it does not source the file as shell.
+
 The helper prompt is seeded to `prompt.md` in the same config directory. Edit
-it to change what the helper does; your copy is never overwritten.
+that copy to change what the helper does; it is never overwritten. Devin also
+gets the same text as a `.windsurf/rules` file in the plugin state workdir.
+
+Mutating `herdr` commands (create, start, focus, close, …) are wrapped. After
+the user confirms a path or target, the helper must rerun with
+`HERDR_HELPER_OK=1`.
 
 ## Use
-
-Open it from the command line:
 
 ```bash
 herdr plugin action invoke aigora.session-helper.open
 ```
 
-Or bind a key in your Herdr config. `prefix+h` is already “focus pane left”, so use another chord:
+Or bind a key. `prefix+h` is already “focus pane left”:
 
 ```toml
 [[keys.command]]
@@ -63,9 +68,17 @@ The popup closes when the agent exits (or with your agent's normal quit key).
 ## Requirements
 
 - Herdr 0.7.5 or newer, macOS or Linux
-- The configured agent CLI (`devin`, `codex`, `claude`, or `grok`) on your PATH
+- The configured agent CLI on `PATH` (Herdr panes should see `~/.local/bin`)
+
+## Tests
+
+```bash
+sh tests/smoke.sh
+```
 
 ## Trust
 
-Like every Herdr plugin, this runs as your user with your environment. It is
-two small POSIX shell scripts; read them before installing.
+Like every Herdr plugin, this runs as your user with your environment. Read
+`launch.sh`, `lib.sh`, and `bin/herdr` before installing. Devin
+`HELPER_PERMISSION=dangerous` skips Devin's own approval UI; the herdr wrapper
+still requires `HERDR_HELPER_OK=1` for mutating commands.

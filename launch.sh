@@ -8,14 +8,30 @@ set -u
 die() {
     printf '\nsession-helper: %s\n' "$1" >&2
     printf 'Fix the config, then reopen the helper. Press Enter to close.\n' >&2
-    # Keep the popup open so the message is readable instead of flashing away.
     read -r _ignored
     exit 1
 }
 
-plugin_root=${HERDR_PLUGIN_ROOT:-$(dirname "$0")}
+plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
+# shellcheck disable=SC1091
+. "$plugin_root/lib.sh"
+
 config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
 [ -n "$config_dir" ] || die "HERDR_PLUGIN_CONFIG_DIR is not set; run this through Herdr"
+
+helper_extend_user_path
+helper_prepend_path "$plugin_root/bin"
+
+if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "$HERDR_BIN_PATH" ]; then
+    case $HERDR_BIN_PATH in
+    "$plugin_root"/bin/herdr) ;;
+    *)
+        HERDR_REAL=$HERDR_BIN_PATH
+        export HERDR_REAL
+        ;;
+    esac
+fi
+export HERDR_BIN_PATH="$plugin_root/bin/herdr"
 
 conf="$config_dir/helper.conf"
 if [ ! -f "$conf" ]; then
@@ -33,34 +49,75 @@ HELPER_AGENT=""
 HELPER_MODEL=""
 HELPER_EFFORT=""
 HELPER_CWD=""
-# shellcheck disable=SC1090
-. "$conf"
+HELPER_SPAWN_KIND=""
+HELPER_PERMISSION=""
+HELPER_EXTRA_ARGS=""
+helper_parse_conf "$conf" || die "could not parse $conf"
 
-[ -n "$HELPER_AGENT" ] || die "set HELPER_AGENT in $conf (codex, claude, grok, or devin)"
+if [ -z "$HELPER_AGENT" ]; then
+    HELPER_AGENT=$(helper_detect_agent) ||
+        die "set HELPER_AGENT in $conf (devin, claude, codex, or grok)"
+    printf 'session-helper: HELPER_AGENT empty; using %s from PATH\n' "$HELPER_AGENT" >&2
+fi
 
-case "$HELPER_AGENT" in
+case $HELPER_AGENT in
 codex | claude | grok | devin) ;;
-*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use codex, claude, grok, or devin)" ;;
+*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use devin, claude, codex, or grok)" ;;
 esac
 
 command -v "$HELPER_AGENT" >/dev/null 2>&1 ||
     die "agent program not found on PATH: $HELPER_AGENT"
 
-cwd=${HELPER_CWD:-$HOME}
-case "$cwd" in
-"~") cwd=$HOME ;;
-"~/"*) cwd="$HOME/${cwd#\~/}" ;;
+HELPER_SPAWN_KIND=${HELPER_SPAWN_KIND:-claude}
+case $HELPER_SPAWN_KIND in
+*[!a-z0-9_-]* | '')
+    die "HELPER_SPAWN_KIND must match [a-z][a-z0-9_-]* (got '$HELPER_SPAWN_KIND')"
+    ;;
 esac
-[ -d "$cwd" ] || die "helper working directory does not exist: $cwd"
+
+HELPER_PERMISSION=${HELPER_PERMISSION:-smart}
+case $HELPER_PERMISSION in
+auto | accept-edits | smart | dangerous) ;;
+*) die "HELPER_PERMISSION must be auto, accept-edits, smart, or dangerous" ;;
+esac
+
+state_dir=${HERDR_PLUGIN_STATE_DIR:-$config_dir/state}
+workdir=$state_dir/workdir
+mkdir -p "$workdir/.windsurf/rules" || die "could not create helper workdir"
+
+search_root=$(helper_expand_tilde "${HELPER_CWD:-~}")
+[ -d "$search_root" ] || die "helper search directory does not exist: $search_root"
 
 prompt=$(cat "$prompt_file")
+appendix=$(
+    cat <<EOF
+
+Runtime (injected by launch.sh; do not ignore):
+
+- Prefer \$HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.
+  Inspect commands (list/read/get) run as usual.
+  Mutating commands (create, start, focus, close, remove, prompt, send-*)
+  are blocked until the user confirms the exact path or target. Then rerun:
+    HERDR_HELPER_OK=1 herdr <same command>
+  Never call /opt/homebrew/bin/herdr or another absolute herdr path.
+- Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
+- After workspace create, if agent start fails, wait two seconds and retry once
+  (the new pane may still be coming up to a shell prompt).
+- Search from $search_root plus the usual project roots. You are not a coding
+  agent; do not edit files in this helper workdir.
+EOF
+)
+full_prompt=$prompt$appendix
+
+printf '%s\n' "$full_prompt" >"$workdir/.windsurf/rules/session-helper.md" ||
+    die "could not write devin rule file"
 
 set -- "$HELPER_AGENT"
 if [ -n "$HELPER_MODEL" ]; then
     set -- "$@" --model "$HELPER_MODEL"
 fi
 if [ -n "$HELPER_EFFORT" ]; then
-    case "$HELPER_AGENT" in
+    case $HELPER_AGENT in
     codex) set -- "$@" --config "model_reasoning_effort=\"$HELPER_EFFORT\"" ;;
     claude) set -- "$@" --effort "$HELPER_EFFORT" ;;
     grok) set -- "$@" --reasoning-effort "$HELPER_EFFORT" ;;
@@ -70,16 +127,18 @@ if [ "$HELPER_AGENT" = "grok" ]; then
     set -- "$@" --no-subagents
 fi
 if [ "$HELPER_AGENT" = "devin" ]; then
-    # create/focus/start must run without a TUI approval prompt
-    set -- "$@" --permission-mode dangerous
+    set -- "$@" --permission-mode "$HELPER_PERMISSION"
 fi
-if [ -n "$prompt" ]; then
-    if [ "$HELPER_AGENT" = "devin" ]; then
-        set -- "$@" -- "$prompt"
-    else
-        set -- "$@" "$prompt"
-    fi
+if [ -n "$HELPER_EXTRA_ARGS" ]; then
+    for _helper_extra in $HELPER_EXTRA_ARGS; do
+        set -- "$@" "$_helper_extra"
+    done
+fi
+if [ "$HELPER_AGENT" = "devin" ]; then
+    set -- "$@" -- "Run herdr agent list, greet with a one-line summary of open agents, and ask what to do."
+elif [ -n "$full_prompt" ]; then
+    set -- "$@" "$full_prompt"
 fi
 
-cd "$cwd" || die "could not change to $cwd"
+cd "$workdir" || die "could not change to $workdir"
 exec "$@"
