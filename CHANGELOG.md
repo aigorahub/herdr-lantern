@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes to Lantern, by Elves are documented here.
+
+## [0.2.0] - 2026-08-18
+
+First named release. Plugin id is `aigora.lantern`. GitHub repo is
+[aigorahub/herdr-lantern](https://github.com/aigorahub/herdr-lantern).
+Requires Herdr 0.7.5+.
+
+### Added
+
+- Field snapshot on light-up (`bin/goals-floor`): pane titles, Claude `/goal`
+  and recap lines, buckets NEEDS YOU / IN MOTION / LIVE GOALS / QUIET. No
+  invented percent-complete.
+- Optional Elves floor (`bin/elves-floor`): if `.elves-session.json` files
+  exist under the usual code roots, groups IN PROGRESS / WAITING ON YOU /
+  STALE. Home is never walked as a search root. No Elves skill required.
+- Helper CLIs: Cursor `agent`, Devin, Claude Code, Codex, Grok. Empty
+  `HELPER_AGENT` picks the first of those on `PATH`.
+- `bin/herdr` mutate gate: inspect is allowed; create / start / focus / close
+  need `HERDR_HELPER_OK=1`.
+- `hsh` shortcut and `prefix+H` keybind (`aigora.lantern.open`).
+- Product art: cobbler with a lantern over the herd
+  (`assets/lantern-banner.jpeg`, GitHub social preview).
+- Public guide at `docs/` for GitHub Pages
+  (https://aigorahub.github.io/herdr-lantern/).
+- Claude helper gets `CLAUDE.md` in the workdir (same text as `AGENTS.md`).
+
+### Changed
+
+- Plugin id `aigora.session-helper` → `aigora.lantern`. Display name
+  **Lantern, by Elves**.
+- Prompt and docs use Herdr's words: workspace, pane, agent, working /
+  blocked / done / idle. The sidebar already has status; Lantern adds
+  what they are working toward.
+- Cursor `agent` defaults to `composer-2.5-fast`, `--trust --sandbox disabled`.
+  `HELPER_PERMISSION=smart` → `--auto-review`.
+- Devin: `--permission-mode` from config. Do not pass `--model` (Free rejects it).
+- Conf parse is `KEY=value` only. Unknown keys and shell metacharacters fail.
+  The file is never sourced.
+
+### Fixed
+
+- Conf character class no longer treats the letter `n` as a metacharacter
+  (that broke `HELPER_AGENT="devin"`).
+
+## [0.1.0]
+
+Initial session-helper popup plugin on `main`.

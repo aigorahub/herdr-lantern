@@ -1,9 +1,9 @@
 #!/bin/sh
-# Short launcher: open the session-helper popup.
+# Short launcher: open the lantern.
 # Prefer the real herdr. Inside the helper pane, HERDR_BIN_PATH is the
 # mutate-gated wrapper and `plugin action invoke` would be blocked.
 set -eu
 if [ -n "${HERDR_REAL:-}" ] && [ -x "$HERDR_REAL" ]; then
-    exec "$HERDR_REAL" plugin action invoke aigora.session-helper.open
+    exec "$HERDR_REAL" plugin action invoke aigora.lantern.open
 fi
-exec herdr plugin action invoke aigora.session-helper.open
+exec herdr plugin action invoke aigora.lantern.open

@@ -6,8 +6,8 @@
 set -u
 
 die() {
-    printf '\nsession-helper: %s\n' "$1" >&2
-    printf 'Fix the config, then reopen the helper. Press Enter to close.\n' >&2
+    printf '\nlantern, by elves: %s\n' "$1" >&2
+    printf 'Fix the config, then reopen the lantern. Press Enter to close.\n' >&2
     read -r _ignored
     exit 1
 }
@@ -56,17 +56,22 @@ helper_parse_conf "$conf" || die "could not parse $conf"
 
 if [ -z "$HELPER_AGENT" ]; then
     HELPER_AGENT=$(helper_detect_agent) ||
-        die "set HELPER_AGENT in $conf (devin, claude, codex, or grok)"
-    printf 'session-helper: HELPER_AGENT empty; using %s from PATH\n' "$HELPER_AGENT" >&2
+        die "set HELPER_AGENT in $conf (agent, devin, claude, codex, or grok)"
+    printf 'lantern: HELPER_AGENT empty; using %s from PATH\n' "$HELPER_AGENT" >&2
 fi
 
 case $HELPER_AGENT in
-codex | claude | grok | devin) ;;
-*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use devin, claude, codex, or grok)" ;;
+codex | claude | grok | devin | agent | cursor) ;;
+*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use agent, devin, claude, codex, or grok)" ;;
 esac
 
-command -v "$HELPER_AGENT" >/dev/null 2>&1 ||
-    die "agent program not found on PATH: $HELPER_AGENT"
+helper_bin=$HELPER_AGENT
+if [ "$HELPER_AGENT" = "cursor" ]; then
+    helper_bin=agent
+fi
+
+command -v "$helper_bin" >/dev/null 2>&1 ||
+    die "agent program not found on PATH: $helper_bin"
 
 HELPER_SPAWN_KIND=${HELPER_SPAWN_KIND:-claude}
 case $HELPER_SPAWN_KIND in
@@ -85,7 +90,7 @@ state_dir=${HERDR_PLUGIN_STATE_DIR:-$config_dir/state}
 workdir=$state_dir/workdir
 mkdir -p "$workdir/.windsurf/rules" || die "could not create helper workdir"
 
-search_root=$(helper_expand_tilde "${HELPER_CWD:-~}")
+search_root=$(helper_normalize_root "${HELPER_CWD:-~}")
 [ -d "$search_root" ] || die "helper search directory does not exist: $search_root"
 
 prompt=$(cat "$prompt_file")
@@ -103,19 +108,57 @@ Runtime (injected by launch.sh; do not ignore):
 - Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
 - After workspace create, if agent start fails, wait two seconds and retry once
   (the new pane may still be coming up to a shell prompt).
-- Search from $search_root plus the usual project roots. You are not a coding
-  agent; do not edit files in this helper workdir.
+- Search from $search_root plus the usual project roots. You are the lantern,
+  not an elf; do not edit files in this workdir.
+- Close this popup by exiting the helper CLI (not Escape). Cursor agent:
+  Ctrl+C, or Ctrl+D on an empty prompt.
 EOF
 )
 full_prompt=$prompt$appendix
 
-printf '%s\n' "$full_prompt" >"$workdir/.windsurf/rules/session-helper.md" ||
-    die "could not write devin rule file"
+real_herdr=${HERDR_REAL:-}
+if [ -z "$real_herdr" ] || [ ! -x "$real_herdr" ]; then
+    real_herdr=$(helper_resolve_real_herdr "$plugin_root/bin") || real_herdr=
+fi
+if [ -n "$real_herdr" ]; then
+    "$real_herdr" agent list >"$workdir/floor.txt" 2>/dev/null || true
+else
+    : >"$workdir/floor.txt"
+fi
+if command -v python3 >/dev/null 2>&1; then
+    if [ -n "$real_herdr" ]; then
+        python3 "$plugin_root/bin/goals-floor" --herdr "$real_herdr" \
+            >"$workdir/goals-floor.txt" 2>/dev/null || true
+    fi
+    if [ "$search_root" = "$HOME" ]; then
+        python3 "$plugin_root/bin/elves-floor" >"$workdir/elves-floor.txt" 2>/dev/null || true
+    else
+        python3 "$plugin_root/bin/elves-floor" --root "$search_root" \
+            >"$workdir/elves-floor.txt" 2>/dev/null || true
+    fi
+fi
 
-set -- "$HELPER_AGENT"
+printf '%s\n' "$full_prompt" >"$workdir/AGENTS.md" ||
+    die "could not write AGENTS.md"
+printf '%s\n' "$full_prompt" >"$workdir/CLAUDE.md" ||
+    die "could not write CLAUDE.md"
+printf '%s\n' "$full_prompt" >"$workdir/.windsurf/rules/lantern.md" ||
+    die "could not write lantern rule file"
+mkdir -p "$workdir/.cursor/rules" || die "could not create cursor rules dir"
+{
+    printf '%s\n' "---" "alwaysApply: true" "description: Lantern" "---" ""
+    printf '%s\n' "$full_prompt"
+} >"$workdir/.cursor/rules/lantern.mdc" ||
+    die "could not write cursor rule file"
+
+if [ "$helper_bin" = "agent" ] && [ -z "$HELPER_MODEL" ]; then
+    HELPER_MODEL=composer-2.5-fast
+fi
+
+set -- "$helper_bin"
 if [ -n "$HELPER_MODEL" ]; then
     if [ "$HELPER_AGENT" = "devin" ]; then
-        printf 'session-helper: ignoring HELPER_MODEL for devin (use devin config)\n' >&2
+        printf 'lantern: ignoring HELPER_MODEL for devin (use devin config)\n' >&2
     else
         set -- "$@" --model "$HELPER_MODEL"
     fi
@@ -133,16 +176,24 @@ fi
 if [ "$HELPER_AGENT" = "devin" ]; then
     set -- "$@" --permission-mode "$HELPER_PERMISSION"
 fi
+if [ "$helper_bin" = "agent" ]; then
+    set -- "$@" --trust --sandbox disabled
+    case $HELPER_PERMISSION in
+    smart | accept-edits) set -- "$@" --auto-review ;;
+    dangerous) set -- "$@" --force ;;
+    esac
+fi
 if [ -n "$HELPER_EXTRA_ARGS" ]; then
+    set -f
     for _helper_extra in $HELPER_EXTRA_ARGS; do
         set -- "$@" "$_helper_extra"
     done
+    set +f
 fi
-if [ "$HELPER_AGENT" = "devin" ]; then
-    set -- "$@" -- "Run herdr agent list, greet with a one-line summary of open agents, and ask what to do."
-elif [ -n "$full_prompt" ]; then
-    set -- "$@" "$full_prompt"
-fi
+# Invisible first turn so the CLI starts work without painting instructions.
+set -- "$@" -- "$(printf '\342\200\213')"
 
 cd "$workdir" || die "could not change to $workdir"
+# The wrapper finds the real binary itself. Do not leak HERDR_REAL to the agent.
+unset HERDR_REAL
 exec "$@"

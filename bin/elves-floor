@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Read-only Elves floor for Lantern. No model calls, no mutation."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from pathlib import Path
+
+SKIP_PARTS = {
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    "__pycache__",
+}
+DEFAULT_ROOTS = (
+    Path.home() / "aigora",
+    Path.home() / "code",
+    Path.home() / "Projects",
+    Path.home() / "dev",
+    Path.home() / "src",
+)
+LIVE_STATUS = {
+    "staging",
+    "executing",
+    "reconciling",
+    "reviewing",
+    "revising",
+    "running",
+    "in_progress",
+}
+DEAD_STATUS = {"superseded", "failed", "abandoned", "terminal"}
+WAITING_STATUS = {"ready", "ready_for_human_merge"}
+
+
+def find_sessions(roots: list[Path], max_depth: int) -> list[Path]:
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        root = root.expanduser()
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            rel = Path(dirpath).relative_to(root)
+            depth = 0 if rel == Path(".") else len(rel.parts)
+            dirnames[:] = [d for d in dirnames if d not in SKIP_PARTS]
+            if depth >= max_depth:
+                dirnames[:] = []
+                continue
+            if ".elves-session.json" not in filenames:
+                continue
+            p = Path(dirpath) / ".elves-session.json"
+            resolved = p.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            found.append(resolved)
+    return found
+
+
+def load_session(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def newest_runtime(dirpath: Path) -> float:
+    runtime = dirpath / ".elves" / "runtime"
+    if not runtime.is_dir():
+        return 0.0
+    newest = 0.0
+    try:
+        for dirpath2, dirnames, filenames in os.walk(runtime):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_PARTS]
+            for name in filenames:
+                try:
+                    newest = max(newest, (Path(dirpath2) / name).stat().st_mtime)
+                except OSError:
+                    continue
+    except OSError:
+        return newest
+    return newest
+
+
+def last_activity(path: Path, data: dict) -> float:
+    times = [path.stat().st_mtime]
+    times.append(newest_runtime(path.parent))
+    worktree = str(data.get("worktree_path") or "").strip()
+    if worktree:
+        wt = Path(worktree)
+        if wt.is_dir():
+            times.append(newest_runtime(wt))
+            sess = wt / ".elves-session.json"
+            if sess.is_file():
+                times.append(sess.stat().st_mtime)
+    return max(times)
+
+
+def rel_age(ts: float) -> str:
+    secs = max(0, int(time.time() - ts))
+    if secs < 90:
+        return "just now"
+    if secs < 3600:
+        return f"{secs // 60}m ago"
+    if secs < 86400:
+        return f"{secs // 3600}h ago"
+    return f"{secs // 86400}d ago"
+
+
+def batch_line(batches: object) -> str:
+    if not isinstance(batches, list):
+        return "batches ?"
+    done = sum(1 for b in batches if isinstance(b, dict) and b.get("status") == "complete")
+    open_ids = [
+        str(b.get("id") or "?")
+        for b in batches
+        if isinstance(b, dict) and b.get("status") != "complete"
+    ]
+    if open_ids:
+        return f"{done}/{len(batches)} open {','.join(open_ids[:4])}"
+    return f"{done}/{len(batches)} done"
+
+
+def open_batches(data: dict) -> bool:
+    batches = data.get("batches")
+    if not isinstance(batches, list):
+        return False
+    return any(isinstance(b, dict) and b.get("status") != "complete" for b in batches)
+
+
+def classify(path: Path, data: dict, stale_days: int) -> str | None:
+    status = str(data.get("status") or "").lower()
+    if status in DEAD_STATUS:
+        return None
+    guard = data.get("continuation_guard") if isinstance(data.get("continuation_guard"), dict) else {}
+    stop_allowed = bool(guard.get("stop_allowed"))
+    nxt = str(guard.get("next_required_action") or "").lower()
+    age_days = max(0.0, (time.time() - last_activity(path, data)) / 86400)
+    live = status in LIVE_STATUS
+    waiting_hint = status in WAITING_STATUS or "merge" in nxt or "land" in nxt
+    opened = open_batches(data)
+
+    if live or opened:
+        if age_days > stale_days:
+            return "stale"
+        if live and not opened and waiting_hint:
+            return "waiting"
+        return "in_progress"
+    if waiting_hint and not stop_allowed:
+        if age_days > stale_days:
+            return "stale"
+        return "waiting"
+    if not stop_allowed and age_days <= stale_days:
+        return "waiting"
+    return None
+
+
+def dedupe_key(data: dict, path: Path) -> str:
+    run_id = str(data.get("run_id") or "").strip()
+    if run_id:
+        return f"run:{run_id}"
+    pr = str(data.get("pr") or "").strip()
+    if pr:
+        return f"pr:{pr}"
+    worktree = str(data.get("worktree_path") or "").strip()
+    if worktree:
+        return f"wt:{worktree}"
+    return f"path:{path}"
+
+
+def row(path: Path, data: dict, kind: str, activity: float) -> str:
+    repo = path.parent.name
+    status = data.get("status") or "?"
+    guard = data.get("continuation_guard") if isinstance(data.get("continuation_guard"), dict) else {}
+    nxt = str(guard.get("next_required_action") or "").strip().replace("\n", " ")
+    if len(nxt) > 100:
+        nxt = nxt[:97] + "..."
+    parts = [
+        repo,
+        str(status),
+        batch_line(data.get("batches")),
+        rel_age(activity),
+    ]
+    if nxt:
+        parts.append(nxt)
+    if data.get("pr"):
+        parts.append(str(data["pr"]))
+    worktree = str(data.get("worktree_path") or "").strip()
+    if worktree:
+        parts.append(worktree)
+    return f"{kind}\t" + " — ".join(parts)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Read-only Elves floor snapshot for Lantern.")
+    parser.add_argument("--root", action="append", default=[], help="Extra search root (repeatable)")
+    parser.add_argument("--max-depth", type=int, default=6)
+    parser.add_argument("--stale-days", type=int, default=14)
+    args = parser.parse_args()
+    roots = [Path(r) for r in args.root] if args.root else list(DEFAULT_ROOTS)
+    extra = Path.home() / "aigora"
+    if extra.is_dir() and extra not in [r.expanduser() for r in roots]:
+        roots.append(extra)
+
+    buckets = {"in_progress": [], "waiting": [], "stale": []}
+    seen: set[str] = set()
+    dormant = 0
+    for path in find_sessions(roots, args.max_depth):
+        data = load_session(path)
+        if data is None:
+            continue
+        kind = classify(path, data, args.stale_days)
+        if kind is None:
+            dormant += 1
+            continue
+        key = dedupe_key(data, path)
+        if key in seen:
+            dormant += 1
+            continue
+        seen.add(key)
+        activity = last_activity(path, data)
+        buckets[kind].append((activity, row(path, data, kind, activity)))
+
+    found_any = any(buckets.values()) or dormant > 0
+    if not found_any:
+        print("elves_detected 0")
+        print("No .elves-session.json in the usual project roots.")
+        print("Lantern, by Elves still lights the field. Add the night shift later if you want it.")
+        return 0
+
+    print("elves_detected 1")
+    print("ELVES FLOOR (read-only; Lantern, by Elves does not cobble or land)")
+    print(
+        f"in_progress {len(buckets['in_progress'])}  "
+        f"waiting {len(buckets['waiting'])}  "
+        f"stale {len(buckets['stale'])}  "
+        f"dormant {dormant}"
+    )
+    for kind, title in (
+        ("in_progress", "IN PROGRESS"),
+        ("waiting", "WAITING ON YOU"),
+        ("stale", "STALE (still marked open, quiet too long)"),
+    ):
+        items = sorted(buckets[kind], key=lambda item: item[0], reverse=True)
+        if not items:
+            continue
+        print(title)
+        for _, line in items:
+            print(f"- {line.split(chr(9), 1)[-1]}")
+    print("For one run: read that repo's .elves-session.json and survival guide.")
+    print("Live worker stream (no model): cobbler_agents.py native-worker status|follow")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

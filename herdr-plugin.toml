@@ -1,13 +1,13 @@
-id = "aigora.session-helper"
-name = "Session Helper"
+id = "aigora.lantern"
+name = "Lantern, by Elves"
 version = "0.2.0"
 min_herdr_version = "0.7.5"
-description = "Chat popup that spawns a helper agent to find repos, launch agents, and triage open sessions via natural language"
+description = "From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field."
 platforms = ["linux", "macos"]
 
 [[panes]]
 id = "helper"
-title = "Session helper"
+title = "Lantern"
 placement = "popup"
 width = "90%"
 height = "90%"
@@ -15,6 +15,6 @@ command = ["sh", "launch.sh"]
 
 [[actions]]
 id = "open"
-title = "Open session helper"
-description = "Open the session helper chat popup"
+title = "Open lantern"
+description = "Open the lantern popup"
 command = ["sh", "open.sh"]

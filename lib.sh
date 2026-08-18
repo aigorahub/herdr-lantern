@@ -95,7 +95,7 @@ helper_extend_user_path() {
 
 helper_detect_agent() {
     _helper_cand=
-    for _helper_cand in devin claude codex grok; do
+    for _helper_cand in agent devin claude codex grok; do
         if command -v "$_helper_cand" >/dev/null 2>&1; then
             printf '%s' "$_helper_cand"
             return 0
@@ -111,6 +111,16 @@ helper_expand_tilde() {
     "~/"*) printf '%s' "$HOME/${_helper_path#\~/}" ;;
     *) printf '%s' "$_helper_path" ;;
     esac
+}
+
+helper_normalize_root() {
+    # Expand ~ and drop a trailing slash so "$HOME/" still counts as home.
+    _helper_root=$(helper_expand_tilde "$1")
+    case $_helper_root in
+    /) ;;
+    */) _helper_root=${_helper_root%/} ;;
+    esac
+    printf '%s' "$_helper_root"
 }
 
 helper_is_inspect() {
