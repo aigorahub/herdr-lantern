@@ -1,0 +1,18 @@
+# Session helper configuration. This file is sourced by launch.sh as POSIX
+# shell, so keep values quoted and avoid other shell syntax.
+
+# Required: which agent CLI runs the helper chat. One of: codex, claude, grok.
+HELPER_AGENT=""
+
+# Optional: model to pass to the agent (--model).
+HELPER_MODEL=""
+
+# Optional: reasoning effort. Mapped per agent:
+#   codex  -> --config model_reasoning_effort="<value>"
+#   claude -> --effort <value>
+#   grok   -> --reasoning-effort <value>
+HELPER_EFFORT=""
+
+# Optional: working directory for the helper agent. Defaults to $HOME so the
+# helper can search your project roots. Supports a leading ~.
+HELPER_CWD="~"

@@ -1,0 +1,20 @@
+id = "aigora.session-helper"
+name = "Session Helper"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "Chat popup that spawns a helper agent to find repos, launch agents, and triage open sessions via natural language"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "helper"
+title = "Session helper"
+placement = "popup"
+width = "90%"
+height = "90%"
+command = ["sh", "launch.sh"]
+
+[[actions]]
+id = "open"
+title = "Open session helper"
+description = "Open the session helper chat popup"
+command = ["sh", "open.sh"]
