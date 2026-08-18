@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr tests/smoke.sh; do
+for f in launch.sh open.sh lib.sh bin/herdr hsh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -17,7 +17,8 @@ done
 . "$root/lib.sh"
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+err=$(mktemp)
+trap 'rm -f "$tmp" "$err"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -47,10 +48,10 @@ export HERDR_HELPER_OK=
 out=$(sh "$root/bin/herdr" agent list) || fail "inspect should pass"
 printf '%s\n' "$out" | grep -q 'agent list' || fail "inspect did not exec real herdr"
 
-if sh "$root/bin/herdr" workspace create --cwd /tmp --label x 2>/tmp/helper-wrap.err; then
+if sh "$root/bin/herdr" workspace create --cwd /tmp --label x 2>"$err"; then
     fail "mutate without OK should fail"
 fi
-grep -q HERDR_HELPER_OK /tmp/helper-wrap.err || fail "blocked hint missing"
+grep -q HERDR_HELPER_OK "$err" || fail "blocked hint missing"
 
 export HERDR_HELPER_OK=1
 out=$(sh "$root/bin/herdr" workspace create --cwd /tmp --label x) ||
