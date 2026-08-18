@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Read-only Herdr herd snapshot for Lantern. Titles, /goal, recaps. No mutation."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+GOAL_ACTIVE_RE = re.compile(r"/goal\s+active(?:\s*\(([^)]+)\))?", re.I)
+RECAP_RE = re.compile(r"(?:※\s*)?recap:\s*(.*)", re.I)
+GOAL_INLINE_RE = re.compile(r"\bGoal:\s*(.+?)(?:\.\s+|\s+Next\b|$)", re.I | re.S)
+NEXT_INLINE_RE = re.compile(
+    r"\bNext(?:\s+action)?:\s*(.+?)(?:\s+\(disable recaps.*)?$",
+    re.I | re.S,
+)
+NEEDS_YOU_RE = re.compile(
+    r"\b(your (go-ahead|approval|merge)|may i merge|waiting on (you|ci|your))\b",
+    re.I,
+)
+BOX_RE = re.compile(r"[─━═▀▄│┃]")
+
+
+def resolve_herdr(explicit: str) -> str | None:
+    if explicit:
+        return explicit
+    for key in ("HERDR_REAL", "HERDR_BIN_PATH"):
+        cand = os.environ.get(key, "").strip()
+        if cand and Path(cand).is_file() and os.access(cand, os.X_OK):
+            return cand
+    return shutil.which("herdr")
+
+
+def run_herdr(herdr: str, args: list[str], timeout: float) -> str:
+    try:
+        proc = subprocess.run(
+            [herdr, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return proc.stdout or ""
+
+
+def parse_list(raw: str) -> list[dict]:
+    raw = raw.strip()
+    if not raw or not raw.startswith("{"):
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, dict) and isinstance(data.get("result"), dict):
+        agents = data["result"].get("agents")
+        if isinstance(agents, list):
+            return [a for a in agents if isinstance(a, dict)]
+    return []
+
+
+def unwrap_read(raw: str) -> str:
+    stripped = raw.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return raw
+        result = data.get("result") if isinstance(data, dict) else None
+        if isinstance(result, str):
+            return result
+        if isinstance(result, dict):
+            for key in ("text", "output", "content"):
+                if isinstance(result.get(key), str):
+                    return result[key]
+    return raw
+
+
+def clean_line(line: str) -> str:
+    return re.sub(r"\s+", " ", line).strip()
+
+
+def collect_recap(lines: list[str]) -> str:
+    buf: list[str] = []
+    grabbing = False
+    for line in lines:
+        stripped = line.strip()
+        if not grabbing:
+            match = RECAP_RE.search(stripped)
+            if not match:
+                continue
+            grabbing = True
+            first = clean_line(match.group(1) or "")
+            if first:
+                buf.append(first)
+            continue
+        if not stripped or BOX_RE.search(line) or stripped.startswith("❯"):
+            break
+        if GOAL_ACTIVE_RE.search(stripped):
+            break
+        if stripped.startswith("✻") or stripped.startswith("* Cooked"):
+            break
+        buf.append(clean_line(stripped))
+    return " ".join(buf).strip()
+
+
+def first_sentence(text: str, limit: int = 140) -> str:
+    text = clean_line(text)
+    text = re.sub(r"\s+\(disable recaps.*$", "", text, flags=re.I)
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut + "…"
+
+
+def extract_signals(text: str, title: str) -> dict[str, str]:
+    lines = text.splitlines()
+    recap = collect_recap(lines)
+    blob = recap or clean_line(" ".join(lines[-12:]))
+    goal_age = ""
+    for line in lines:
+        match = GOAL_ACTIVE_RE.search(line)
+        if match:
+            goal_age = (match.group(1) or "").strip()
+    goal = ""
+    nxt = ""
+    if recap:
+        gmatch = GOAL_INLINE_RE.search(recap)
+        if gmatch:
+            goal = first_sentence(gmatch.group(1))
+        nmatch = NEXT_INLINE_RE.search(recap)
+        if nmatch:
+            nxt = first_sentence(nmatch.group(1), 120)
+        if not goal and recap.lower().startswith("goal:"):
+            goal = first_sentence(recap[5:])
+        if not goal:
+            goal = first_sentence(recap)
+    if not goal and title:
+        goal = title
+    needs = bool(NEEDS_YOU_RE.search(recap) or NEEDS_YOU_RE.search(text))
+    return {
+        "goal": goal,
+        "next": nxt,
+        "goal_age": goal_age,
+        "needs": "1" if needs else "0",
+        "has_recap": "1" if recap else "0",
+        "has_goal": "1" if goal_age or recap else "0",
+    }
+
+
+def repo_name(cwd: str) -> str:
+    if not cwd:
+        return "?"
+    return Path(cwd).name or cwd
+
+
+def classify(status: str, signals: dict[str, str]) -> str:
+    status = (status or "").lower()
+    if status == "blocked" or signals["needs"] == "1":
+        return "needs_you"
+    if status == "working":
+        return "in_motion"
+    if signals["has_goal"] == "1":
+        return "live_goal"
+    return "quiet"
+
+
+def row(agent: dict, signals: dict[str, str]) -> str:
+    pane = str(agent.get("pane_id") or "?")
+    kind = str(agent.get("agent") or "?")
+    status = str(agent.get("agent_status") or "?")
+    title = str(agent.get("terminal_title_stripped") or "").strip()
+    repo = repo_name(str(agent.get("cwd") or ""))
+    parts = [f"{pane} {kind} {status}", repo]
+    if title and title.lower() not in (signals["goal"] or "").lower():
+        parts.append(title)
+    if signals["goal_age"]:
+        parts.append(f"/goal {signals['goal_age']}")
+    if signals["goal"]:
+        parts.append(signals["goal"])
+    if signals["next"]:
+        parts.append(f"next: {signals['next']}")
+    return " — ".join(parts)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Read-only Herdr herd snapshot for Lantern.")
+    parser.add_argument("--herdr", default="", help="herdr binary (else HERDR_REAL / PATH)")
+    parser.add_argument("--lines", type=int, default=40)
+    parser.add_argument("--timeout", type=float, default=5.0)
+    args = parser.parse_args()
+    herdr = resolve_herdr(args.herdr)
+    if not herdr:
+        print("herd_detected 0")
+        print("No herdr binary. Lantern cannot light the field until Herdr is on PATH.")
+        return 0
+
+    agents = parse_list(run_herdr(herdr, ["agent", "list"], args.timeout))
+    if not agents:
+        print("herd_detected 0")
+        print("No agent panes in this Herdr session.")
+        return 0
+
+    buckets = {"needs_you": [], "in_motion": [], "live_goal": [], "quiet": []}
+    for agent in agents:
+        pane = str(agent.get("pane_id") or "").strip()
+        title = str(agent.get("terminal_title_stripped") or "").strip()
+        text = ""
+        if pane:
+            text = unwrap_read(
+                run_herdr(
+                    herdr,
+                    [
+                        "agent",
+                        "read",
+                        pane,
+                        "--source",
+                        "recent",
+                        "--lines",
+                        str(args.lines),
+                        "--format",
+                        "text",
+                    ],
+                    args.timeout,
+                )
+            )
+        signals = extract_signals(text, title)
+        kind = classify(str(agent.get("agent_status") or ""), signals)
+        buckets[kind].append(row(agent, signals))
+
+    print("herd_detected 1")
+    print("THE HERD IN THE FIELD (read-only; titles, /goal, recaps)")
+    print(
+        f"panes {len(agents)}  "
+        f"needs_you {len(buckets['needs_you'])}  "
+        f"in_motion {len(buckets['in_motion'])}  "
+        f"live_goals {len(buckets['live_goal'])}  "
+        f"quiet {len(buckets['quiet'])}"
+    )
+    for key, title in (
+        ("needs_you", "NEEDS YOU"),
+        ("in_motion", "IN MOTION"),
+        ("live_goal", "LIVE GOALS"),
+        ("quiet", "QUIET"),
+    ):
+        if not buckets[key]:
+            continue
+        print(title)
+        for line in buckets[key]:
+            print(f"- {line}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

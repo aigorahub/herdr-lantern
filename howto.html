@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lantern, by Elves — team setup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Fragment+Mono:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: oklch(0.10 0 0);
+      --surface: oklch(0.16 0 0);
+      --ink: oklch(0.96 0 0);
+      --muted: oklch(0.72 0 0);
+      --primary: oklch(0.68 0.18 330);
+      --accent: oklch(0.86 0.16 110);
+      --rule: oklch(0.28 0 0);
+      --focus: oklch(0.86 0.16 110);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      min-height: 100dvh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Atkinson Hyperlegible", ui-sans-serif, sans-serif;
+      font-size: 1.125rem;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(44rem, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 2.5rem 0 4rem;
+    }
+
+    header {
+      border-bottom: 2px solid var(--primary);
+      padding-bottom: 1.25rem;
+      margin-bottom: 2rem;
+    }
+
+    p.kicker {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin: 0 0 0.6rem;
+    }
+
+    h1 {
+      font-size: clamp(1.75rem, 4vw, 2.25rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      text-wrap: balance;
+      margin: 0 0 0.5rem;
+    }
+
+    .lede {
+      color: var(--muted);
+      margin: 0;
+      max-width: 46ch;
+    }
+
+    h2 {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 2.25rem 0 0.75rem;
+    }
+
+    p { margin: 0 0 0.85rem; }
+    p:last-child { margin-bottom: 0; }
+
+    ol.steps {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: step;
+    }
+    ol.steps li {
+      counter-increment: step;
+      display: grid;
+      grid-template-columns: 2rem 1fr;
+      gap: 0.75rem;
+      padding: 0.9rem 0;
+      border-top: 1px solid var(--rule);
+    }
+    ol.steps li:last-child { border-bottom: 1px solid var(--rule); }
+    ol.steps li::before {
+      content: counter(step);
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      color: var(--primary);
+      font-size: 0.9rem;
+      padding-top: 0.15rem;
+    }
+
+    kbd, code, pre {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.92em;
+    }
+
+    kbd {
+      display: inline-block;
+      background: var(--primary);
+      color: oklch(0.12 0 0);
+      font-weight: 700;
+      padding: 0.08em 0.4em;
+      border-radius: 2px;
+    }
+
+    code { color: var(--accent); }
+
+    pre {
+      background: var(--surface);
+      color: var(--accent);
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      margin: 0.6rem 0 0;
+      line-height: 1.45;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 1rem;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 0.65rem 0.5rem 0.65rem 0;
+      border-top: 1px solid var(--rule);
+    }
+    th {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    td:first-child { color: var(--accent); white-space: nowrap; }
+
+    ul.says {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    ul.says li {
+      padding: 0.55rem 0 0.55rem 1rem;
+      border-left: 3px solid var(--primary);
+      margin-bottom: 0.65rem;
+    }
+    ul.says li span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-top: 0.15rem;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    a { color: var(--primary); }
+    a:focus-visible, button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 3px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.2.0</p>
+      <h1>Lantern, by Elves</h1>
+      <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
+    </header>
+
+    <h2>Install the plugin</h2>
+    <ol class="steps">
+      <li>
+        <div>
+          Need Herdr 0.7.5+ on macOS or Linux, already running and attached.
+        </div>
+      </li>
+      <li>
+        <div>
+          If you previously linked a local checkout, unlink it first:
+          <pre>herdr plugin unlink aigora.lantern</pre>
+        </div>
+      </li>
+      <li>
+        <div>
+          Then install from GitHub:
+          <pre>herdr plugin install aigorahub/herdr-lantern</pre>
+        </div>
+      </li>
+    </ol>
+    <p class="note">Developers can <code>herdr plugin link /path/to/herdr-lantern</code> instead. Do not link and GitHub-install the same id at once.</p>
+
+    <h2>Pick your helper CLI</h2>
+    <p>The popup is not a new chat UI. It launches one of the CLIs you already have. That choice is yours; it is not a shared team model.</p>
+    <table>
+      <thead>
+        <tr><th>Helper</th><th>What to install</th><th>Your <code>helper.conf</code></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Cursor</td>
+          <td>Cursor CLI as <code>agent</code> (Ultra / Composer)</td>
+          <td><code>HELPER_AGENT="agent"</code>. <code>HELPER_MODEL="composer-2.5-fast"</code>. <code>HELPER_PERMISSION</code> <code>smart</code> uses <code>--auto-review</code>.</td>
+        </tr>
+        <tr>
+          <td>Devin</td>
+          <td>Devin CLI on <code>PATH</code> (often <code>~/.local/bin/devin</code>)</td>
+          <td><code>HELPER_AGENT="devin"</code>. Leave <code>HELPER_MODEL</code> empty. Set <code>HELPER_PERMISSION</code> to <code>smart</code>.</td>
+        </tr>
+        <tr>
+          <td>Claude</td>
+          <td>Claude Code as <code>claude</code></td>
+          <td><code>HELPER_AGENT="claude"</code>. Optional <code>HELPER_MODEL</code> and <code>HELPER_EFFORT</code>.</td>
+        </tr>
+        <tr>
+          <td>Codex</td>
+          <td>Codex CLI as <code>codex</code></td>
+          <td><code>HELPER_AGENT="codex"</code>. Optional model and effort.</td>
+        </tr>
+        <tr>
+          <td>Grok</td>
+          <td>Grok CLI as <code>grok</code> (often <code>~/.grok/bin</code>)</td>
+          <td><code>HELPER_AGENT="grok"</code>. Optional model and effort.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the popup.</p>
+
+    <h2>Edit your config</h2>
+    <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
+    <pre>HELPER_AGENT="agent"
+HELPER_MODEL="composer-2.5-fast"
+HELPER_EFFORT=""
+HELPER_CWD="~"
+HELPER_SPAWN_KIND="claude"
+HELPER_PERMISSION="smart"
+HELPER_EXTRA_ARGS=""</pre>
+    <p class="note">Empty <code>HELPER_AGENT</code> picks the first of <code>agent</code> / Devin / Claude / Codex / Grok on <code>PATH</code>. Cursor with an empty model defaults to Composer 2.5 Fast. Leave Devin’s model blank.</p>
+
+    <h2>Open it</h2>
+    <ol class="steps">
+      <li>
+        <div>
+          Once it is installed, in Herdr: press <kbd>ctrl+b</kbd>, then capital <kbd>H</kbd>.
+          Lowercase h still moves focus left. If the binding is missing, map
+          <code>prefix+H</code> to <code>aigora.lantern.open</code> in your
+          <code>config.toml</code>, then <code>herdr server reload-config</code>.
+        </div>
+      </li>
+      <li>
+        <div>
+          Or from any terminal, after putting this repo’s <code>hsh</code> on <code>PATH</code>:
+          <pre>hsh</pre>
+        </div>
+      </li>
+    </ol>
+    <p class="note">Close the popup by quitting the helper CLI. Escape stays inside the CLI. For Cursor <code>agent</code>: <kbd>ctrl+c</kbd> (twice if a turn is running), or <kbd>ctrl+d</kbd> on an empty prompt. Script and config edits do not need a Herdr restart — reopen the popup.</p>
+
+    <h2>What to say</h2>
+    <ul class="says">
+      <li>
+        “Who is working, blocked, or done?”
+        <span>Inspect-only. It reads <code>herdr agent list</code> and says who needs you.</span>
+      </li>
+      <li>
+        “What are they working toward?”
+        <span>Titles, Claude <code>/goal</code> / recap lines, and who is waiting on a merge. Status alone is not progress.</span>
+      </li>
+      <li>
+        “Jump me to the love-spark agent.”
+        <span>Reuse the existing workspace. Unnamed agents use a pane id, e.g. <code>w1X:p1</code>.</span>
+      </li>
+      <li>
+        “Open the image maker repo with claude.”
+        <span>Reuse the workspace and agent if they are already there. Agent slugs: <code>image-maker</code>, not “Image Maker”.</span>
+      </li>
+      <li>
+        “Make a worktree on herdr for branch helper-tests.”
+        <span><code>herdr worktree create</code>, not a second workspace on the main checkout.</span>
+      </li>
+      <li>
+        “How’s the night shift?”
+        <span>Optional. If Elves session files are around, it reads the floor. No Elves install required for the rest of Lantern.</span>
+      </li>
+    </ul>
+    <p class="note">Create / start / focus / close are blocked until you confirm the exact path or target. The helper then reruns with <code>HERDR_HELPER_OK=1</code>. “Clean everything up” should ask which workspaces.</p>
+
+    <p class="note">Source and README: <a href="https://github.com/aigorahub/herdr-lantern">aigorahub/herdr-lantern</a>.</p>
+  </main>
+</body>
+</html>

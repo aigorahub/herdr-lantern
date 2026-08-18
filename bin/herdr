@@ -1,0 +1,29 @@
+#!/bin/sh
+# Inspect-by-default Herdr wrapper for Lantern.
+# Mutating verbs need HERDR_HELPER_OK=1 after the user confirms.
+set -u
+
+self_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+# shellcheck disable=SC1091
+. "$self_dir/../lib.sh"
+
+real=$(helper_resolve_real_herdr "$self_dir") || {
+    printf 'lantern: could not find the real herdr binary\n' >&2
+    exit 127
+}
+
+if helper_is_inspect "$@"; then
+    exec "$real" "$@"
+fi
+
+case ${HERDR_HELPER_OK:-} in
+1 | yes | true)
+    exec "$real" "$@"
+    ;;
+esac
+
+printf 'lantern: blocked mutating herdr command:\n' >&2
+printf '  herdr %s\n' "$*" >&2
+printf 'Confirm the exact path or target with the user, then rerun as:\n' >&2
+printf '  HERDR_HELPER_OK=1 herdr %s\n' "$*" >&2
+exit 2

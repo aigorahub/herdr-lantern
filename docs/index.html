@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lantern, by Elves — how to use it</title>
+  <meta name="description" content="Herdr manages the herd. The herd is in the field. Lantern illuminates who needs you and what they are working toward.">
+  <meta property="og:title" content="Lantern, by Elves">
+  <meta property="og:description" content="A Herdr plugin that lights the field: who needs you, what they are working toward, jump to a pane, start an agent.">
+  <meta property="og:image" content="assets/lantern-social-preview.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Fragment+Mono:ital@0;1&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: oklch(0.11 0.01 80);
+      --surface: oklch(0.16 0.015 70);
+      --ink: oklch(0.94 0.02 90);
+      --muted: oklch(0.74 0.03 80);
+      --gold: oklch(0.86 0.09 85);
+      --flame: oklch(0.78 0.14 55);
+      --rule: oklch(0.28 0.02 70);
+      --focus: oklch(0.86 0.09 85);
+      --good: oklch(0.82 0.12 140);
+      --wait: oklch(0.78 0.12 55);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      min-height: 100dvh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Atkinson Hyperlegible", ui-sans-serif, sans-serif;
+      font-size: 1.125rem;
+      line-height: 1.55;
+    }
+    a { color: var(--gold); }
+    a:focus-visible, button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 3px;
+    }
+    img { max-width: 100%; height: auto; }
+    main { padding-bottom: 4rem; }
+    .hero {
+      position: relative;
+      min-height: min(36rem, 88dvh);
+      display: grid;
+      align-items: end;
+    }
+    .hero img {
+      width: 100%;
+      height: min(36rem, 88dvh);
+      object-fit: cover;
+      object-position: 70% 50%;
+      display: block;
+    }
+    .hero-copy {
+      position: absolute;
+      inset: auto 0 0 0;
+      padding: 4rem 1.25rem 2rem;
+      background: linear-gradient(transparent, var(--bg) 72%);
+    }
+    .wrap {
+      width: min(44rem, calc(100% - 2rem));
+      margin: 0 auto;
+    }
+    .wide { width: min(64rem, calc(100% - 2rem)); }
+    .kicker {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin: 0 0 0.5rem;
+    }
+    h1 {
+      font-family: "Instrument Serif", ui-serif, serif;
+      font-size: clamp(2.25rem, 6vw, 3.5rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      text-wrap: balance;
+      margin: 0 0 0.6rem;
+    }
+    h2 {
+      font-family: "Instrument Serif", ui-serif, serif;
+      font-size: 1.85rem;
+      font-weight: 400;
+      margin: 2.75rem 0 0.75rem;
+    }
+    .lede {
+      color: var(--muted);
+      max-width: 46ch;
+      margin: 0;
+    }
+    p { margin: 0 0 0.85rem; }
+    ol.steps, ul.says { margin: 0; padding: 0; list-style: none; }
+    ol.steps { counter-reset: step; }
+    ol.steps li {
+      counter-increment: step;
+      display: grid;
+      grid-template-columns: 2rem 1fr;
+      gap: 0.75rem;
+      padding: 0.95rem 0;
+      border-top: 1px solid var(--rule);
+    }
+    ol.steps li:last-child { border-bottom: 1px solid var(--rule); }
+    ol.steps li::before {
+      content: counter(step);
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      color: var(--gold);
+      padding-top: 0.15rem;
+    }
+    ul.says li {
+      padding: 0.55rem 0 0.55rem 1rem;
+      border-left: 3px solid var(--flame);
+      margin-bottom: 0.75rem;
+    }
+    ul.says li span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.98rem;
+      margin-top: 0.15rem;
+    }
+    kbd, code, pre {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.92em;
+    }
+    kbd {
+      display: inline-block;
+      background: var(--gold);
+      color: oklch(0.14 0.02 70);
+      font-weight: 700;
+      padding: 0.08em 0.4em;
+      border-radius: 2px;
+    }
+    code { color: var(--gold); }
+    pre {
+      background: var(--surface);
+      color: var(--gold);
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      margin: 0.55rem 0 0;
+      line-height: 1.45;
+    }
+    .note { color: var(--muted); font-size: 1rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 1rem; }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 0.65rem 0.5rem 0.65rem 0;
+      border-top: 1px solid var(--rule);
+    }
+    th {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .shots {
+      display: grid;
+      gap: 1.25rem;
+      margin: 1.25rem 0 0;
+    }
+    @media (min-width: 52rem) {
+      .shots { grid-template-columns: 1fr 1fr; }
+      .shots .span { grid-column: 1 / -1; }
+    }
+    figure.shot { margin: 0; }
+    figure.shot figcaption {
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 0.55rem;
+    }
+    .frame {
+      background: oklch(0.13 0.015 70);
+      border: 1px solid oklch(0.32 0.02 70);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 24px 60px oklch(0 0 0 / 0.45);
+    }
+    .chrome {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.55rem 0.75rem;
+      background: oklch(0.18 0.015 70);
+      border-bottom: 1px solid var(--rule);
+      color: var(--muted);
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+    }
+    .dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: oklch(0.4 0.02 70);
+    }
+    .dot.live { background: var(--flame); }
+    .term {
+      margin: 0;
+      padding: 1rem 1.05rem 1.15rem;
+      background: oklch(0.09 0.012 70);
+      color: oklch(0.9 0.03 90);
+      font-size: 0.86rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .dim { color: oklch(0.62 0.03 80); }
+    .need { color: var(--wait); }
+    .ok { color: var(--good); }
+    .you { color: var(--gold); }
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--rule);
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
+      <div class="hero-copy">
+        <div class="wrap">
+          <p class="kicker">aigora.lantern · v0.2.0 · herdr 0.7.5+</p>
+          <h1>Lantern, illuminating your herd</h1>
+          <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <h2>What it is</h2>
+      <p>A Herdr plugin from the team that brought you <a href="https://github.com/aigorahub/elves">Elves</a>. It opens a 90% popup and starts the CLI you already use — Cursor <code>agent</code>, Devin, Claude Code, Codex, or Grok. That CLI drives Herdr. It is not a new chat product, and it does not cobble or land PRs.</p>
+      <p class="note">The sidebar already marks working, blocked, done, or idle. Lantern adds goals and progress in words, then seats or focuses a pane when you ask.</p>
+
+      <h2>Install</h2>
+      <ol class="steps">
+        <li><div>Need Herdr 0.7.5+ on macOS or Linux, already running.</div></li>
+        <li>
+          <div>
+            Install from GitHub:
+            <pre>herdr plugin install aigorahub/herdr-lantern</pre>
+          </div>
+        </li>
+        <li>
+          <div>
+            If you had a local <code>herdr plugin link</code> for this id, unlink first:
+            <pre>herdr plugin unlink aigora.lantern</pre>
+          </div>
+        </li>
+      </ol>
+      <p class="note">Developers: <code>herdr plugin link /path/to/herdr-lantern</code>. Do not link and GitHub-install the same id at once.</p>
+
+      <h2>Open it</h2>
+      <ol class="steps">
+        <li>
+          <div>
+            Once it is installed, in Herdr: <kbd>ctrl+b</kbd>, then capital <kbd>H</kbd>.
+            Lowercase h still moves focus left. If the binding is missing, map
+            <code>prefix+H</code> to <code>aigora.lantern.open</code> and run
+            <code>herdr server reload-config</code>.
+          </div>
+        </li>
+        <li>
+          <div>
+            Or put this repo’s <code>hsh</code> on your <code>PATH</code> and run:
+            <pre>hsh</pre>
+          </div>
+        </li>
+      </ol>
+      <p class="note">Close by quitting the helper CLI. Escape stays inside the CLI. Cursor <code>agent</code>: <kbd>ctrl+c</kbd> (twice if a turn is running), or <kbd>ctrl+d</kbd> on an empty prompt.</p>
+    </div>
+
+    <div class="wrap wide">
+      <h2>What it looks like</h2>
+      <p class="note wrap" style="width: min(44rem, 100%)">Simulated. Your helper CLI is the real UI. Lantern primes it with the field, then you talk.</p>
+      <div class="shots">
+        <figure class="shot">
+          <div class="frame">
+            <div class="chrome"><span class="dot live"></span> Lantern · Cursor agent · 90%</div>
+            <pre class="term"><span class="dim">THE HERD IN THE FIELD</span>
+
+<span class="need">NEEDS YOU</span>
+  w1J:p2  love-spark    done     merge #41
+  w3:p1   site-copy     blocked  your go-ahead
+
+<span class="ok">IN MOTION</span>
+  w2:p1   image-maker   working  /goal 2h
+
+<span class="dim">QUIET</span>
+  w4:p1   docs          idle</pre>
+          </div>
+          <figcaption>Light-up · the field, not a status lecture</figcaption>
+        </figure>
+        <figure class="shot">
+          <div class="frame">
+            <div class="chrome"><span class="dot live"></span> Lantern · you talking</div>
+            <pre class="term"><span class="you">▸ who needs me?</span>
+
+2 waiting on you.
+love-spark wants a merge on #41.
+site-copy is blocked on your go-ahead.
+
+<span class="you">▸ jump me to love-spark</span>
+
+Reuse workspace love-spark. Focus w1J:p2?
+<span class="dim">Confirm the pane, then it reruns with
+HERDR_HELPER_OK=1.</span></pre>
+          </div>
+          <figcaption>Talk · inspect first, mutate after you confirm</figcaption>
+        </figure>
+        <figure class="shot span">
+          <div class="frame">
+            <div class="chrome"><span class="dot"></span> Optional · Elves night shift</div>
+            <pre class="term"><span class="you">▸ how’s the night shift?</span>
+
+<span class="ok">IN PROGRESS</span>
+  herdr-lantern   executing   batch 4/7   moved 11m ago
+  love-spark      reviewing   PR #41
+
+<span class="need">WAITING ON YOU</span>  1
+<span class="dim">STALE</span>           0
+
+No Elves install required. If there are no
+.elves-session.json files, one pairing line is enough.</pre>
+          </div>
+          <figcaption>Elves is extra light, not a prerequisite</figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <h2>What to say</h2>
+      <ul class="says">
+        <li>“Who is working, blocked, or done?”<span>Inspect-only. It reads <code>herdr agent list</code>.</span></li>
+        <li>“What are they working toward?”<span>Titles, Claude <code>/goal</code> / recap lines, who is waiting on a merge. Status alone is not progress.</span></li>
+        <li>“Jump me to the love-spark agent.”<span>Reuse the workspace. Unnamed agents use a pane id, e.g. <code>w1X:p1</code>.</span></li>
+        <li>“Open the image maker repo with claude.”<span>Reuse if they are already there. Slugs: <code>image-maker</code>, not “Image Maker”.</span></li>
+        <li>“Make a worktree on herdr for branch helper-tests.”<span><code>herdr worktree create</code>, not a second workspace on the main checkout.</span></li>
+        <li>“How’s the night shift?”<span>If Elves session files are around, it reads that floor. It does not cobble or land.</span></li>
+      </ul>
+
+      <h2>Pick your helper CLI</h2>
+      <p>The popup is one CLI. That is yours. It is not a shared team model. <code>HELPER_SPAWN_KIND</code> is separate: the default <code>--kind</code> when Lantern starts an agent for your work (usually <code>claude</code>).</p>
+      <table>
+        <thead>
+          <tr><th>Helper</th><th>Install</th><th>Your helper.conf</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Cursor</td>
+            <td>Cursor CLI as <code>agent</code></td>
+            <td><code>HELPER_AGENT="agent"</code> · <code>HELPER_MODEL="composer-2.5-fast"</code> · <code>smart</code> uses <code>--auto-review</code></td>
+          </tr>
+          <tr>
+            <td>Devin</td>
+            <td>Devin CLI (often <code>~/.local/bin/devin</code>)</td>
+            <td><code>HELPER_AGENT="devin"</code> · leave model empty · <code>HELPER_PERMISSION="smart"</code></td>
+          </tr>
+          <tr>
+            <td>Claude</td>
+            <td>Claude Code as <code>claude</code></td>
+            <td><code>HELPER_AGENT="claude"</code> · optional model and effort</td>
+          </tr>
+          <tr>
+            <td>Codex</td>
+            <td>Codex CLI as <code>codex</code></td>
+            <td><code>HELPER_AGENT="codex"</code> · optional model and effort</td>
+          </tr>
+          <tr>
+            <td>Grok</td>
+            <td>Grok CLI as <code>grok</code></td>
+            <td><code>HELPER_AGENT="grok"</code> · optional model and effort</td>
+          </tr>
+        </tbody>
+      </table>
+      <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
+      <pre>HELPER_AGENT="agent"
+HELPER_MODEL="composer-2.5-fast"
+HELPER_EFFORT=""
+HELPER_CWD="~"
+HELPER_SPAWN_KIND="claude"
+HELPER_PERMISSION="smart"
+HELPER_EXTRA_ARGS=""</pre>
+      <p class="note">Empty <code>HELPER_AGENT</code> picks the first of those CLIs on <code>PATH</code>. Conf is <code>KEY=value</code> only; it is never sourced. After an upgrade, copy repo <code>prompt.md</code> over the seeded file if you want the latest rules.</p>
+
+      <h2>Trust</h2>
+      <p>Runs as you, with your environment. Read <code>launch.sh</code>, <code>lib.sh</code>, and <code>bin/herdr</code> first. Create / start / focus / close wait until you confirm the exact path or target, then rerun with <code>HERDR_HELPER_OK=1</code>.</p>
+
+      <footer>
+        Source: <a href="https://github.com/aigorahub/herdr-lantern">aigorahub/herdr-lantern</a>
+        · Herdr: <a href="https://herdr.dev">herdr.dev</a>
+        · Elves: <a href="https://github.com/aigorahub/elves">aigorahub/elves</a>
+      </footer>
+    </div>
+  </main>
+</body>
+</html>

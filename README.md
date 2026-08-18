@@ -1,71 +1,136 @@
-# herdr-session-helper
+# Lantern, by Elves
 
-A [Herdr](https://herdr.dev) plugin that opens a chat popup with a helper
-agent for your session. Describe a repository in natural language and it finds
-the directory and spawns an agent there; ask about your open agents and it
-tells you who is blocked, done, or still working, and jumps you to them.
+![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-The helper is not a new chat UI. It launches the agent CLI you already use
-(Codex, Claude Code, or Grok) in a 90% session popup, primed with a prompt
-that teaches it to drive the Herdr CLI: `herdr workspace create`,
-`herdr agent start`, `herdr agent list`, `herdr agent focus`, and friends.
+**v0.2.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
-## Install
+From the team that brought you [Elves](https://github.com/aigorahub/elves).
+
+Herdr manages the herd. The herd is in the field. Lantern illuminates
+the field: who needs you, what they are working toward, jump to a pane,
+start a new agent. The sidebar already marks working, blocked, done, or
+idle. This plugin does not replace Herdr or wrap the agent CLIs.
+
+It opens at 90% and starts the helper CLI you already use (Cursor `agent`,
+Devin, Claude Code, Codex, or Grok). That CLI drives `herdr`.
+
+Requires Herdr **0.7.5+** on macOS or Linux.
+
+## Install the plugin
+
+From the marketplace / GitHub (after this release is on `main`):
 
 ```bash
-herdr plugin install aigorahub/herdr-session-helper
+# If you previously used `herdr plugin link` for this repo, unlink first.
+herdr plugin unlink aigora.lantern
+herdr plugin install aigorahub/herdr-lantern
 ```
 
-Or link a local checkout while developing:
+Local checkout while developing:
 
 ```bash
-herdr plugin link /path/to/herdr-session-helper
+herdr plugin link /path/to/herdr-lantern
 ```
 
-## Configure
+Do not run link and GitHub install at the same time for the same plugin id.
 
-Set the agent that powers the helper:
+## Pick your helper CLI
+
+The popup runs **one** CLI as the lantern. That is independent of
+`HELPER_SPAWN_KIND`, which is only the default `--kind` when the helper starts
+an agent for your work (usually `claude`).
+
+Leave `HELPER_AGENT` empty to use the first of `agent`, `devin`, `claude`, `codex`,
+`grok` on `PATH`. Launch prepends `~/.local/bin`, `~/bin`, and Homebrew.
+
+| Helper you want | Install that CLI | `helper.conf` |
+| --- | --- | --- |
+| Cursor Ultra | Cursor CLI on `PATH` as `agent` (also `cursor-agent`) | `HELPER_AGENT="agent"` · `HELPER_MODEL="composer-2.5-fast"` (empty also defaults to that) · `HELPER_PERMISSION="smart"` (`--auto-review`) |
+| Devin | [Devin CLI](https://docs.devin.ai) — typically `~/.local/bin/devin` | `HELPER_AGENT="devin"` · leave `HELPER_MODEL` empty (Free rejects `--model`; Devin uses `~/.config/devin/config.json`) · `HELPER_PERMISSION="smart"` |
+| Claude Code | [Claude Code](https://code.claude.com/docs) on `PATH` as `claude` | `HELPER_AGENT="claude"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`--effort`) |
+| Codex | [Codex CLI](https://github.com/openai/codex) on `PATH` as `codex` | `HELPER_AGENT="codex"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`model_reasoning_effort`) |
+| Grok | Grok CLI on `PATH` as `grok` (often `~/.grok/bin`) | `HELPER_AGENT="grok"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`--reasoning-effort`) |
+
+Each person on the team sets their own file. Nobody shares one model string.
 
 ```bash
-$EDITOR "$(herdr plugin config-dir aigora.session-helper)/helper.conf"
+$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"
 ```
 
 ```sh
-HELPER_AGENT="claude"   # required: codex, claude, or grok
-HELPER_MODEL=""         # optional --model value
-HELPER_EFFORT=""        # optional reasoning effort, mapped per agent
-HELPER_CWD="~"          # working directory for the helper
+HELPER_AGENT="agent"         # agent, devin, claude, codex, grok; empty = first on PATH
+HELPER_MODEL="composer-2.5-fast"  # optional --model; leave empty for Devin
+HELPER_EFFORT=""             # unused for Devin and Cursor agent
+HELPER_CWD="~"               # search root mentioned to the helper
+HELPER_SPAWN_KIND="claude"   # default --kind for `herdr agent start`
+HELPER_PERMISSION="smart"    # devin / agent: auto | accept-edits | smart | dangerous
+HELPER_EXTRA_ARGS=""         # extra unquoted CLI tokens
 ```
 
-The helper prompt is seeded to `prompt.md` in the same config directory. Edit
-it to change what the helper does; your copy is never overwritten.
+`launch.sh` parses `KEY=value` only; it does not source the file as shell.
 
-## Use
+The helper prompt is copied once to `prompt.md` in the same config directory
+and is never overwritten. After upgrading the plugin, copy the new
+`prompt.md` from the repo over that file if you want the latest rules. Devin
+also gets the same text as `.windsurf/rules/lantern.md` in the plugin
+state workdir. Cursor `agent` gets `.cursor/rules/lantern.mdc`. Claude
+Code gets `CLAUDE.md`.
 
-Open it from the command line:
+On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
+`/goal` / recap lines, and who is waiting on you. Ask “what are they
+working toward?” for that readout.
+
+Lantern works great with Elves. Without Elves it is still the Herdr
+plugin: workspaces, panes, agents. If `.elves-session.json` files exist,
+it also snapshots those runs (`bin/elves-floor`). Ask “how’s the night
+shift?” It does not cobble or land.
+
+Mutating `herdr` commands (create, start, focus, close, …) go through
+`bin/herdr`. After you confirm a path or target, the helper reruns with
+`HERDR_HELPER_OK=1`.
+
+How to use it (GitHub Pages, after this lands on `main`):
+[aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).
+Team setup notes: [howto.html](howto.html). Changelog: [CHANGELOG.md](CHANGELOG.md).
+
+## Open it
 
 ```bash
-herdr plugin pane open --plugin aigora.session-helper --entrypoint helper
+hsh
 ```
 
-Or bind a key in your Herdr config:
+That runs `herdr plugin action invoke aigora.lantern.open`. Put `hsh`
+from this repo on your `PATH` (for example `ln -s "$PWD/hsh" ~/bin/hsh`).
+
+Once it is installed, open it in Herdr with **Ctrl+B, then capital H**.
+`prefix+h` is already “focus pane left”, so the binding has to be capital H:
 
 ```toml
 [[keys.command]]
-key = "prefix+h"
+key = "prefix+H"
 type = "plugin_action"
-command = "aigora.session-helper.open"
-description = "session helper"
+command = "aigora.lantern.open"
+description = "Open lantern"
 ```
 
-The popup closes when the agent exits (or with your agent's normal quit key).
+Then `herdr server reload-config`. No Herdr restart is needed for plugin
+script or config edits; reopen the popup.
 
-## Requirements
+The popup closes when the agent exits. Herdr does not take Escape until then.
 
-- Herdr 0.7.5 or newer, macOS or Linux
-- The configured agent CLI (`codex`, `claude`, or `grok`) on your PATH
+For Cursor `agent`: **Ctrl+C** (twice if a turn is running), or **Ctrl+D** on an
+empty prompt.
+
+
+## Tests
+
+```bash
+sh tests/smoke.sh
+```
 
 ## Trust
 
-Like every Herdr plugin, this runs as your user with your environment. It is
-two small POSIX shell scripts; read them before installing.
+This runs as your user with your environment. Read `launch.sh`, `lib.sh`, and
+`bin/herdr` before installing. Devin `HELPER_PERMISSION=dangerous` skips
+Devin’s own approval UI; the herdr wrapper still requires `HERDR_HELPER_OK=1`
+for mutating commands.

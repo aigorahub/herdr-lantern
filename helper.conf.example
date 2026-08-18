@@ -1,18 +1,33 @@
-# Session helper configuration. This file is sourced by launch.sh as POSIX
-# shell, so keep values quoted and avoid other shell syntax.
+# Lantern configuration. launch.sh parses KEY=value lines only;
+# it does not source this file as shell.
 
-# Required: which agent CLI runs the helper chat. One of: codex, claude, grok.
+# Which agent CLI runs the helper chat. One of: agent, devin, claude, codex, grok.
+# `cursor` is an alias for `agent` (Cursor CLI). Empty: first of agent, devin,
+# claude, codex, grok on PATH.
 HELPER_AGENT=""
 
-# Optional: model to pass to the agent (--model).
+# Optional --model. For devin, leave empty (uses ~/.config/devin/config.json).
+# For Cursor `agent`, empty defaults to composer-2.5-fast.
 HELPER_MODEL=""
 
-# Optional: reasoning effort. Mapped per agent:
+# Optional reasoning effort. Mapped per agent:
 #   codex  -> --config model_reasoning_effort="<value>"
 #   claude -> --effort <value>
 #   grok   -> --reasoning-effort <value>
+#   devin / agent -> unused (pick a model id that already includes effort)
 HELPER_EFFORT=""
 
-# Optional: working directory for the helper agent. Defaults to $HOME so the
-# helper can search your project roots. Supports a leading ~.
+# Search root mentioned to the helper. Process cwd is a plugin state workdir.
 HELPER_CWD="~"
+
+# Default --kind for `herdr agent start` when the user does not name one.
+HELPER_SPAWN_KIND="claude"
+
+# Permission mode:
+#   devin: auto | accept-edits | smart (default) | dangerous
+#   agent:   smart/accept-edits -> --auto-review; dangerous -> --force
+# Mutating herdr still requires HERDR_HELPER_OK=1 after the user confirms.
+HELPER_PERMISSION="smart"
+
+# Extra CLI tokens appended before the prompt. Unquoted words only.
+HELPER_EXTRA_ARGS=""
