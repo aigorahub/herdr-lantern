@@ -159,12 +159,37 @@ The user approved unlinking the GitHub install and linking the local checkout.
 - [ ] B9-A3: A second open focuses the existing chat instead of seating a second one.
 - [ ] B9-A4: The mutation gate blocks a mutating herdr command from Git Bash and from cmd.
 
+### Batch 10: Line endings
+
+Added after staging, from a measurement. `core.autocrlf=true` is set on the
+target machine, and every shell file in the working tree is CRLF: `launch.sh`,
+`open.sh`, `lib.sh`, `bin/herdr`, `hsh`, and `tests/smoke.sh` each carry a CR
+before every LF. Git Bash tolerates it today, which is why the baseline gate
+ran. Nothing in the repository makes that tolerance a guarantee, and a
+different Git build, a `./open.sh` invocation, or a `#!/bin/sh` line ending in
+CR turns it into a failure that reads as a syntax error.
+
+`.gitattributes` fixes it at the source: the shell files stay LF in the working
+tree on every platform, and `bin/herdr.cmd` gets CRLF, which is what cmd.exe
+expects.
+
+Execute this batch immediately after Batch 1, before the shell edits, so the
+later diffs carry content and not line-ending noise.
+
+**Acceptance criteria**
+
+- [ ] B10-A1: `.gitattributes` pins the shell files, `hsh`, and `bin/herdr` to `eol=lf`, and `bin/herdr.cmd` to `eol=crlf`.
+- [ ] B10-A2: After renormalizing, the working tree copies of `launch.sh`, `open.sh`, `lib.sh`, `bin/herdr`, `hsh`, and `tests/smoke.sh` hold no CR bytes on this Windows checkout.
+- [ ] B10-A3: `tests/smoke.sh` passes under Git Bash after the renormalization.
+- [ ] B10-A4: The renormalization changes line endings only, with no content change in those files.
+
 ## Master acceptance
 
 - [ ] M-A1: Lantern opens and runs on Windows through Git Bash, with no change to macOS or Linux behaviour.
 - [ ] M-A2: The herdr mutation gate cannot be bypassed on Windows by a native process resolving `herdr` on PATH.
 - [ ] M-A3: `tests/smoke.sh` passes on Windows under Git Bash and stays valid for Linux and macOS.
 - [ ] M-A4: `README.md` and `CHANGELOG.md` describe the Windows requirements and the release.
+- [ ] M-A5: The repository pins the line endings its shell code depends on, so a Windows checkout cannot silently produce CRLF scripts.
 
 ## Focused tests
 

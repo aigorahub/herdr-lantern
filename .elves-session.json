@@ -109,13 +109,24 @@
         {"id": "B9-A3", "criterion": "A second open focuses the existing chat instead of seating a second one.", "met": false, "evidence": ""},
         {"id": "B9-A4", "criterion": "The mutation gate blocks a mutating herdr command from Git Bash and from cmd.", "met": false, "evidence": ""}
       ]
+    },
+    {
+      "id": "B10",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B10-A1", "criterion": "`.gitattributes` pins the shell files, `hsh`, and `bin/herdr` to `eol=lf`, and `bin/herdr.cmd` to `eol=crlf`.", "met": false, "evidence": ""},
+        {"id": "B10-A2", "criterion": "After renormalizing, the working tree copies of `launch.sh`, `open.sh`, `lib.sh`, `bin/herdr`, `hsh`, and `tests/smoke.sh` hold no CR bytes on this Windows checkout.", "met": false, "evidence": ""},
+        {"id": "B10-A3", "criterion": "`tests/smoke.sh` passes under Git Bash after the renormalization.", "met": false, "evidence": ""},
+        {"id": "B10-A4", "criterion": "The renormalization changes line endings only, with no content change in those files.", "met": false, "evidence": ""}
+      ]
     }
   ],
   "master_acceptance": [
     {"id": "M-A1", "criterion": "Lantern opens and runs on Windows through Git Bash, with no change to macOS or Linux behaviour.", "met": false, "evidence": ""},
     {"id": "M-A2", "criterion": "The herdr mutation gate cannot be bypassed on Windows by a native process resolving `herdr` on PATH.", "met": false, "evidence": ""},
     {"id": "M-A3", "criterion": "`tests/smoke.sh` passes on Windows under Git Bash and stays valid for Linux and macOS.", "met": false, "evidence": ""},
-    {"id": "M-A4", "criterion": "`README.md` and `CHANGELOG.md` describe the Windows requirements and the release.", "met": false, "evidence": ""}
+    {"id": "M-A4", "criterion": "`README.md` and `CHANGELOG.md` describe the Windows requirements and the release.", "met": false, "evidence": ""},
+    {"id": "M-A5", "criterion": "The repository pins the line endings its shell code depends on, so a Windows checkout cannot silently produce CRLF scripts.", "met": false, "evidence": ""}
   ],
   "review_comments": []
 }
