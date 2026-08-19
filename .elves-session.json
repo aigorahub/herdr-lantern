@@ -19,7 +19,13 @@
   },
   "continuation_guard": {
     "stop_allowed": false,
-    "next_required_action": "Start B1: declare windows in herdr-plugin.toml."
+    "next_required_action": "Start B10: pin line endings with .gitattributes and renormalize before the shell edits."
+  },
+  "plugin_install_state": {
+    "before_run": "github:aigorahub/herdr-lantern@99e34fa, enabled",
+    "now": "local link to C:\\Claude\\herdr-lantern, enabled",
+    "restore_command": "herdr plugin unlink aigora.lantern; herdr plugin install aigorahub/herdr-lantern",
+    "note": "The user approved the swap. Ask before restoring; they may want to keep developing against the link."
   },
   "test_baseline": {
     "command": "sh tests/smoke.sh",
@@ -29,11 +35,11 @@
   "batches": [
     {
       "id": "B1",
-      "status": "pending",
+      "status": "complete",
       "acceptance": [
-        {"id": "B1-A1", "criterion": "`herdr-plugin.toml` declares platforms linux, macos, and windows.", "met": false, "evidence": ""},
-        {"id": "B1-A2", "criterion": "The action id stays `open`, the pane id stays `helper`, the pane title stays `Lantern`, and the placement stays `tab`.", "met": false, "evidence": ""},
-        {"id": "B1-A3", "criterion": "`herdr plugin action list` reports windows in the action platforms after relink.", "met": false, "evidence": ""}
+        {"id": "B1-A1", "criterion": "`herdr-plugin.toml` declares platforms linux, macos, and windows.", "met": true, "evidence": "herdr-plugin.toml:6 reads platforms = [\"linux\", \"macos\", \"windows\"]."},
+        {"id": "B1-A2", "criterion": "The action id stays `open`, the pane id stays `helper`, the pane title stays `Lantern`, and the placement stays `tab`.", "met": true, "evidence": "herdr plugin link returned actions[0].id=open, panes[0].id=helper, panes[0].title=Lantern, panes[0].placement=tab. tests/smoke.sh:49,70,71 assert placement and title and passed in the same run."},
+        {"id": "B1-A3", "criterion": "`herdr plugin action list` reports windows in the action platforms after relink.", "met": true, "evidence": "After uninstalling the GitHub copy and linking C:\\Claude\\herdr-lantern, herdr plugin action list returned \"platforms\":[\"linux\",\"macos\",\"windows\"]."}
       ]
     },
     {

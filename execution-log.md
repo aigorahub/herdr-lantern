@@ -77,3 +77,58 @@ The plan started at `docs/plans/windows-support.md` and moved to
 `docs/` becomes public. Run documents do not belong on the product site.
 
 **Next required action:** Batch 1.
+
+---
+
+## 2026-08-19 — Batch 1: Manifest platform gate
+
+**Rollback ref**
+
+`refs/elves/rollback/lantern-windows-2026-08-/lantern-windows-/b1-469b51eb10bd`
+at `a9097c5`, pushed to origin. The helper truncates the run id and session id
+in the ref name; the head SHA is exact.
+
+**Change**
+
+`herdr-plugin.toml:6`: `platforms = ["linux", "macos"]` becomes
+`platforms = ["linux", "macos", "windows"]`. Nothing else in the manifest
+moved.
+
+**Plugin swap on this machine**
+
+`herdr pane list` showed one pane, this session's own. No lantern pane and no
+lantern workspace existed, so the swap disturbed nothing.
+
+```
+herdr plugin uninstall aigora.lantern   -> Uninstalled aigora.lantern.
+herdr plugin link C:\Claude\herdr-lantern -> plugin_linked
+herdr plugin list -> aigora.lantern enabled [local:\\?\C:\Claude\herdr-lantern]
+```
+
+The previous state was `github:aigorahub/herdr-lantern@99e34fa`. Restore with
+`herdr plugin unlink aigora.lantern` then
+`herdr plugin install aigorahub/herdr-lantern`. Recorded in
+`.elves-session.json` under `plugin_install_state`.
+
+**Acceptance**
+
+| Id | Evidence |
+| --- | --- |
+| B1-A1 | `herdr-plugin.toml:6` declares the three platforms. |
+| B1-A2 | `plugin link` returned `actions[0].id=open`, `panes[0].id=helper`, `panes[0].title=Lantern`, `panes[0].placement=tab`. `tests/smoke.sh:49,70,71` assert placement and title and passed. |
+| B1-A3 | `herdr plugin action list` returned `"platforms":["linux","macos","windows"]`. |
+
+**Gate**
+
+`& 'C:\Program Files\Git\bin\sh.exe' tests/smoke.sh` still fails only at the
+known `tests/smoke.sh:245` case. That is the pre-existing Windows baseline
+failure that Batch 7 repairs, not a regression from this batch. Every
+assertion before it passed, which is what proves B1-A2.
+
+**Decisions made**
+
+Proved B1-A3 now rather than deferring it to Batch 9. The relink was needed for
+Batch 9 anyway, no lantern pane was running, and leaving a criterion open
+across eight batches would have made the batch unclosable.
+
+**Next required action:** Batch 10, before the shell edits.

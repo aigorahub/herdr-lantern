@@ -86,12 +86,11 @@ scope.
 
 ## Stop Gate
 
-- **Planned batches remaining:** 9
+- **Planned batches remaining:** 9 (Batches 2-10)
 - **Stop allowed right now:** no
-- **Why:** no batch has started.
-- **Next required action:** Start Batch 1. Declare windows in
-  `herdr-plugin.toml` without touching the action id, pane id, pane title, or
-  placement.
+- **Why:** only Batch 1 is closed.
+- **Next required action:** Start Batch 10. Write `.gitattributes`,
+  renormalize, and rewrite the working tree to LF before any shell edit.
 
 ---
 
@@ -129,14 +128,15 @@ scope.
 
 ## Current Phase
 
-**Status:** Launch-ready
+**Status:** In progress
 
-**Active batch:** Batch 1: Manifest platform gate
+**Active batch:** Batch 10: Line endings
 
-**What was just finished:** Staging. Plan, session, survival guide, learnings,
-and execution log written. `acceptance_contract.py validate` passed.
+**What was just finished:** Batch 1. The manifest declares windows, the GitHub
+install was replaced with a link to this checkout, and
+`herdr plugin action list` reports the three platforms.
 
-**Single next action:** Start Batch 1.
+**Single next action:** Start Batch 10.
 
 ---
 
@@ -148,22 +148,29 @@ No active paid or long-running compute.
 
 ## Next Exact Batch
 
-**Batch:** B1: Manifest platform gate
+**Batch:** B10: Line endings
 
 **Scope:**
-- Add `windows` to `platforms` in `herdr-plugin.toml`.
-- Leave the action id, pane id, pane title, and placement untouched.
-- Confirm with `herdr plugin action list` after the Batch 9 relink.
+- Write `.gitattributes` pinning the shell files, `hsh`, and `bin/herdr` to
+  `eol=lf`, and `*.cmd` to `eol=crlf`.
+- `git add --renormalize .`, commit, then `git checkout-index -f -a` to rewrite
+  the working tree. Do not use `git checkout .` or `git reset --hard`.
+- Verify no CR bytes remain in the shell files, then rerun the gate.
 
 **Acceptance criteria:**
-- [ ] B1-A1: `herdr-plugin.toml` declares platforms linux, macos, and windows.
-- [ ] B1-A2: The action id stays `open`, the pane id stays `helper`, the pane title stays `Lantern`, and the placement stays `tab`.
-- [ ] B1-A3: `herdr plugin action list` reports windows in the action platforms after relink.
+- [ ] B10-A1: `.gitattributes` pins the shell files, `hsh`, and `bin/herdr` to `eol=lf`, and `bin/herdr.cmd` to `eol=crlf`.
+- [ ] B10-A2: After renormalizing, the working tree copies of `launch.sh`, `open.sh`, `lib.sh`, `bin/herdr`, `hsh`, and `tests/smoke.sh` hold no CR bytes on this Windows checkout.
+- [ ] B10-A3: `tests/smoke.sh` passes under Git Bash after the renormalization.
+- [ ] B10-A4: The renormalization changes line endings only, with no content change in those files.
 
-**Risk:** Low. The ids are asserted by `tests/smoke.sh:49,70,71`, so a slip is
-caught by the gate.
+**Risk:** A renormalization that also changes content would be invisible in a
+plain diff. Prove content equality separately from the ending change.
 
-**Rollback authority:** host-created `b1` rollback ref before the batch.
+**Note on B10-A3:** the gate still carries the known `tests/smoke.sh:245`
+Windows failure until Batch 7. B10-A3 means no new failure, and the same single
+known failure.
+
+**Rollback authority:** host-created `b10` rollback ref before the batch.
 
 ---
 
