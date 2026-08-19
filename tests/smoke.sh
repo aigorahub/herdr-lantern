@@ -856,8 +856,18 @@ run_bridge() {
         sh "$root/bridge.sh" "$_bridge_arg" </dev/null 2>&1
 }
 
+bridge_fail() {
+    # Every case below turns on the content of $bridge_out, and a bridge that
+    # died for an unrelated reason exits non-zero exactly like one that
+    # refused on purpose. Print what actually came back. Guessing at it from
+    # the assertion name has already cost this suite several CI rounds, all
+    # of them on the platform nobody develops on.
+    printf 'bridge --check said:\n%s\n' "$bridge_out" >&2
+    fail "$1"
+}
+
 # No credentials at all: refuse, and say which file and which example.
-bridge_out=$(run_bridge --check) && fail "bridge with no channels should fail"
+bridge_out=$(run_bridge --check) && bridge_fail "bridge with no channels should fail"
 # What this asserts is that the refusal names the config file, and the only
 # portable way to say that is to match the tail of the path.
 #
@@ -866,23 +876,19 @@ bridge_out=$(run_bridge --check) && fail "bridge with no channels should fail"
 # back with backslashes; and cygpath answers with the 8.3 short form of a
 # temporary directory (C:\Users\RUNNER~1\...) where Python has the long one
 # (C:\Users\runneradmin\...). Two spellings of one path, neither wrong.
-printf '%s\n' "$bridge_out" | grep -qE 'config[/\\]bridge\.conf' || {
-    # A refusal for the wrong reason also exits non-zero, so print what came
-    # back rather than leaving the next reader to guess at it.
-    printf 'bridge --check said:\n%s\n' "$bridge_out" >&2
-    fail "bridge should name the config file it wants filled in"
-}
+printf '%s\n' "$bridge_out" | grep -qE 'config[/\\]bridge\.conf' ||
+    bridge_fail "bridge should name the config file it wants filled in"
 printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
-    fail "bridge should name the example file"
-[ -f "$bridge_dir/config/bridge.conf" ] || fail "bridge should seed bridge.conf"
-[ -f "$bridge_dir/config/prompt.md" ] || fail "bridge should seed prompt.md"
+    bridge_fail "bridge should name the example file"
+[ -f "$bridge_dir/config/bridge.conf" ] || bridge_fail "bridge should seed bridge.conf"
+[ -f "$bridge_dir/config/prompt.md" ] || bridge_fail "bridge should seed prompt.md"
 
 # Credentials without an allowlist: still a refusal, naming the key to set.
 bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
     TELEGRAM_BOT_TOKEN=secret-token-value) &&
-    fail "bridge with no allowlist should fail"
+    bridge_fail "bridge with no allowlist should fail"
 printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_ALLOWED_CHATS' ||
-    fail "bridge should name the empty allowlist key"
+    bridge_fail "bridge should name the empty allowlist key"
 
 # WhatsApp is the one channel that can be reached from outside this machine, so
 # the signature secret and the allowlist are both refusals, not warnings.
@@ -891,35 +897,35 @@ bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
     WHATSAPP_PHONE_NUMBER_ID=PN1 \
     WHATSAPP_VERIFY_TOKEN=verify-token-value \
     WHATSAPP_ALLOWED_NUMBERS=15551234567) &&
-    fail "whatsapp without an app secret should fail"
+    bridge_fail "whatsapp without an app secret should fail"
 printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_APP_SECRET' ||
-    fail "whatsapp should name the missing app secret"
+    bridge_fail "whatsapp should name the missing app secret"
 
 bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
     WHATSAPP_ACCESS_TOKEN=access-token-value \
     WHATSAPP_PHONE_NUMBER_ID=PN1 \
     WHATSAPP_VERIFY_TOKEN=verify-token-value \
     WHATSAPP_APP_SECRET=app-secret-value) &&
-    fail "whatsapp without an allowlist should fail"
+    bridge_fail "whatsapp without an allowlist should fail"
 printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_ALLOWED_NUMBERS' ||
-    fail "whatsapp should name the missing allowlist"
+    bridge_fail "whatsapp should name the missing allowlist"
 if printf '%s\n' "$bridge_out" | grep -q 'app-secret-value'; then
-    fail "bridge leaked the whatsapp app secret"
+    bridge_fail "bridge leaked the whatsapp app secret"
 fi
 
 # Armed: a redacted summary and a real argv, no network, exit 0.
 bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
     TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242) ||
-    fail "bridge --check with a full telegram config should pass"
+    bridge_fail "bridge --check with a full telegram config should pass"
 printf '%s\n' "$bridge_out" | grep -q 'channels: telegram' ||
-    fail "bridge --check should report the enabled channel"
+    bridge_fail "bridge --check should report the enabled channel"
 printf '%s\n' "$bridge_out" | grep -q -- '--output-format text' ||
-    fail "bridge --check should print the helper argv"
+    bridge_fail "bridge --check should print the helper argv"
 if printf '%s\n' "$bridge_out" | grep -q 'secret-token-value'; then
-    fail "bridge --check leaked a token"
+    bridge_fail "bridge --check leaked a token"
 fi
 printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_BOT_TOKEN *(set,' ||
-    fail "bridge --check should report the token as redacted"
+    bridge_fail "bridge --check should report the token as redacted"
 
 # The example file and the parser have to agree, or a fresh install refuses to
 # start on its own seeded config.
