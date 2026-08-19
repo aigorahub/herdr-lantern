@@ -989,6 +989,21 @@ def acquire_daemon_lock(state_dir):
 _DAEMON_LOCKS = []
 
 
+def release_daemon_locks() -> None:
+    """Drop every lock this process holds. For tests, not for the daemon.
+
+    A daemon holds its lock until it exits, so nothing in the normal path
+    calls this. A test that runs serve() in the same interpreter does need
+    it: Windows refuses to delete a file that still has an open handle, so a
+    leaked fd turns a temporary directory's cleanup into a PermissionError.
+    """
+    while _DAEMON_LOCKS:
+        try:
+            os.close(_DAEMON_LOCKS.pop())
+        except OSError:
+            pass
+
+
 def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
     """One thread per channel in, one helper turn at a time out.
 

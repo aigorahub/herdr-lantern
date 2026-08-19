@@ -884,6 +884,11 @@ class DispatchLoopTest(unittest.TestCase):
     def test_a_failed_turn_is_reported_and_the_loop_continues(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
+        # serve() parks its lock fd for the life of the process, which is
+        # right for a daemon and wrong for a test: Windows will not delete a
+        # file that still has an open handle. Cleanups run last-registered
+        # first, so this one releases the lock before tmp.cleanup above.
+        self.addCleanup(lb.release_daemon_locks)
         state = Path(tmp.name)
         sent = []
         started = threading.Event()

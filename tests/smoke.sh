@@ -658,9 +658,14 @@ elves_tmp=
 $smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" \
     "$root/bin/lantern-bridge" || fail "py_compile"
 
+# The unit suite's own output is the diagnosis. Swallowing it and saying "run
+# it directly" is advice nobody can take on a CI runner, which is exactly where
+# a platform-specific failure shows up first.
 # shellcheck disable=SC2086
-$smoke_python "$root/tests/bridge_test.py" >/dev/null 2>&1 ||
-    fail "tests/bridge_test.py (run it directly to see which case)"
+if ! $smoke_python "$root/tests/bridge_test.py" >"$tmp" 2>&1; then
+    cat "$tmp" >&2
+    fail "tests/bridge_test.py"
+fi
 
 grep -q 'helper_detect_python' "$root/launch.sh" ||
     fail "launch.sh should use the detected interpreter"
