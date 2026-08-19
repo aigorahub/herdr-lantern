@@ -74,9 +74,9 @@ Declare Windows in the manifest without disturbing the ids the tests and
 
 **Acceptance criteria**
 
-- [ ] B1-A1: `herdr-plugin.toml` declares platforms linux, macos, and windows.
-- [ ] B1-A2: The action id stays `open`, the pane id stays `helper`, the pane title stays `Lantern`, and the placement stays `tab`.
-- [ ] B1-A3: `herdr plugin action list` reports windows in the action platforms after relink.
+- [x] B1-A1: `herdr-plugin.toml` declares platforms linux, macos, and windows.
+- [x] B1-A2: The action id stays `open`, the pane id stays `helper`, the pane title stays `Lantern`, and the placement stays `tab`.
+- [x] B1-A3: `herdr plugin action list` reports windows in the action platforms after relink.
 
 ### Batch 2: Mutation gate on Windows
 
@@ -86,11 +86,11 @@ down. The confirmation gate is bypassed with no message.
 
 **Acceptance criteria**
 
-- [ ] B2-A1: `bin/herdr.cmd` forwards its arguments to the POSIX wrapper through `sh.exe` and exits with the wrapper's exit code.
-- [ ] B2-A2: A mutating command through `bin/herdr.cmd` without `HERDR_HELPER_OK` exits non-zero and prints the `HERDR_HELPER_OK` hint.
-- [ ] B2-A3: An inspect command through `bin/herdr.cmd` reaches the real herdr.
-- [ ] B2-A4: With both files present, Git Bash `command -v herdr` still selects the extensionless wrapper.
-- [ ] B2-A5: `bin/herdr.cmd` never falls through to the real herdr when `sh.exe` is missing.
+- [x] B2-A1: `bin/herdr.cmd` forwards its arguments to the POSIX wrapper through `sh.exe` and exits with the wrapper's exit code.
+- [x] B2-A2: A mutating command through `bin/herdr.cmd` without `HERDR_HELPER_OK` exits non-zero and prints the `HERDR_HELPER_OK` hint.
+- [x] B2-A3: An inspect command through `bin/herdr.cmd` reaches the real herdr.
+- [x] B2-A4: With both files present, Git Bash `command -v herdr` still selects the extensionless wrapper.
+- [x] B2-A5: `bin/herdr.cmd` never falls through to the real herdr when `sh.exe` is missing.
 
 ### Batch 3: Python detection
 
@@ -99,11 +99,11 @@ the Store alias on Windows.
 
 **Acceptance criteria**
 
-- [ ] B3-A1: `lib.sh` has `helper_detect_python`, which rejects a zero-byte candidate and validates each candidate by running it.
-- [ ] B3-A2: `launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.
-- [ ] B3-A3: A missing interpreter skips the snapshot and never kills the pane.
-- [ ] B3-A4: `bin/goals-floor` decodes herdr output as UTF-8 with replacement, so pane text carrying box drawing or emoji cannot crash the snapshot on a Windows code page.
-- [ ] B3-A5: `bin/goals-floor` and `bin/elves-floor` force UTF-8 on stdout, because `launch.sh` redirects both into files and a redirected stream on Windows carries the locale code page.
+- [x] B3-A1: `lib.sh` has `helper_detect_python`, which rejects a zero-byte candidate and validates each candidate by running it.
+- [x] B3-A2: `launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.
+- [x] B3-A3: A missing interpreter skips the snapshot and never kills the pane.
+- [x] B3-A4: `bin/goals-floor` decodes herdr output as UTF-8 with replacement, so pane text carrying box drawing or emoji cannot crash the snapshot on a Windows code page.
+- [x] B3-A5: `bin/goals-floor` and `bin/elves-floor` force UTF-8 on stdout, because `launch.sh` redirects both into files and a redirected stream on Windows carries the locale code page.
 
 ### Batch 4: Path form handed to herdr
 
@@ -112,10 +112,10 @@ and native `herdr.exe` wants `C:\Users\Megan`.
 
 **Acceptance criteria**
 
-- [ ] B4-A1: `lib.sh` has `helper_native_path`, which converts with `cygpath -w` when cygpath exists and is identity otherwise.
-- [ ] B4-A2: `open.sh` passes the native form to `herdr workspace create --cwd`.
-- [ ] B4-A3: `helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.
-- [ ] B4-A4: `launch.sh`, `open.sh`, and `bin/herdr` normalise the plugin root with `helper_posix_path`, because Herdr on Windows reports it as an extended-length `\\?\C:\path` that a native child program cannot use once a child path is appended.
+- [x] B4-A1: `lib.sh` has `helper_native_path`, which converts with `cygpath -w` when cygpath exists and is identity otherwise.
+- [x] B4-A2: `open.sh` passes the native form to `herdr workspace create --cwd`.
+- [x] B4-A3: `helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.
+- [x] B4-A4: `launch.sh`, `open.sh`, and `bin/herdr` normalise the plugin root with `helper_posix_path`, because Herdr on Windows reports it as an extended-length `\\?\C:\path` that a native child program cannot use once a child path is appended.
 
 ### Batch 5: Real herdr resolution with a Windows HERDR_BIN_PATH
 
@@ -124,32 +124,32 @@ tests it and compares it against a POSIX plugin path.
 
 **Acceptance criteria**
 
-- [ ] B5-A1: `helper_resolve_real_herdr` accepts a Windows-style `HERDR_BIN_PATH` and returns a path that runs.
-- [ ] B5-A2: It never returns the plugin's own wrapper.
+- [x] B5-A1: `helper_resolve_real_herdr` accepts a Windows-style `HERDR_BIN_PATH` and returns a path that runs.
+- [x] B5-A2: It never returns the plugin's own wrapper.
 
 ### Batch 6: PATH extension
 
 **Acceptance criteria**
 
-- [ ] B6-A1: `helper_extend_user_path` leaves macOS and Linux behaviour unchanged and adds no entry that could resolve bare `bash` to the WSL stub.
+- [x] B6-A1: `helper_extend_user_path` leaves macOS and Linux behaviour unchanged and adds no entry that could resolve bare `bash` to the WSL stub.
 
 ### Batch 7: Smoke test portability
 
 **Acceptance criteria**
 
-- [ ] B7-A1: The unwritable-state-dir case detects a platform that ignores the permission bits and prints a SKIP line instead of failing.
-- [ ] B7-A2: That case still runs and passes on Linux and macOS.
-- [ ] B7-A3: The suite uses the detected Python instead of a bare `python3`.
-- [ ] B7-A4: The full suite passes under Git Bash on Windows with the plain Windows PATH.
+- [x] B7-A1: The unwritable-state-dir case detects a platform that ignores the permission bits and prints a SKIP line instead of failing.
+- [x] B7-A2: That case still runs and passes on Linux and macOS.
+- [x] B7-A3: The suite uses the detected Python instead of a bare `python3`.
+- [x] B7-A4: The full suite passes under Git Bash on Windows with the plain Windows PATH.
 
 ### Batch 8: Docs and version
 
 **Acceptance criteria**
 
-- [ ] B8-A1: `README.md` documents the Windows requirements: Herdr on Windows, Git for Windows, `C:\Program Files\Git\bin` on PATH, one helper CLI on PATH.
-- [ ] B8-A2: `README.md` gives a Windows equivalent for the `hsh` symlink step.
-- [ ] B8-A3: `CHANGELOG.md` has a 0.4.0 entry covering Windows support and the gate fix.
-- [ ] B8-A4: `herdr-plugin.toml` and the README version line both read 0.4.0.
+- [x] B8-A1: `README.md` documents the Windows requirements: Herdr on Windows, Git for Windows, `C:\Program Files\Git\bin` on PATH, one helper CLI on PATH.
+- [x] B8-A2: `README.md` gives a Windows equivalent for the `hsh` symlink step.
+- [x] B8-A3: `CHANGELOG.md` has a 0.4.0 entry covering Windows support and the gate fix.
+- [x] B8-A4: `herdr-plugin.toml` and the README version line both read 0.4.0.
 
 ### Batch 9: End to end verification on the Windows machine
 
@@ -157,10 +157,10 @@ The user approved unlinking the GitHub install and linking the local checkout.
 
 **Acceptance criteria**
 
-- [ ] B9-A1: The linked plugin creates a workspace labelled `🔥 lantern` with cwd `C:\Users\Megan` and a tab named `home`.
-- [ ] B9-A2: `claude.exe` starts in the plugin state workdir and the prompt files are written.
-- [ ] B9-A3: A second open focuses the existing chat instead of seating a second one.
-- [ ] B9-A4: The mutation gate blocks a mutating herdr command from Git Bash and from cmd.
+- [x] B9-A1: The linked plugin creates a workspace labelled `🔥 lantern` with cwd `C:\Users\Megan` and a tab named `home`.
+- [x] B9-A2: `claude.exe` starts in the plugin state workdir and the prompt files are written.
+- [x] B9-A3: A second open focuses the existing chat instead of seating a second one.
+- [x] B9-A4: The mutation gate blocks a mutating herdr command from Git Bash and from cmd.
 
 ### Batch 10: Line endings
 
@@ -181,18 +181,18 @@ later diffs carry content and not line-ending noise.
 
 **Acceptance criteria**
 
-- [ ] B10-A1: `.gitattributes` pins the shell files, `hsh`, and `bin/herdr` to `eol=lf`, and `bin/herdr.cmd` to `eol=crlf`.
-- [ ] B10-A2: After renormalizing, the working tree copies of `launch.sh`, `open.sh`, `lib.sh`, `bin/herdr`, `hsh`, and `tests/smoke.sh` hold no CR bytes on this Windows checkout.
-- [ ] B10-A3: `tests/smoke.sh` passes under Git Bash after the renormalization.
-- [ ] B10-A4: The renormalization changes line endings only, with no content change in those files.
+- [x] B10-A1: `.gitattributes` pins the shell files, `hsh`, and `bin/herdr` to `eol=lf`, and `bin/herdr.cmd` to `eol=crlf`.
+- [x] B10-A2: After renormalizing, the working tree copies of `launch.sh`, `open.sh`, `lib.sh`, `bin/herdr`, `hsh`, and `tests/smoke.sh` hold no CR bytes on this Windows checkout.
+- [x] B10-A3: `tests/smoke.sh` passes under Git Bash after the renormalization.
+- [x] B10-A4: The renormalization changes line endings only, with no content change in those files.
 
 ## Master acceptance
 
-- [ ] M-A1: Lantern opens and runs on Windows through Git Bash, with no change to macOS or Linux behaviour.
-- [ ] M-A2: The herdr mutation gate cannot be bypassed on Windows by a native process resolving `herdr` on PATH.
-- [ ] M-A3: `tests/smoke.sh` passes on Windows under Git Bash and stays valid for Linux and macOS.
-- [ ] M-A4: `README.md` and `CHANGELOG.md` describe the Windows requirements and the release.
-- [ ] M-A5: The repository pins the line endings its shell code depends on, so a Windows checkout cannot silently produce CRLF scripts.
+- [x] M-A1: Lantern opens and runs on Windows through Git Bash, with no change to macOS or Linux behaviour.
+- [x] M-A2: The herdr mutation gate cannot be bypassed on Windows by a native process resolving `herdr` on PATH.
+- [x] M-A3: `tests/smoke.sh` passes on Windows under Git Bash and stays valid for Linux and macOS.
+- [x] M-A4: `README.md` and `CHANGELOG.md` describe the Windows requirements and the release.
+- [x] M-A5: The repository pins the line endings its shell code depends on, so a Windows checkout cannot silently produce CRLF scripts.
 
 ## Focused tests
 
