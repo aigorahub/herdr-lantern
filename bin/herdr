@@ -18,6 +18,10 @@ fi
 
 case ${HERDR_HELPER_OK:-} in
 1 | yes | true)
+    if helper_is_agent_prompt "$@"; then
+        helper_relay_agent_prompt "$real" "$@"
+        exit $?
+    fi
     exec "$real" "$@"
     ;;
 esac

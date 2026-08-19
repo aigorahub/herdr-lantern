@@ -19,7 +19,8 @@ done
 tmp=$(mktemp)
 err=$(mktemp)
 fake=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"' EXIT
+fake_prompt=
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -63,6 +64,41 @@ export HERDR_HELPER_OK=1
 out=$(sh "$root/bin/herdr" workspace create --cwd /tmp --label x) ||
     fail "mutate with OK should pass"
 printf '%s\n' "$out" | grep -q 'workspace create' || fail "OK mutate did not exec real herdr"
+
+fake_prompt=$(mktemp -d)
+cat >"$fake_prompt/herdr" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+"agent prompt")
+    if [ "$5" = --wait ]; then
+        exit 1
+    fi
+    printf 'agent prompt %s\n' "$3"
+    exit 0
+    ;;
+"agent send-keys")
+    printf 'agent send-keys %s %s\n' "$3" "$4"
+    exit 0
+    ;;
+"agent wait")
+    printf 'agent wait %s\n' "$3"
+    exit 0
+    ;;
+esac
+printf '%s\n' "$*"
+exit 0
+EOF
+chmod +x "$fake_prompt/herdr"
+export HERDR_REAL="$fake_prompt/herdr"
+export HERDR_HELPER_OK=1
+out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there") ||
+    fail "prompt relay should succeed after Enter fallback"
+printf '%s\n' "$out" | grep -q 'agent send-keys w1:p1 Enter' ||
+    fail "prompt relay did not send Enter fallback"
+printf '%s\n' "$out" | grep -q 'agent wait w1:p1' ||
+    fail "prompt relay did not wait after Enter"
+unset HERDR_REAL
+fake_prompt=
 
 python3 "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
 python3 -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" || fail "py_compile"

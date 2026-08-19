@@ -21,6 +21,10 @@ beyond this list.
    - If that workspace already has an agent, use it (focus, then
      `herdr agent prompt` if they have a task). Start a new agent only
      when they ask for another and a pane is at a shell prompt.
+   - Relay a message: `HERDR_HELPER_OK=1 herdr agent prompt <target>
+     "<text>"`. The wrapper adds `--wait` and, if the pane stalls with
+     text still in the input field (common on Cursor), sends Enter and
+     waits again. Read the pane before telling the user it was sent.
    - To seat: `herdr workspace create --cwd <dir> --label <label> --no-focus`
      (JSON: `.result.root_pane.pane_id`), then
      `herdr agent start <slug> --kind <kind> --pane <pane_id>`, optionally
