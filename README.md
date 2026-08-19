@@ -240,7 +240,8 @@ reachable from outside.
 the bot to the channel (`/invite @yourbot`). `SLACK_CHANNEL` is that channel's
 id (`C…`), and `SLACK_ALLOWED_USERS` holds your member id (`U…`). The bridge
 polls that one channel and ignores everything it did not hear from an
-allowlisted human.
+allowlisted human. Step by step, including where to find both ids and what to
+do when it does not answer: [docs/slack-trial.md](docs/slack-trial.md).
 
 **WhatsApp.** Meta Cloud API only. Create a Meta app with the WhatsApp
 product, note the phone number id, the access token, and the app secret. The

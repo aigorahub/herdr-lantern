@@ -1,0 +1,174 @@
+# Trying the Lantern Bridge on Slack
+
+Slack is the easiest of the three channels to trial, and the right one to do
+first. It needs no public URL and no tunnel: the bridge polls Slack's servers
+rather than listening for them, so nothing on your machine has to be reachable
+from outside. It also means the bridge does not know or care whether you typed
+from the desktop app or the phone. Both work, with no extra setup, and you can
+start a conversation on a laptop and carry it on from a phone.
+
+Budget about ten minutes. Steps 1 to 3 happen in a browser and in Slack;
+steps 4 to 6 happen in a terminal.
+
+## Before you start
+
+- Herdr 0.7.5+ running, with this plugin installed or linked.
+- `claude` or `codex` on `PATH`. Those are the only two bridge helpers: they
+  are the two with a real one-shot mode that also resumes a conversation.
+- Python 3 on `PATH`.
+- Permission to add an app to your Slack workspace. In a workspace that
+  restricts app installs, an admin has to approve it, so ask before you start
+  rather than halfway through.
+
+Check the first two now:
+
+```bash
+command -v claude codex herdr python3
+```
+
+## 1. Create the Slack app
+
+Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** →
+**From scratch**. Name it something the channel will recognise (`Lantern` is
+fine) and pick your workspace.
+
+In **OAuth & Permissions**, scroll to **Bot Token Scopes** and add exactly two:
+
+| Scope | Why |
+| --- | --- |
+| `channels:history` | read the messages in the channel it watches |
+| `chat:write` | post its answers back |
+
+Add nothing else. The bridge uses no other Slack API.
+
+If you plan to watch a **private** channel, use `groups:history` instead of
+`channels:history`. Everything else is the same.
+
+## 2. Install it and copy the token
+
+Still in **OAuth & Permissions**, click **Install to Workspace** and approve.
+Copy the **Bot User OAuth Token**. It starts with `xoxb-`.
+
+That token can read and post in any channel the bot joins. Treat it the way
+you would treat a password: do not paste it into a chat window, a ticket, or a
+commit. Step 4 keeps it out of files entirely.
+
+## 3. Invite the bot to a channel
+
+Pick a quiet channel for the trial, or make a new one. Everyone in the channel
+will see the lantern's answers, so a dedicated channel is the polite choice on
+a busy team.
+
+In that channel, send:
+
+```
+/invite @Lantern
+```
+
+The bridge only ever watches this one channel. It cannot see any other part of
+the workspace.
+
+## 4. Find the two ids
+
+`SLACK_CHANNEL` is the channel's id and `SLACK_ALLOWED_USERS` is your own
+member id. Both are visible in the Slack apps:
+
+- **Channel id** (`C…`): open the channel, click its name, and scroll to the
+  bottom of the **About** tab. Or copy the channel link — the id is the last
+  path segment.
+- **Your member id** (`U…`): click your avatar → **Profile** → the **⋮** menu
+  → **Copy member ID**.
+
+The allowlist is not optional and it is not a warning. A channel with a
+credential and an empty allowlist refuses to start, because a bridge that
+answers anyone who finds the bot is a bridge that runs commands for anyone who
+finds the bot.
+
+## 5. Configure
+
+Open the config:
+
+```bash
+$EDITOR "$(herdr plugin config-dir aigora.lantern)/bridge.conf"
+```
+
+Set the channel and the allowlist. Leave `SLACK_BOT_TOKEN` empty:
+
+```sh
+BRIDGE_HELPER="claude"
+SLACK_BOT_TOKEN=""
+SLACK_CHANNEL="C0123456789"
+SLACK_ALLOWED_USERS="U0123456789"
+```
+
+Every key falls back to an environment variable of the same name when the line
+here is empty. That is deliberate, and it is why the token line stays blank:
+export the token in your shell instead, and it never reaches disk.
+
+```bash
+export SLACK_BOT_TOKEN="xoxb-…"
+```
+
+Confirm the config without touching the network. `--check` prints what the
+bridge resolved, redacts every secret to a byte count, and exits non-zero if
+anything is missing:
+
+```bash
+sh bridge.sh --check
+```
+
+You want `channels: slack` and a `helper:` line naming a CLI that is on
+`PATH`.
+
+## 6. Run it
+
+```bash
+sh bridge.sh
+```
+
+That process is the daemon. Leave it running; the window is the log. Then post
+a message in the channel, and an answer should arrive within a few seconds —
+the first one is slower, because the helper is starting cold.
+
+Only one bridge may run per state directory. A second one is refused by name
+rather than left to fight the first over the same messages, and the pane
+action focuses a running bridge instead of seating another.
+
+## What to expect
+
+**It only sees messages sent after it starts.** The cursor begins at the
+moment the daemon comes up, so nothing in the channel's history is read. Start
+the daemon, then send your test message.
+
+**It answers you and ignores everyone else.** Messages from anyone outside
+`SLACK_ALLOWED_USERS` are dropped, as are the bot's own messages and Slack's
+join/leave notices.
+
+**Mutating Herdr still needs your confirmation.** Inspect commands run
+normally, but anything that creates, starts, focuses, closes, or prompts is
+blocked until you confirm the exact target — and over Slack that confirmation
+is simply your next message. This is the same gate the lantern pane uses; the
+bridge does not widen it.
+
+**Replies are plain and short.** The helper is told it is answering a person
+who is probably on a phone.
+
+**Each conversation is its own workdir** under the plugin state directory,
+seeded with the lantern prompt. The helper does not read your lantern pane and
+cannot see any other conversation.
+
+## When it does not work
+
+| Symptom | Cause |
+| --- | --- |
+| `no channels configured` | `SLACK_BOT_TOKEN` reached neither the file nor the environment. `export` it in the *same* shell that runs `bridge.sh`. |
+| `SLACK_ALLOWED_USERS is empty` | The allowlist is required. Put your `U…` id in it. |
+| Daemon starts, nothing answers | The bot is not in the channel (`/invite`), or `SLACK_CHANNEL` is the wrong id, or you are messaging from an account that is not on the allowlist. |
+| `not_in_channel` in the log | Same: invite the bot. |
+| `missing_scope` in the log | A scope was added after installing. Re-install the app from **OAuth & Permissions**; scope changes need it. |
+| `a lantern bridge is already running` | One is. The message names the lock file. Stop that daemon first. |
+| `no bridge helper on PATH` | Neither `claude` nor `codex` is installed, or `BRIDGE_HELPER` names something else. |
+
+The daemon logs one line per message with the channel, the sender, and a byte
+count. It never logs message text or any token, so a log is safe to paste when
+you ask for help — but read it before you do.
