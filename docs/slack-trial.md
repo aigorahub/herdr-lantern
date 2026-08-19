@@ -84,6 +84,20 @@ credential and an empty allowlist refuses to start, because a bridge that
 answers anyone who finds the bot is a bridge that runs commands for anyone who
 finds the bot.
 
+**What an allowlisted member gets is a shell on this machine.** The headless
+helper runs as the account that started the bridge, with
+`--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox. `Bash` is an
+ordinary shell: it can read, write, and delete whatever that account can, and
+reach the network. The `bin/herdr` wrapper described further down gates
+mutating **`herdr` subcommands** and nothing else — it is not a sandbox, and it
+does not stand between a message and the rest of your files.
+
+So `SLACK_ALLOWED_USERS` is the whole security boundary. Every id on it is the
+same trust as a seat at your keyboard. For a trial, put your own id there and
+nobody else's. The other two channels work the same way: WhatsApp allowlists
+sender numbers, and a Telegram chat id is a person's private chat — a group id
+is not accepted, because it would authorize every member of the group.
+
 ## 5. Configure
 
 Open the config:
@@ -108,6 +122,12 @@ export the token in your shell instead, and it never reaches disk.
 ```bash
 export SLACK_BOT_TOKEN="xoxb-…"
 ```
+
+If you would rather write it into the file, that is fine too: `bridge.conf` is
+created `0600` on first start, because five of its keys are secrets. Values
+from the file and values from the environment are checked the same way —
+neither may hold a shell metacharacter, and the refusal names which side it
+came from.
 
 Confirm the config without touching the network. `--check` prints what the
 bridge resolved, redacts every secret to a byte count, and exits non-zero if
@@ -170,5 +190,12 @@ cannot see any other conversation.
 | `no bridge helper on PATH` | Neither `claude` nor `codex` is installed, or `BRIDGE_HELPER` names something else. |
 
 The daemon logs one line per message with the channel, the sender, and a byte
-count. It never logs message text or any token, so a log is safe to paste when
-you ask for help — but read it before you do.
+count. It never logs message text or any token, and an unexpected error inside
+the webhook is one line naming the exception rather than a stack trace with
+your filesystem paths in it. A log is safe to paste when you ask for help —
+but read it before you do.
+
+One thing the log does not cover: while a turn is running, the message text is
+an argument to the helper process, so any other account on this machine can
+read it with `ps auxww`. Tokens and secrets are never passed that way. The
+bridge is built for a machine you are the only user of.

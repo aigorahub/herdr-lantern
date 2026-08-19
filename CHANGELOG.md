@@ -36,16 +36,75 @@ All notable changes to Lantern, by Elves are documented here.
 
 - Every WhatsApp webhook POST is verified as HMAC-SHA256 of the raw request
   body against `WHATSAPP_APP_SECRET`, with `hmac.compare_digest`, before
-  anything parses it. A mismatch or a missing header is a 401 and nothing
-  reaches the queue. The app secret is required, not optional. The webhook
-  binds localhost; a tunnel is what gives Meta a public URL.
+  anything parses it. A signature that is missing, malformed, or wrong is a
+  401 and nothing reaches the queue. The app secret is required, not optional.
+  The webhook binds localhost; a tunnel is what gives Meta a public URL.
 - The webhook's default request logger is off. The line it writes carries
   `hub.verify_token`.
-- No token, secret, or message body is logged or echoed. Log lines carry a
-  channel, a chat id, and byte counts.
+- No token or secret is logged or echoed, and no log line carries message
+  text: a line is a channel, a chat id, and byte counts. Message text is not
+  logged, but it is an argument to the helper process while the turn runs, so
+  any other account on this machine can read it out of `ps auxww` for up to
+  `HELPER_TIMEOUT` (900s). That is accepted rather than fixed: the bridge is
+  built for a single-user host, where the same account could read the
+  conversation workdir anyway. On a shared machine, treat every message as
+  visible to everyone logged in.
+- **An allowlisted sender gets a shell.** The helper runs with
+  `--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox, as the user who
+  started the bridge. The `bin/herdr` gate covers mutating `herdr` subcommands
+  and nothing else; it is not a sandbox and never was. The allowlists are the
+  security boundary, so an entry on one is the same trust as a seat at the
+  keyboard.
+- The webhook could be taken down by anyone who learned its URL. The handler
+  inherited `timeout=None` from `StreamRequestHandler` and
+  `ThreadingHTTPServer` caps nothing, so connections that announce a
+  `Content-Length` and then stop sending parked one thread each — and the body
+  is read before the signature is checked, so no credential was needed. The
+  handler now carries a 15s socket timeout and the server refuses a connection
+  past eight in flight.
+- A signature header holding one non-ASCII byte crashed the request. Headers
+  are decoded as latin-1, and `hmac.compare_digest` raises `TypeError` rather
+  than returning `False` on a non-ASCII `str`. The exception escaped to
+  `socketserver`, which printed a full traceback with absolute filesystem
+  paths into the bridge pane and dropped the connection with no 401 at all.
+  Only 64 hex digits reach the comparison now, and an unexpected handler
+  exception is one redacted line.
+- `TELEGRAM_ALLOWED_CHATS` authorized a conversation rather than a person. A
+  group id on that list let every member of the group drive the lantern. A
+  message is accepted when the sender's own id is allowlisted, or when the
+  chat is private and its id is allowlisted; a non-private chat whose members
+  are not individually listed is dropped and logged.
+- `BRIDGE_EXTRA_ARGS` could switch the permission model off. It is appended
+  after the bridge's own `--allowed-tools` and a later flag wins, so
+  `--dangerously-skip-permissions`, `--permission-mode bypassPermissions`,
+  `--allowed-tools *`, `--sandbox danger-full-access`, `--add-dir /` and their
+  neighbours all went through. They are refused by name now, and `--check`
+  prints a loud line whenever any extra args are set.
+- Config values from the environment were used verbatim; only file values were
+  checked for shell metacharacters. The environment is the path this README
+  recommends for secrets, so it now gets the same reject set, with an error
+  naming the key and the source.
+- `bridge.conf` was seeded world-readable with `cp`. It holds five secrets, so
+  it is created `0600`. An existing file's mode is left alone.
+- Untrusted message text was a bare positional for `codex`, so a message that
+  is exactly a flag was parsed as one. An end-of-options `--` guards it.
+  `claude` was already safe: the text is the value of `-p`.
 
 ### Fixed
 
+- A helper that exited non-zero after printing anything still got a session
+  marker, so every later turn passed `--continue` for a session that never
+  began and the conversation was stuck there. The marker goes down only when
+  the run succeeded.
+- A reply could be lost whole. `split_message` could emit an empty chunk,
+  every provider rejects an empty message, and the failed send took the entire
+  reply with it behind one `send failed` line.
+- The webhook's 413 answered without draining the body it refused, and on a
+  keep-alive connection the undelivered bytes were then parsed as the next
+  request. It closes the connection.
+- `WHATSAPP_WEBHOOK_PORT` was checked with `isdigit()` alone, so `99999`
+  passed validation and failed at bind — leaving that channel dead while the
+  daemon reported itself healthy. It has to be 1-65535.
 - Nothing stopped a second Lantern Bridge, and a second one breaks every
   channel: two `getUpdates` long polls on one bot token answer 409 and fight
   over the offset cursor, two Slack pollers both reply to every message, and

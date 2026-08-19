@@ -206,9 +206,9 @@ is empty, so tokens can stay out of the file.
 | `BRIDGE_EFFORT` | `claude --effort`, `codex model_reasoning_effort` |
 | `BRIDGE_CWD` | search root mentioned to the helper (default `~`) |
 | `BRIDGE_SPAWN_KIND` | default `--kind` for `herdr agent start` |
-| `BRIDGE_EXTRA_ARGS` | extra unquoted helper CLI tokens |
+| `BRIDGE_EXTRA_ARGS` | extra unquoted helper CLI tokens; permission and sandbox flags are refused |
 | `TELEGRAM_BOT_TOKEN` | token from @BotFather |
-| `TELEGRAM_ALLOWED_CHATS` | comma-separated numeric chat ids |
+| `TELEGRAM_ALLOWED_CHATS` | comma-separated numeric ids of **people**: each one a private chat, or a user id |
 | `SLACK_BOT_TOKEN` | `xoxb-` token |
 | `SLACK_CHANNEL` | the one channel id the bridge watches |
 | `SLACK_ALLOWED_USERS` | comma-separated member ids (`U…`) |
@@ -235,6 +235,14 @@ token. Message your bot once, then read your chat id out of
 `TELEGRAM_ALLOWED_CHATS`. The bridge long-polls, so nothing has to be
 reachable from outside.
 
+The id you took from your own private chat is your user id, and that is what
+the allowlist is for: **a chat id here is a person, not a room.** A group or
+supergroup id would name a room, and the bridge will not answer one — putting
+it here would authorize every member of the group, present and future, to run
+the commands described under [What a sender gets](#what-a-sender-gets). To use
+the bridge in a group, allowlist the user ids of the people who may drive it;
+their messages are answered there and everyone else's are dropped.
+
 **Slack.** Create an app at api.slack.com, add the bot scopes
 `channels:history` and `chat:write`, install it to the workspace, and invite
 the bot to the channel (`/invite @yourbot`). `SLACK_CHANNEL` is that channel's
@@ -259,7 +267,43 @@ token, and subscribe to `messages`. Every POST is checked against
 required rather than optional: without it the tunnel is an open door.
 
 Text messages only, both directions. Replies are split at each provider's
-limit. Tokens and message bodies never reach a log line.
+limit.
+
+### What a sender gets
+
+**An allowlisted sender gets a shell on this machine.** The headless helper
+runs as the user who started the bridge, with
+`--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox. `Bash` is an
+ordinary shell: it can read, write, and delete anything that account can, and
+reach the network. The `bin/herdr` wrapper gates mutating **`herdr`
+subcommands** — create, start, focus, close, prompt, `send-*` — and nothing
+else. It is not a sandbox, and it does not stand between a message and the
+rest of your files.
+
+So the allowlists are the whole security boundary. An id on one is the same
+trust as handing that person your keyboard. Treat every one of them that way:
+
+- Put only your own ids on the allowlists to start with.
+- A Telegram chat id is a person's private chat. A group id is not accepted;
+  see the Telegram notes above.
+- Slack allowlists member ids, WhatsApp allowlists sender numbers. Neither
+  channel is authorized by the room.
+- `BRIDGE_EXTRA_ARGS` is appended after the bridge's own flags and a later
+  flag wins, so the tokens that would switch the tool list or the sandbox off
+  are refused by name. `sh bridge.sh --check` prints a loud line whenever any
+  extra args are set at all.
+
+Two things the daemon does not protect against, said plainly:
+
+- Message text is never logged, but while a turn runs it is an argument to the
+  helper process, so any other account on this machine can read it out of
+  `ps auxww` for up to fifteen minutes. Tokens and secrets are never argv and
+  never logged.
+- `bridge.conf` is created `0600`, because five of its keys are secrets. If
+  you loosened that mode, or you keep the secrets in your environment on a
+  shared machine, they are readable by whoever can read that.
+
+The bridge is built for a machine you are the only user of.
 
 ## Windows
 
@@ -345,3 +389,8 @@ This runs as your user with your environment. Read `launch.sh`, `lib.sh`, and
 `bin/herdr` before installing. Devin `HELPER_PERMISSION=dangerous` skips
 Devin’s own approval UI; the herdr wrapper still requires `HERDR_HELPER_OK=1`
 for mutating commands.
+
+That wrapper gates mutating `herdr` subcommands only. It is not a sandbox: the
+helper CLI it fronts has whatever tools you gave it, as you. For the bridge,
+where the person at the other end is not necessarily sitting here, read
+[What a sender gets](#what-a-sender-gets) before you fill in an allowlist.

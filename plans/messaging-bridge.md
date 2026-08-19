@@ -285,6 +285,62 @@ refused in the constructor, because `compare_digest("", "")` is a match.
   directory.
 - [x] B8-A4: `WhatsAppAdapter` refuses an empty `WHATSAPP_VERIFY_TOKEN`.
 
+### Batch 9: Audit fixes
+
+Twelve findings from two independent audits of the bridge and a third-party
+review, every one reproduced against this branch before it was touched. The
+three that matter: the webhook could be taken down by anyone who learned its
+URL, because the handler inherited `timeout=None` and `ThreadingHTTPServer`
+caps nothing, and the body is read before the signature is checked — twenty
+stalled sockets parked twenty threads, four hundred parked four hundred, and
+the README tells people to publish that port through a tunnel. A signature
+header with one non-ASCII byte raised `TypeError` out of `hmac.compare_digest`
+and escaped `do_POST` as a traceback with absolute paths, printed into the
+pane the docs call safe to paste, with no 401 at all. And
+`TELEGRAM_ALLOWED_CHATS` gated the room rather than the person, so a group id
+on the list handed unsandboxed `Bash` to every member of the group.
+
+The rest: `BRIDGE_EXTRA_ARGS` could carry `--dangerously-skip-permissions` and
+its neighbours past the tool list; environment values skipped the
+metacharacter check that file values got, on the path the docs actually
+recommend for secrets; `bridge.conf` was seeded world-readable; untrusted text
+was a bare positional for `codex`; a failed helper run still opened a session
+and wedged the conversation; the 413 path desynced a keep-alive connection;
+`split_message` could emit an empty chunk and lose a whole reply; and
+`WHATSAPP_WEBHOOK_PORT` accepted 99999 and then failed at bind. Two
+documentation claims were false and are now precise: what an allowlisted
+sender actually gets, and where message text is exposed.
+
+**Acceptance criteria**
+- [x] B9-A1: The webhook handler carries a socket timeout, the server refuses
+  a connection past its cap, and forty stalled sockets neither park forty
+  threads nor stay open.
+- [x] B9-A2: A non-ASCII `X-Hub-Signature-256` is answered 401 over a real
+  socket, with no traceback and no filesystem path on stderr.
+- [x] B9-A3: A Telegram private chat on the allowlist is accepted; a group
+  whose sender is unlisted is dropped; a group message from an allowlisted
+  user id is accepted.
+- [x] B9-A4: Each of the six reproduced permission and sandbox flags in
+  `BRIDGE_EXTRA_ARGS` is refused by name, and `--check` prints a loud line
+  whenever any extra args are set.
+- [x] B9-A5: A shell metacharacter in an environment value is refused exactly
+  as it is in a file value, and the message names the key and the source.
+- [x] B9-A6: Both `codex` argv shapes put `--` in front of the message text,
+  with every other argument ahead of it.
+- [x] B9-A7: `bridge.conf` is seeded `0600` where the platform has real
+  permission bits, and the smoke case skips where it does not.
+- [x] B9-A8: A helper that exits non-zero after printing output leaves no
+  session marker; a clean run leaves one.
+- [x] B9-A9: The 413 answer sends `Connection: close` and the connection ends.
+- [x] B9-A10: `split_message` never returns an empty chunk.
+- [x] B9-A11: `WHATSAPP_WEBHOOK_PORT` outside 1-65535 is refused by
+  `validate()`.
+- [x] B9-A12: The CHANGELOG no longer claims message bodies are never exposed;
+  it names `ps auxww` and the single-user assumption. README and
+  docs/slack-trial.md say plainly that an allowlisted sender gets unsandboxed
+  `Bash` as the host user and that the `bin/herdr` gate covers `herdr`
+  subcommands only.
+
 ## Master Acceptance
 
 - [ ] M-A1: Full smoke suite green locally (macOS with real Homebrew CLIs
