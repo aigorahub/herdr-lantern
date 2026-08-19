@@ -828,6 +828,18 @@ printf 'ok: launch.sh argv for every helper CLI\n'
 # one explicitly and nothing here ever runs it.
 bridge_dir=$(mktemp -d)
 mkdir -p "$bridge_dir/config" "$bridge_dir/state"
+# The interpreter has to be reachable from the scrubbed environment below.
+# launch.sh treats a missing Python as "no snapshot" and carries on, but the
+# bridge is a Python daemon and dies without one -- and on Windows the
+# interpreter is under C:\hostedtoolcache, which /usr/bin:/bin does not
+# contain. Without this the bridge fails for the wrong reason, still exits
+# non-zero, and every case below asserts against the wrong error.
+bridge_path=/usr/bin:/bin
+bridge_py_bin=${smoke_python%% *}
+if bridge_py_path=$(command -v "$bridge_py_bin" 2>/dev/null); then
+    bridge_path="$(dirname "$bridge_py_path"):$bridge_path"
+fi
+
 run_bridge() {
     # $1 is the bridge.sh argument; the rest are KEY=value pairs for its
     # environment. Every config key falls back to the environment, so a test
@@ -836,7 +848,7 @@ run_bridge() {
     shift
     env -i \
         HOME="$bridge_dir" \
-        PATH="/usr/bin:/bin" \
+        PATH="$bridge_path" \
         HERDR_PLUGIN_ROOT="$root" \
         HERDR_PLUGIN_CONFIG_DIR="$bridge_dir/config" \
         HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
@@ -854,8 +866,12 @@ bridge_out=$(run_bridge --check) && fail "bridge with no channels should fail"
 # back with backslashes; and cygpath answers with the 8.3 short form of a
 # temporary directory (C:\Users\RUNNER~1\...) where Python has the long one
 # (C:\Users\runneradmin\...). Two spellings of one path, neither wrong.
-printf '%s\n' "$bridge_out" | grep -qE 'config[/\\]bridge\.conf' ||
+printf '%s\n' "$bridge_out" | grep -qE 'config[/\\]bridge\.conf' || {
+    # A refusal for the wrong reason also exits non-zero, so print what came
+    # back rather than leaving the next reader to guess at it.
+    printf 'bridge --check said:\n%s\n' "$bridge_out" >&2
     fail "bridge should name the config file it wants filled in"
+}
 printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
     fail "bridge should name the example file"
 [ -f "$bridge_dir/config/bridge.conf" ] || fail "bridge should seed bridge.conf"
