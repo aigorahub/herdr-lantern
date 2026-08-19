@@ -232,19 +232,21 @@ helper_lantern_pane_in_workspace() {
     # title carries pane_id but not workspace_id. Each candidate is
     # confirmed with `pane get`.
     [ -n "${2:-}" ] || return 1
-    "$1" pane list 2>/dev/null |
+    _helper_cands=$("$1" pane list 2>/dev/null |
         tr '{' '\n' |
         grep -F -e "\"label\":\"$3\"" |
-        sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p' |
-        while IFS= read -r _helper_cand; do
-            [ -n "$_helper_cand" ] || continue
-            _helper_cand_ws=$(helper_lantern_pane_workspace "$1" "$_helper_cand" "$3") ||
-                continue
-            if [ "$_helper_cand_ws" = "$2" ]; then
-                printf '%s' "$_helper_cand"
-                return 0
-            fi
-        done
+        sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p') || return 1
+    # Pane ids hold no spaces, so a plain word loop keeps this out of a
+    # subshell and lets the function fail when it finds nothing.
+    for _helper_cand in $_helper_cands; do
+        _helper_cand_ws=$(helper_lantern_pane_workspace "$1" "$_helper_cand" "$3") ||
+            continue
+        if [ "$_helper_cand_ws" = "$2" ]; then
+            printf '%s' "$_helper_cand"
+            return 0
+        fi
+    done
+    return 1
 }
 
 helper_resolve_real_herdr() {

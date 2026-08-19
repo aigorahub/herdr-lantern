@@ -141,6 +141,9 @@ case "$1 $2" in
     printf '{"result":{"root_pane":{"pane_id":"w9:p1","scroll":{"viewport_rows":32},"tab_id":"w9:t1","workspace_id":"w9"},"workspace":{"label":"new","workspace_id":"w9"}}}\n'
     ;;
 "plugin pane")
+    if [ "$3" = focus ]; then
+        [ "${STUB_FOCUS_FAIL:-}" = 1 ] && exit 1
+    fi
     if [ "$3" = open ]; then
         [ "${STUB_OPEN_FAIL:-}" = 1 ] && exit 1
         printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern","pane_id":"%s:p2","scroll":{"viewport_rows":32},"tab_id":"%s:t2","workspace_id":"%s"}}}}\n' \
@@ -153,7 +156,8 @@ EOF
 chmod +x "$open_dir/herdr"
 STUB_LOG=$open_dir/calls.txt
 export STUB_LOG STUB_WS_EXTRA STUB_WS STUB_WS_LABEL STUB_PANE STUB_PANE_LABEL
-export STUB_OPEN_WS STUB_OPEN_FAIL STUB_PANE_EXTRA
+export STUB_OPEN_WS STUB_OPEN_FAIL STUB_PANE_EXTRA STUB_FOCUS_FAIL
+STUB_FOCUS_FAIL=
 STUB_WS_EXTRA=
 STUB_WS=
 STUB_WS_LABEL=
@@ -224,6 +228,26 @@ logged '--placement tab --workspace w7' || fail "label match should seat in w7"
 if logged 'pane close'; then fail "label match must not close a pane"; fi
 STUB_WS_EXTRA=
 STUB_OPEN_WS=w9
+
+# A chat that dies between the check and the focus is replaced, not fatal.
+reset_open
+printf 'w7\n' >"$open_state/workspace.id"
+printf 'w7:p2\n' >"$open_state/pane.id"
+STUB_PANE=w7:p2
+STUB_FOCUS_FAIL=1
+run_open || fail "a refused focus should not end the open"
+logged 'workspace create --cwd' || fail "a refused focus should seat a new chat"
+STUB_FOCUS_FAIL=
+STUB_PANE=
+
+# A state directory that cannot be locked is an error, not silence.
+reset_open
+chmod 500 "$open_state"
+if run_open; then
+    chmod 700 "$open_state"
+    fail "an unlockable state dir should exit nonzero"
+fi
+chmod 700 "$open_state"
 
 # A workspace labelled by hand is not the lantern workspace.
 reset_open

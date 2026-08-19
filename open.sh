@@ -69,9 +69,9 @@ if [ -n "$workspace" ]; then
         printf '%s\n' "$workspace" >"$workspace_file" || true
         exit 0
     fi
-    # The chat quit between the check and the focus. Seat a new one.
+    # The chat quit between the check and the focus. Seat a new one, and
+    # keep the id so step 5 does not offer the same dead pane again.
     workspace=
-    pane=
 fi
 
 # 2. No live chat. The remembered workspace counts only while it still
@@ -110,12 +110,14 @@ fi
 if [ -z "$root_pane" ]; then
     running=$(helper_lantern_pane_in_workspace "$herdr" "$workspace" "$pane_title") ||
         running=
-    if [ -n "$running" ]; then
+    if [ -n "$running" ] && [ "$running" != "$pane" ]; then
         printf '%s\n' "$workspace" >"$workspace_file" || true
         printf '%s\n' "$running" >"$pane_file" || true
         "$herdr" workspace focus "$workspace" >/dev/null 2>&1 || true
-        "$herdr" plugin pane focus "$running"
-        exit 0
+        if "$herdr" plugin pane focus "$running"; then
+            exit 0
+        fi
+        # It went away too. Seat a new one below.
     fi
 fi
 
