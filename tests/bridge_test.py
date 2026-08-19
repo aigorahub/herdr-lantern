@@ -952,6 +952,54 @@ class DispatchLoopTest(unittest.TestCase):
         self.assertEqual(sent[1], ("1", "the answer"))
 
 
+class HomeDirTest(unittest.TestCase):
+    """Path.home() reads USERPROFILE on Windows and HOME elsewhere, and raises
+    rather than returning None when its own variable is missing. A shell that
+    exports only HOME is ordinary on macOS and fatal on Windows."""
+
+    def swap(self, obj, name, value):
+        original = getattr(obj, name)
+        self.addCleanup(setattr, obj, name, original)
+        setattr(obj, name, value)
+
+    def set_env(self, **values):
+        original = dict(os.environ)
+        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(original)))
+        os.environ.clear()
+        os.environ.update(values)
+
+    def raise_home(self):
+        def boom():
+            raise RuntimeError("Could not determine home directory.")
+
+        self.swap(lb.Path, "home", staticmethod(boom))
+
+    def test_env_home_answers_when_path_home_raises(self):
+        self.raise_home()
+        self.set_env(HOME=os.sep + "from-env")
+        self.assertEqual(lb.home_dir(), Path(os.sep + "from-env"))
+
+    def test_userprofile_answers_when_home_is_absent(self):
+        self.raise_home()
+        self.set_env(USERPROFILE=os.sep + "from-win")
+        self.assertEqual(lb.home_dir(), Path(os.sep + "from-win"))
+
+    def test_nothing_at_all_is_none_not_an_exception(self):
+        self.raise_home()
+        self.set_env()
+        self.assertIsNone(lb.home_dir())
+
+    def test_a_homeless_environment_does_not_end_the_daemon(self):
+        # serve() expands the search root before it starts a single adapter,
+        # and BRIDGE_CWD defaults to "~", so a raise here is a startup crash
+        # rather than a bad hint.
+        self.swap(lb, "home_dir", lambda: None)
+        self.swap(lb, "log", lambda message: None)
+        self.assertEqual(lb.expand_root("~"), "~")
+        self.assertEqual(lb.expand_root("~/code"), "~/code")
+        self.assertEqual(lb.expand_root("/explicit"), "/explicit")
+
+
 class ExpandRootTest(unittest.TestCase):
     def test_tilde(self):
         self.assertEqual(lb.expand_root("~"), str(Path.home()))

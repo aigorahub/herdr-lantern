@@ -1094,13 +1094,42 @@ def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
                 )
 
 
+def home_dir():
+    """The user's home, or None when nothing in the environment says.
+
+    Path.home() reads USERPROFILE on Windows and HOME everywhere else, and
+    raises RuntimeError rather than returning anything when its variable is
+    unset. A shell that exports only HOME is therefore fine on macOS and
+    Linux and fatal on Windows, which is a difference worth absorbing here
+    rather than at three call sites.
+    """
+    try:
+        return Path.home()
+    except RuntimeError:
+        pass
+    for key in ("HOME", "USERPROFILE"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return Path(value)
+    return None
+
+
 def expand_root(value: str) -> str:
-    """~ the way lib.sh expands it, so both entrypoints agree."""
+    """~ the way lib.sh expands it, so both entrypoints agree.
+
+    The search root is a hint handed to the helper, nothing the bridge acts
+    on itself. An environment that will not say where home is leaves the
+    value unexpanded and says so, because ending the daemon over a hint --
+    and BRIDGE_CWD defaults to ~, so this is the ordinary path -- would be
+    out of all proportion.
+    """
     value = (value or "~").strip()
-    if value == "~":
-        return str(Path.home())
-    if value.startswith("~/"):
-        return str(Path.home() / value[2:])
+    if value == "~" or value.startswith("~/"):
+        home = home_dir()
+        if home is None:
+            log("no home directory in this environment; BRIDGE_CWD stays %s" % value)
+            return value
+        return str(home) if value == "~" else str(home / value[2:])
     return value.rstrip("/") or "/"
 
 
