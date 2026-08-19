@@ -52,7 +52,7 @@ if grep -qE '^(width|height) =' "$root/herdr-plugin.toml"; then
 fi
 
 # Real herdr 0.7.5 shapes, trimmed of fields these helpers ignore.
-created_json='{"id":"cli:workspace:create","result":{"root_pane":{"agent_status":"unknown","cwd":"/Users/j","pane_id":"w9:p1","scroll":{"viewport_rows":32},"tab_id":"w9:t1","workspace_id":"w9"},"tab":{"label":"1","tab_id":"w9:t1","workspace_id":"w9"},"type":"workspace_created","workspace":{"active_tab_id":"w9:t1","label":"💡 lantern","workspace_id":"w9"}}}'
+created_json='{"id":"cli:workspace:create","result":{"root_pane":{"agent_status":"unknown","cwd":"/Users/j","pane_id":"w9:p1","scroll":{"viewport_rows":32},"tab_id":"w9:t1","workspace_id":"w9"},"tab":{"label":"1","tab_id":"w9:t1","workspace_id":"w9"},"type":"workspace_created","workspace":{"active_tab_id":"w9:t1","label":"🔥 lantern","workspace_id":"w9"}}}'
 opened_json='{"id":"cli:plugin","result":{"plugin_pane":{"entrypoint":"helper","pane":{"agent_status":"unknown","cwd":"/state/workdir","label":"Lantern","pane_id":"w9:p2","scroll":{"viewport_rows":32},"tab_id":"w9:t2","terminal_id":"term_x","workspace_id":"w9"},"plugin_id":"aigora.lantern"},"type":"plugin_pane_opened"}}'
 
 ws=$(printf '%s' "$created_json" | helper_json_value workspace_id)
@@ -69,18 +69,18 @@ missing=$(printf '%s' '{"result":{}}' | helper_json_value pane_id)
 # The chat is found by pane title, so open.sh and the manifest must agree.
 grep -q 'pane_title=Lantern' "$root/open.sh" || fail "open.sh pane title"
 grep -q '^title = "Lantern"$' "$root/herdr-plugin.toml" || fail "manifest pane title"
-grep -q "workspace_label='💡 lantern'" "$root/open.sh" || fail "open.sh lantern label"
+grep -q "workspace_label='🔥 lantern'" "$root/open.sh" || fail "open.sh lantern label"
 
 fake_ws=$(mktemp -d)
 cat >"$fake_ws/herdr" <<'EOF'
 #!/bin/sh
 if [ "$1" = workspace ] && [ "$2" = list ]; then
-    printf '%s\n' '{"result":{"workspaces":[{"label":"love-spark","workspace_id":"w1"},{"label":"lantern","workspace_id":"w5"},{"label":"💡 lantern","workspace_id":"w7"}]}}'
+    printf '%s\n' '{"result":{"workspaces":[{"label":"love-spark","workspace_id":"w1"},{"label":"lantern","workspace_id":"w5"},{"label":"🔥 lantern","workspace_id":"w7"}]}}'
     exit 0
 fi
 if [ "$1" = workspace ] && [ "$2" = get ]; then
     [ "$3" = w7 ] || exit 1
-    printf '%s\n' '{"result":{"type":"workspace_info","workspace":{"active_tab_id":"w7:t2","label":"💡 lantern","workspace_id":"w7"}}}'
+    printf '%s\n' '{"result":{"type":"workspace_info","workspace":{"active_tab_id":"w7:t2","label":"🔥 lantern","workspace_id":"w7"}}}'
     exit 0
 fi
 if [ "$1" = pane ] && [ "$2" = get ]; then
@@ -91,10 +91,10 @@ fi
 exit 1
 EOF
 chmod +x "$fake_ws/herdr"
-found=$(helper_workspace_id_by_label "$fake_ws/herdr" '💡 lantern')
+found=$(helper_workspace_id_by_label "$fake_ws/herdr" '🔥 lantern')
 [ "$found" = w7 ] || fail "workspace by lantern label ($found)"
 [ -z "$(helper_workspace_id_by_label "$fake_ws/herdr" nope)" ] || fail "unknown label"
-[ "$(helper_workspace_label "$fake_ws/herdr" w7)" = '💡 lantern' ] ||
+[ "$(helper_workspace_label "$fake_ws/herdr" w7)" = '🔥 lantern' ] ||
     fail "workspace label"
 if helper_workspace_label "$fake_ws/herdr" w8 >/dev/null 2>&1; then
     fail "stale workspace id"
@@ -185,7 +185,7 @@ logged() { grep -qF -e "$1" "$STUB_LOG"; }
 reset_open
 run_open || fail "first open"
 logged 'workspace create --cwd' || fail "first open should create a workspace"
-logged '--label 💡 lantern' || fail "first open should use the lantern label"
+logged '--label 🔥 lantern' || fail "first open should use the lantern label"
 logged 'plugin pane open --plugin aigora.lantern --entrypoint helper --placement tab --workspace w9' ||
     fail "first open should seat a tab in the new workspace"
 logged 'tab rename w9:t2 field' || fail "first open should name the tab"
@@ -220,7 +220,7 @@ STUB_WS_LABEL=
 
 # An existing lantern workspace is reused, and no shell tab is closed.
 reset_open
-STUB_WS_EXTRA=',{"label":"💡 lantern","workspace_id":"w7"}'
+STUB_WS_EXTRA=',{"label":"🔥 lantern","workspace_id":"w7"}'
 STUB_OPEN_WS=w7
 run_open || fail "reuse by label"
 if logged 'workspace create'; then fail "label match must not create a workspace"; fi
@@ -259,7 +259,7 @@ STUB_WS_EXTRA=
 
 # A chat already running in that workspace is focused, not duplicated.
 reset_open
-STUB_WS_EXTRA=',{"label":"💡 lantern","workspace_id":"w7"}'
+STUB_WS_EXTRA=',{"label":"🔥 lantern","workspace_id":"w7"}'
 STUB_PANE_EXTRA=',{"agent_status":"idle","cwd":"/state","label":"Lantern","pane_id":"w7:p2","scroll":{"viewport_rows":32},"tab_id":"w7:t2","workspace_id":"w7"}'
 STUB_PANE=w7:p2
 run_open || fail "duplicate guard"
