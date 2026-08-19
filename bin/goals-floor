@@ -42,6 +42,11 @@ def run_herdr(herdr: str, args: list[str], timeout: float) -> str:
             check=False,
             capture_output=True,
             text=True,
+            # Pane text carries box drawing, arrows, and emoji. text=True would
+            # otherwise decode with the locale encoding, which is a Windows
+            # code page, and one stray byte would end the snapshot.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -196,6 +201,12 @@ def main() -> int:
     parser.add_argument("--lines", type=int, default=40)
     parser.add_argument("--timeout", type=float, default=5.0)
     args = parser.parse_args()
+    # launch.sh redirects this into a file, and on Windows a redirected stream
+    # gets the locale code page. Pane titles carry braille spinners, box
+    # drawing, and emoji, none of which cp1252 can encode, and the failure
+    # would arrive as an empty snapshot rather than an error.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     herdr = resolve_herdr(args.herdr)
     if not herdr:
         print("herd_detected 0")

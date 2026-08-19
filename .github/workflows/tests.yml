@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    # The plugin claims linux, macos, and windows. Prove all three.
+    # On the Windows runner `shell: bash` is Git Bash, which is the same
+    # interpreter Herdr uses there for `sh open.sh` and `sh launch.sh`.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show the interpreter and Python
+        shell: bash
+        run: |
+          uname -a
+          sh --version 2>/dev/null | head -1 || true
+          command -v python3 python py || true
+      - name: Smoke test
+        shell: bash
+        run: sh tests/smoke.sh

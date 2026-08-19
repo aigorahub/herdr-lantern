@@ -21,8 +21,12 @@ err=$(mktemp)
 fake=
 fake_prompt=
 fake_ws=
+fake_cmd=
+fake_py=
+fake_agents=
+argv_dir=
 open_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -44,6 +48,78 @@ fi
 [ "$(helper_expand_tilde '~')" = "$HOME" ] || fail "expand ~"
 [ "$(helper_normalize_root '~/')" = "$HOME" ] || fail "normalize ~/"
 [ "$(helper_normalize_root "$HOME/")" = "$HOME" ] || fail "normalize HOME/"
+
+# helper_native_path is what herdr gets. Identity without cygpath, a
+# drive-letter path with it.
+native_home=$(helper_native_path "$HOME")
+if command -v cygpath >/dev/null 2>&1; then
+    case $native_home in
+    [A-Za-z]:\\*) ;;
+    *) fail "helper_native_path should produce a Windows path (got $native_home)" ;;
+    esac
+else
+    [ "$native_home" = "$HOME" ] ||
+        fail "helper_native_path should be identity here (got $native_home)"
+fi
+# helper_posix_path exists because Herdr on Windows reports the plugin root as
+# an extended-length path. The shell reads \\?\C:\path, but appending a child
+# gives a form Windows rejects, and the Python snapshot then fails silently.
+if command -v cygpath >/dev/null 2>&1; then
+    posix_root=$(helper_posix_path '\\?\C:\Claude\herdr-lantern')
+    case $posix_root in
+    /*) ;;
+    *) fail "helper_posix_path should return a POSIX path (got $posix_root)" ;;
+    esac
+    case $posix_root in
+    *'\\?\'*) fail "helper_posix_path left the extended-length prefix" ;;
+    esac
+else
+    [ "$(helper_posix_path "$HOME")" = "$HOME" ] ||
+        fail "helper_posix_path should be identity here"
+fi
+grep -q 'plugin_root=$(helper_posix_path "$plugin_root")' "$root/launch.sh" ||
+    fail "launch.sh should normalise the plugin root"
+grep -q 'plugin_root=$(helper_posix_path "$plugin_root")' "$root/open.sh" ||
+    fail "open.sh should normalise the plugin root"
+
+# launch.sh tests the search root with [ -d ], so that one must stay POSIX.
+[ "$(helper_normalize_root "$HOME")" = "$HOME" ] ||
+    fail "helper_normalize_root must not convert the path form"
+grep -q 'helper_native_path "$HOME"' "$root/open.sh" ||
+    fail "open.sh should hand herdr the native path form"
+
+# helper_resolve_real_herdr has to cope with the Windows form of
+# HERDR_BIN_PATH, which arrives with backslashes and a drive letter.
+resolve_dir=$(mktemp -d)
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$resolve_dir/herdr"
+chmod +x "$resolve_dir/herdr"
+if command -v cygpath >/dev/null 2>&1; then
+    win_herdr=$(cygpath -w "$resolve_dir/herdr")
+    got=$(HERDR_REAL= HERDR_BIN_PATH="$win_herdr" \
+        helper_resolve_real_herdr "$root/bin") ||
+        fail "resolve should accept a Windows HERDR_BIN_PATH"
+    [ -x "$got" ] || fail "resolved herdr is not runnable (got $got)"
+fi
+# The plugin's own wrapper must never be returned as the real binary.
+got=$(HERDR_REAL= HERDR_BIN_PATH="$root/bin/herdr" \
+    helper_resolve_real_herdr "$root/bin") || got=
+case $got in
+"$root/bin/herdr")
+    fail "resolve returned the plugin wrapper as the real herdr"
+    ;;
+esac
+rm -rf "$resolve_dir"
+
+# The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
+# WSL launcher in WindowsApps, so that call would start Linux. Herdr runs these
+# files with `sh`, and nothing here needs more than that.
+if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" "$root/lib.sh" "$root/bin/herdr" |
+    grep -qE '(^|[^A-Za-z_/-])bash([^A-Za-z_]|$)'; then
+    fail "plugin shell code must not invoke bare bash"
+fi
+if grep -q 'WindowsApps' "$root/lib.sh"; then
+    fail "lib.sh must not put WindowsApps on PATH"
+fi
 grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 
 grep -q '^placement = "tab"$' "$root/herdr-plugin.toml" || fail "pane placement is tab"
@@ -185,6 +261,10 @@ logged() { grep -qF -e "$1" "$STUB_LOG"; }
 reset_open
 run_open || fail "first open"
 logged 'workspace create --cwd' || fail "first open should create a workspace"
+# The exact form matters. herdr is native, so on Windows this has to be
+# C:\Users\name and not the /c/Users/name that Git Bash reports as $HOME.
+logged "workspace create --cwd $(helper_native_path "$HOME")" ||
+    fail "first open should pass the native path form to herdr"
 logged '--label 🔥 lantern' || fail "first open should use the lantern label"
 logged 'plugin pane open --plugin aigora.lantern --entrypoint helper --placement tab --workspace w9' ||
     fail "first open should seat a tab in the new workspace"
@@ -241,9 +321,15 @@ STUB_FOCUS_FAIL=
 STUB_PANE=
 
 # A state directory that cannot be locked is an error, not silence.
+# Windows ignores the permission bits on a directory, so chmod cannot set the
+# precondition there. Probe for that instead of failing on it, and keep the
+# assertion wherever the bits are real.
 reset_open
 chmod 500 "$open_state"
-if run_open; then
+if mkdir "$open_state/probe" 2>/dev/null; then
+    rmdir "$open_state/probe"
+    printf 'SKIP: platform ignores directory permission bits (unlockable state dir)\n'
+elif run_open; then
     chmod 700 "$open_state"
     fail "an unlockable state dir should exit nonzero"
 fi
@@ -303,11 +389,41 @@ if [ -s "$STUB_LOG" ]; then
 fi
 rmdir "$open_state/open.lock"
 
-detected=$(helper_detect_agent) || fail "no helper agent on PATH"
-case $detected in
-devin | agent | claude | codex | grok) ;;
-*) fail "detect returned $detected" ;;
-esac
+# helper_detect_agent picks the first of agent, devin, claude, codex, grok on
+# PATH. This used to assert that one of them was installed on the machine
+# running the suite, which is a fact about the machine and not about the code:
+# it can never hold on a CI runner or in a bare container. Test the order
+# against a PATH the test controls, which also covers preference, something the
+# old assertion never did.
+fake_agents=$(mktemp -d)
+for stub_agent in claude codex; do
+    printf '%s\n' '#!/bin/sh' 'exit 0' >"$fake_agents/$stub_agent"
+    chmod +x "$fake_agents/$stub_agent"
+done
+picked=$(PATH="$fake_agents"; export PATH; helper_detect_agent) ||
+    fail "detect should find a stub on a controlled PATH"
+[ "$picked" = claude ] || fail "detect should prefer claude over codex (got $picked)"
+
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$fake_agents/agent"
+chmod +x "$fake_agents/agent"
+picked=$(PATH="$fake_agents"; export PATH; helper_detect_agent) ||
+    fail "detect should still find a stub"
+[ "$picked" = agent ] || fail "detect should prefer agent first (got $picked)"
+
+empty_agents=$(mktemp -d)
+if picked=$(PATH="$empty_agents"; export PATH; helper_detect_agent); then
+    fail "detect should fail when nothing is on PATH (got $picked)"
+fi
+rm -rf "$fake_agents" "$empty_agents"
+fake_agents=
+
+# The real machine is reported, never asserted. launch.sh is where a missing
+# CLI becomes an error the user can read.
+if detected=$(helper_detect_agent); then
+    printf 'note: helper CLI on this machine: %s\n' "$detected"
+else
+    printf 'note: no helper CLI on PATH here\n'
+fi
 
 export HERDR_REAL=/bin/echo
 export HERDR_HELPER_OK=
@@ -359,29 +475,286 @@ printf '%s\n' "$out" | grep -q 'agent wait w1:p1' ||
 unset HERDR_REAL
 fake_prompt=
 
-python3 "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
-python3 -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" || fail "py_compile"
+# Windows: bin/herdr has no file extension, so a native caller resolving
+# `herdr` on PATH skips it under PATHEXT and reaches the real herdr.exe. The
+# .cmd sibling is what that caller finds instead. Nothing here runs elsewhere.
+#
+# `cmd.exe //c` is not a typo. MSYS rewrites a lone `/c` argument into the C:
+# drive path before cmd.exe sees it, and cmd.exe then starts interactively.
+# The doubled slash survives the rewrite as a single one.
+if [ -f "$root/bin/herdr.cmd" ] &&
+    command -v cygpath >/dev/null 2>&1 &&
+    command -v cmd.exe >/dev/null 2>&1; then
+    win_cmd=$(cygpath -w "$root/bin/herdr.cmd")
+
+    fake_cmd=$(mktemp -d)
+    cat >"$fake_cmd/herdr" <<'EOF'
+#!/bin/sh
+printf 'real herdr %s\n' "$*"
+exit 7
+EOF
+    chmod +x "$fake_cmd/herdr"
+    export HERDR_REAL="$fake_cmd/herdr"
+
+    # A mutating verb is blocked, and the block reaches the caller as a
+    # non-zero status with the hint on stderr.
+    export HERDR_HELPER_OK=
+    if cmd.exe //c "$win_cmd" workspace create --cwd C:\\Temp --label x \
+        >/dev/null 2>"$err"; then
+        fail "herdr.cmd mutate without OK should fail"
+    fi
+    grep -q HERDR_HELPER_OK "$err" || fail "herdr.cmd blocked hint missing"
+    if grep -q 'real herdr' "$err"; then
+        fail "herdr.cmd blocked path reached the real herdr"
+    fi
+
+    # An inspect verb passes through, and the wrapper's exit code survives the
+    # trip through cmd.exe. The stub exits 7 so a swallowed code is visible.
+    cmd_status=0
+    cmd.exe //c "$win_cmd" agent list >"$tmp" 2>/dev/null || cmd_status=$?
+    [ "$cmd_status" = 7 ] ||
+        fail "herdr.cmd should return the wrapper exit code (got $cmd_status)"
+    grep -q 'real herdr agent list' "$tmp" ||
+        fail "herdr.cmd inspect did not reach the real herdr"
+
+    # What survives cmd.exe, measured rather than assumed. A lone percent and
+    # an ampersand inside a quoted argument both arrive intact. A %NAME% that
+    # names a defined variable does not, and no shim can stop that: cmd.exe
+    # expands it while parsing its own command line, before the batch file
+    # runs. Agents under Lantern call the POSIX wrapper through Git Bash,
+    # which is unaffected.
+    cmd.exe //c "$win_cmd" agent list "50% off & more" >"$tmp" 2>/dev/null || true
+    grep -q '50% off & more' "$tmp" ||
+        fail "herdr.cmd mangled a percent or ampersand in a quoted argument"
+
+    # With no sh.exe anywhere, it refuses. It must never fall through to the
+    # real herdr, because that is the gate-free path this file exists to close.
+    # The scrubbed environment goes in its own batch file. Passing it as one
+    # long `cmd.exe //c "set ... && ..."` string does not survive: MSYS escapes
+    # the embedded quotes to \" on the way to a native program, and cmd.exe
+    # reports the command as unrecognised.
+    nowhere=$win_cmd.nowhere
+    no_sh_cmd=$fake_cmd/no-sh.cmd
+    cat >"$no_sh_cmd" <<EOF
+@echo off
+set "PATH=C:\\Windows\\System32"
+set "ProgramFiles=$nowhere"
+set "ProgramFiles(x86)=$nowhere"
+set "LOCALAPPDATA=$nowhere"
+call "$win_cmd" workspace create --cwd C:\\Temp --label x
+exit /b %ERRORLEVEL%
+EOF
+    if cmd.exe //c "$(cygpath -w "$no_sh_cmd")" >"$tmp" 2>"$err"; then
+        fail "herdr.cmd without sh.exe should fail"
+    fi
+    grep -q 'refusing to run herdr' "$err" ||
+        fail "herdr.cmd without sh.exe should say why"
+    if grep -q 'real herdr' "$tmp" "$err"; then
+        fail "herdr.cmd without sh.exe must not reach the real herdr"
+    fi
+
+    # Git Bash still matches the exact name, so the POSIX wrapper stays in
+    # front of the agent's own calls.
+    resolved=$(PATH="$root/bin:$PATH" command -v herdr)
+    [ "$resolved" = "$root/bin/herdr" ] ||
+        fail "Git Bash should resolve herdr to the POSIX wrapper (got $resolved)"
+
+    unset HERDR_REAL
+    export HERDR_HELPER_OK=
+    rm -rf "$fake_cmd"
+    fake_cmd=
+    printf 'ok: windows herdr.cmd gate\n'
+fi
+
+smoke_python=$(helper_detect_python) || fail "no working python 3 on this machine"
+# shellcheck disable=SC2086
+$smoke_python -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' ||
+    fail "helper_detect_python returned something that is not python 3"
+
+# Windows ships a zero-byte Microsoft Store alias named python3. It satisfies
+# `command -v` and then opens the Store. Detection must refuse it, either by
+# choosing another interpreter or by failing outright.
+#
+# The stub needs the .exe suffix on Windows. MSYS decides that a file is
+# executable from its extension or its first bytes, so an extensionless empty
+# file is not executable there and would never shadow anything. The real Store
+# alias is python3.exe, which is exactly why it fools `command -v`.
+fake_py=$(mktemp -d)
+if command -v cygpath >/dev/null 2>&1; then
+    stub_python=$fake_py/python3.exe
+else
+    stub_python=$fake_py/python3
+fi
+: >"$stub_python"
+chmod +x "$stub_python"
+stub_pick=$(PATH="$fake_py:$PATH"; export PATH; helper_detect_python) || stub_pick=
+if [ "$stub_pick" = python3 ]; then
+    fail "helper_detect_python accepted a zero-byte python3 stub"
+fi
+rm -rf "$fake_py"
+fake_py=
+
+# The Windows launcher branch. `py` is not a plain file on PATH the way an
+# interpreter is, so it gets its own check, and it is the only fallback left
+# when a Store alias shadows python3 and no python exists.
+if command -v py >/dev/null 2>&1; then
+    launcher_dir=$(dirname "$(command -v py)")
+    picked=$(PATH="$launcher_dir"; export PATH; helper_detect_python) || picked=
+    [ "$picked" = "py -3" ] ||
+        fail "detection should fall back to the py launcher (got $picked)"
+    # shellcheck disable=SC2086
+    $picked -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' ||
+        fail "the py launcher fallback returned something that is not python 3"
+fi
+
+# shellcheck disable=SC2086
+$smoke_python "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
+# shellcheck disable=SC2086
+$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" || fail "py_compile"
+
+grep -q 'helper_detect_python' "$root/launch.sh" ||
+    fail "launch.sh should use the detected interpreter"
+if grep -qE '^[^#]*\bpython3 "\$plugin_root' "$root/launch.sh"; then
+    fail "launch.sh still calls python3 directly"
+fi
 
 fake=$(mktemp -d)
-cat >"$fake/herdr" <<'EOF'
+printf '%s\n' \
+    '{"result":{"agents":[{"pane_id":"w1:p1","agent":"claude","agent_status":"done","cwd":"/tmp/demo","terminal_title_stripped":"Fix login"}]}}' \
+    >"$fake/list.json"
+# Non-ASCII on purpose. goals-floor reads real pane text, which carries box
+# drawing, arrows, and emoji, and it must not decode that with a code page.
+printf '%s\n' \
+    '※ recap: Goal: fix login. Next: your go-ahead to merge #12.' \
+    '◎ /goal active (2h)' \
+    >"$fake/read.txt"
+
+# goals-floor runs the herdr binary itself, so on Windows the stub has to be a
+# native batch file: Python there cannot execute a script by its shebang. Both
+# stubs just print the fixtures above, so neither has to quote JSON or Unicode.
+if command -v cygpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+    fake_herdr=$fake/herdr.cmd
+    {
+        printf '@echo off\r\n'
+        printf 'if "%%2"=="list" (\r\n'
+        printf '  type "%s"\r\n' "$(cygpath -w "$fake/list.json")"
+        printf '  exit /b 0\r\n'
+        printf ')\r\n'
+        printf 'if "%%2"=="read" (\r\n'
+        printf '  type "%s"\r\n' "$(cygpath -w "$fake/read.txt")"
+        printf '  exit /b 0\r\n'
+        printf ')\r\n'
+        printf 'exit /b 1\r\n'
+    } >"$fake_herdr"
+    fake_herdr_arg=$(cygpath -w "$fake_herdr")
+else
+    fake_herdr=$fake/herdr
+    cat >"$fake_herdr" <<EOF
 #!/bin/sh
-if [ "$1" = agent ] && [ "$2" = list ]; then
-    cat <<'JSON'
-{"result":{"agents":[{"pane_id":"w1:p1","agent":"claude","agent_status":"done","cwd":"/tmp/demo","terminal_title_stripped":"Fix login"}]}}
-JSON
+if [ "\$1" = agent ] && [ "\$2" = list ]; then
+    cat "$fake/list.json"
     exit 0
 fi
-if [ "$1" = agent ] && [ "$2" = read ]; then
-    printf '%s\n' '※ recap: Goal: fix login. Next: your go-ahead to merge #12.'
-    printf '%s\n' '◎ /goal active (2h)'
+if [ "\$1" = agent ] && [ "\$2" = read ]; then
+    cat "$fake/read.txt"
     exit 0
 fi
 exit 1
 EOF
-chmod +x "$fake/herdr"
-goals=$(python3 "$root/bin/goals-floor" --herdr "$fake/herdr") || fail "goals-floor"
+    chmod +x "$fake_herdr"
+    fake_herdr_arg=$fake_herdr
+fi
+# shellcheck disable=SC2086
+goals=$($smoke_python "$root/bin/goals-floor" --herdr "$fake_herdr_arg") || fail "goals-floor"
 printf '%s\n' "$goals" | grep -q 'herd_detected 1' || fail "goals-floor herd_detected"
 printf '%s\n' "$goals" | grep -q 'NEEDS YOU' || fail "goals-floor needs you"
 printf '%s\n' "$goals" | grep -q '/goal 2h' || fail "goals-floor goal age"
+
+# launch.sh builds a different command line for each helper CLI, and until now
+# nothing checked any of them. Only `claude` exists on the machine this was
+# ported on, so Cursor agent, Devin, Codex, and Grok had no coverage at all.
+#
+# This runs launch.sh for real against stub binaries. HOME points at an empty
+# directory so helper_extend_user_path cannot find a genuine CLI, and
+# HERDR_BIN_PATH points at a stub so no live herdr is touched.
+argv_dir=$(mktemp -d)
+argv_home=$argv_dir/home
+mkdir -p "$argv_home" "$argv_dir/bin" "$argv_dir/config" "$argv_dir/state"
+for stub_bin in agent devin claude codex grok herdr; do
+    printf '%s\n' '#!/bin/sh' 'printf "ARGV:"' 'for a in "$@"; do printf " [%s]" "$a"; done' \
+        'printf "\n"' 'exit 0' >"$argv_dir/bin/$stub_bin"
+    chmod +x "$argv_dir/bin/$stub_bin"
+done
+
+run_launch() {
+    # $1 is the helper.conf body. Prints the stub's ARGV line.
+    printf '%s\n' "$1" >"$argv_dir/config/helper.conf"
+    rm -rf "$argv_dir/state"
+    mkdir -p "$argv_dir/state"
+    env -i \
+        HOME="$argv_home" \
+        PATH="$argv_dir/bin:/usr/bin:/bin" \
+        HERDR_PLUGIN_ROOT="$root" \
+        HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
+        HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
+        HERDR_BIN_PATH="$argv_dir/bin/herdr" \
+        sh "$root/launch.sh" </dev/null 2>/dev/null |
+        grep '^ARGV:' | tail -1
+}
+
+argv_is() {
+    # $1 label, $2 conf body, $3 expected leading arguments
+    _argv_got=$(run_launch "$2")
+    case $_argv_got in
+    "ARGV:$3"*) ;;
+    *)
+        printf 'want prefix: ARGV:%s\n' "$3" >&2
+        printf 'got:         %s\n' "$_argv_got" >&2
+        fail "launch.sh argv for $1"
+        ;;
+    esac
+}
+
+argv_is "claude" 'HELPER_AGENT="claude"
+HELPER_MODEL="opus"
+HELPER_EFFORT="high"
+HELPER_CWD="~"' ' [--model] [opus] [--effort] [high]'
+
+argv_is "codex" 'HELPER_AGENT="codex"
+HELPER_MODEL="gpt-x"
+HELPER_EFFORT="high"
+HELPER_CWD="~"' ' [--model] [gpt-x] [--config] [model_reasoning_effort="high"]'
+
+argv_is "grok" 'HELPER_AGENT="grok"
+HELPER_MODEL="grok-x"
+HELPER_EFFORT="high"
+HELPER_CWD="~"' ' [--model] [grok-x] [--reasoning-effort] [high] [--no-subagents]'
+
+# Devin rejects --model on the free tier, so launch.sh drops it on purpose.
+argv_is "devin" 'HELPER_AGENT="devin"
+HELPER_MODEL="ignored"
+HELPER_PERMISSION="smart"
+HELPER_CWD="~"' ' [--permission-mode] [smart]'
+
+# Cursor agent: an empty model means the documented default, and smart maps to
+# --auto-review. The binary is called agent, whichever name the config used.
+argv_is "cursor agent" 'HELPER_AGENT="agent"
+HELPER_MODEL=""
+HELPER_PERMISSION="smart"
+HELPER_CWD="~"' ' [--model] [cursor-grok-4.6-high-fast] [--trust] [--sandbox] [disabled] [--auto-review]'
+
+argv_is "cursor alias" 'HELPER_AGENT="cursor"
+HELPER_MODEL="m"
+HELPER_PERMISSION="dangerous"
+HELPER_CWD="~"' ' [--model] [m] [--trust] [--sandbox] [disabled] [--force]'
+
+argv_is "extra args" 'HELPER_AGENT="claude"
+HELPER_MODEL=""
+HELPER_EXTRA_ARGS="--verbose --foo"
+HELPER_CWD="~"' ' [--verbose] [--foo]'
+
+rm -rf "$argv_dir"
+argv_dir=
+printf 'ok: launch.sh argv for every helper CLI\n'
 
 printf 'ok\n'

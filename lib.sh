@@ -104,6 +104,77 @@ helper_detect_agent() {
     return 1
 }
 
+helper_detect_python() {
+    # Prints a working Python 3 command, or fails.
+    #
+    # Windows keeps a zero-byte Microsoft Store alias named python3 on PATH.
+    # It satisfies `command -v` and then opens the Store instead of running,
+    # so a name on PATH proves nothing. A candidate is accepted only when the
+    # file has content and the interpreter reports major version 3.
+    #
+    # Known limit: a shadowing stub hides a real python3 further along PATH.
+    # The fallbacks below cover that on Windows, where the stub lives.
+    for _helper_py in python3 python; do
+        _helper_py_path=$(command -v "$_helper_py" 2>/dev/null) || continue
+        [ -s "$_helper_py_path" ] || continue
+        if "$_helper_py" -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' \
+            >/dev/null 2>&1; then
+            printf '%s' "$_helper_py"
+            return 0
+        fi
+    done
+    # The Windows launcher picks the interpreter itself and is not a plain
+    # file on PATH, so it gets its own check. Two words on purpose.
+    if command -v py >/dev/null 2>&1; then
+        if py -3 -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' \
+            >/dev/null 2>&1; then
+            printf '%s' 'py -3'
+            return 0
+        fi
+    fi
+    return 1
+}
+
+helper_posix_path() {
+    # Prints a path that both this shell and the programs it starts can use.
+    #
+    # Herdr on Windows reports HERDR_PLUGIN_ROOT as an extended-length path,
+    # \\?\C:\path. MSYS reads that happily, so every shell test passes, but
+    # appending a child gives \\?\C:\path/bin/goals-floor, and Windows does not
+    # accept a forward slash after the \\?\ prefix. Python answers OSError 22
+    # and, because the snapshot sends stderr to /dev/null, the only symptom is
+    # an empty file. MSYS converts an ordinary POSIX path correctly on the way
+    # to a native program, so convert once here and hand that form on.
+    #
+    # Identity wherever cygpath does not exist.
+    if command -v cygpath >/dev/null 2>&1; then
+        if _helper_posix=$(cygpath -u "$1" 2>/dev/null) && [ -n "$_helper_posix" ]; then
+            printf '%s' "$_helper_posix"
+            return 0
+        fi
+    fi
+    printf '%s' "$1"
+}
+
+helper_native_path() {
+    # Prints a path in the form the native herdr binary expects.
+    #
+    # Under Git Bash $HOME is /c/Users/name and herdr.exe wants C:\Users\name.
+    # MSYS converts most arguments on its way to a native program, but that is
+    # a heuristic on the argument text, and --cwd decides where a workspace is
+    # created. Convert it here instead of hoping.
+    #
+    # Identity wherever cygpath does not exist, which is everywhere but
+    # Windows, so macOS and Linux are untouched.
+    if command -v cygpath >/dev/null 2>&1; then
+        if _helper_native=$(cygpath -w "$1" 2>/dev/null) && [ -n "$_helper_native" ]; then
+            printf '%s' "$_helper_native"
+            return 0
+        fi
+    fi
+    printf '%s' "$1"
+}
+
 helper_expand_tilde() {
     _helper_path=$1
     case $_helper_path in

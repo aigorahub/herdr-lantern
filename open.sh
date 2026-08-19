@@ -14,6 +14,8 @@ set -eu
 plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
 # shellcheck disable=SC1091
 . "$plugin_root/lib.sh"
+# Herdr on Windows reports this as \\?\C:\path. See helper_posix_path.
+plugin_root=$(helper_posix_path "$plugin_root")
 
 # Sidebar naming. The workspace carries the lantern; the tab is the chat.
 # pane_title must match [[panes]].title in herdr-plugin.toml, because
@@ -97,7 +99,9 @@ fi
 # 4. Still nothing: make the lantern its own workspace, at home.
 root_pane=
 if [ -z "$workspace" ]; then
-    created=$("$herdr" workspace create --cwd "$HOME" \
+    # herdr is a native binary. On Windows it wants C:\Users\name, not the
+    # /c/Users/name that Git Bash hands out as $HOME.
+    created=$("$herdr" workspace create --cwd "$(helper_native_path "$HOME")" \
         --label "$workspace_label" --no-focus) ||
         die "could not create the lantern workspace"
     workspace=$(printf '%s' "$created" | helper_json_value workspace_id)
