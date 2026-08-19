@@ -14,6 +14,8 @@ set -eu
 plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
 # shellcheck disable=SC1091
 . "$plugin_root/lib.sh"
+# Herdr on Windows reports this as \\?\C:\path. See helper_posix_path.
+plugin_root=$(helper_posix_path "$plugin_root")
 
 # Sidebar naming. The workspace carries the lantern; the tab is the chat.
 # pane_title must match [[panes]].title in herdr-plugin.toml, because

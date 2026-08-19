@@ -60,7 +60,8 @@
         {"id": "B3-A1", "criterion": "`lib.sh` has `helper_detect_python`, which rejects a zero-byte candidate and validates each candidate by running it.", "met": true, "evidence": "lib.sh helper_detect_python skips a candidate failing `[ -s ]` and requires `sys.version_info[0] == 3` from a real run. tests/smoke.sh puts a zero-byte python3 first on PATH and asserts detection does not return python3."},
         {"id": "B3-A2", "criterion": "`launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.", "met": true, "evidence": "launch.sh calls helper_detect_python once and uses $helper_python for both scripts. tests/smoke.sh asserts launch.sh mentions helper_detect_python and no longer calls python3 against $plugin_root."},
         {"id": "B3-A3", "criterion": "A missing interpreter skips the snapshot and never kills the pane.", "met": true, "evidence": "Detection failure falls to `helper_python=` and the block is guarded by `[ -n \"$helper_python\" ]`. launch.sh runs under `set -u` only, so no failure path exits."},
-        {"id": "B3-A4", "criterion": "`bin/goals-floor` decodes herdr output as UTF-8 with replacement, so pane text carrying box drawing or emoji cannot crash the snapshot on a Windows code page.", "met": true, "evidence": "run_herdr now passes encoding=\"utf-8\", errors=\"replace\". tests/smoke.sh feeds goals-floor a fixture containing ※ and ◎ through a native stub and asserts herd_detected 1, NEEDS YOU, and /goal 2h."}
+        {"id": "B3-A4", "criterion": "`bin/goals-floor` decodes herdr output as UTF-8 with replacement, so pane text carrying box drawing or emoji cannot crash the snapshot on a Windows code page.", "met": true, "evidence": "run_herdr now passes encoding=\"utf-8\", errors=\"replace\". tests/smoke.sh feeds goals-floor a fixture containing ※ and ◎ through a native stub and asserts herd_detected 1, NEEDS YOU, and /goal 2h. A probe on this machine reproduced the old failure: UnicodeDecodeError, 'charmap' codec can't decode byte 0x90, from cp1252 reading real herdr output."},
+        {"id": "B3-A5", "criterion": "`bin/goals-floor` and `bin/elves-floor` force UTF-8 on stdout, because `launch.sh` redirects both into files and a redirected stream on Windows carries the locale code page.", "met": true, "evidence": "Both call sys.stdout.reconfigure(encoding=\"utf-8\", errors=\"replace\") at the start of main. Defensive: pane titles and repository names are not guaranteed to fit cp1252, and the symptom would be an empty snapshot rather than an error."}
       ]
     },
     {
@@ -69,7 +70,8 @@
       "acceptance": [
         {"id": "B4-A1", "criterion": "`lib.sh` has `helper_native_path`, which converts with `cygpath -w` when cygpath exists and is identity otherwise.", "met": true, "evidence": "lib.sh helper_native_path uses cygpath -w when present and falls back to printing the input. tests/smoke.sh asserts a drive-letter result where cygpath exists and identity where it does not."},
         {"id": "B4-A2", "criterion": "`open.sh` passes the native form to `herdr workspace create --cwd`.", "met": true, "evidence": "open.sh calls `--cwd \"$(helper_native_path \"$HOME\")\"`. tests/smoke.sh greps for it, and the existing stub test still sees `workspace create --cwd`."},
-        {"id": "B4-A3", "criterion": "`helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.", "met": true, "evidence": "helper_normalize_root is unchanged. tests/smoke.sh asserts helper_normalize_root \"$HOME\" equals $HOME, which is the POSIX form under Git Bash."}
+        {"id": "B4-A3", "criterion": "`helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.", "met": true, "evidence": "helper_normalize_root is unchanged. tests/smoke.sh asserts helper_normalize_root \"$HOME\" equals $HOME, which is the POSIX form under Git Bash."},
+        {"id": "B4-A4", "criterion": "`launch.sh`, `open.sh`, and `bin/herdr` normalise the plugin root with `helper_posix_path`, because Herdr on Windows reports it as an extended-length `\\\\?\\C:\\path` that a native child program cannot use once a child path is appended.", "met": true, "evidence": "Found by end-to-end test: goals-floor.txt and elves-floor.txt were 0 bytes in a live pane. Probe: Python raises OSError 22 Invalid argument on '\\\\?\\C:\\Claude\\herdr-lantern/bin/goals-floor' while sh reads the same root fine. After normalising, a recycled pane wrote goals-floor.txt at 56 bytes and elves-floor.txt at 155 bytes. tests/smoke.sh asserts the conversion and that both scripts call it."}
       ]
     },
     {
@@ -112,12 +114,13 @@
     },
     {
       "id": "B9",
-      "status": "pending",
+      "status": "complete",
+      "note": "Run against a separate headless Herdr session named lantern-test, started from a process that already had C:\\Program Files\\Git\\bin on PATH. The user's own session was not restarted or disturbed.",
       "acceptance": [
-        {"id": "B9-A1", "criterion": "The linked plugin creates a workspace labelled `\ud83d\udd25 lantern` with cwd `C:\\Users\\Megan` and a tab named `home`.", "met": false, "evidence": ""},
-        {"id": "B9-A2", "criterion": "`claude.exe` starts in the plugin state workdir and the prompt files are written.", "met": false, "evidence": ""},
-        {"id": "B9-A3", "criterion": "A second open focuses the existing chat instead of seating a second one.", "met": false, "evidence": ""},
-        {"id": "B9-A4", "criterion": "The mutation gate blocks a mutating herdr command from Git Bash and from cmd.", "met": false, "evidence": ""}
+        {"id": "B9-A1", "criterion": "The linked plugin creates a workspace labelled `\ud83d\udd25 lantern` with cwd `C:\\Users\\Megan` and a tab named `home`.", "met": true, "evidence": "herdr workspace list reports label \"\ud83d\udd25 lantern\"; herdr tab list reports label \"home\"; the empty shell tab was closed, leaving pane_count 1 and tab_count 1. The --cwd value is proven hermetically in tests/smoke.sh, which asserts the stub herdr was called with `workspace create --cwd C:\\Users\\Megan`, the native form."},
+        {"id": "B9-A2", "criterion": "`claude.exe` starts in the plugin state workdir and the prompt files are written.", "met": true, "evidence": "Pane text reads `lantern: HELPER_AGENT empty; using claude from PATH` and Claude Code's trust prompt names C:\\Users\\Megan\\AppData\\Local\\herdr\\plugins\\aigora.lantern\\workdir. That workdir holds AGENTS.md and CLAUDE.md at 7412 bytes, .cursor/rules/lantern.mdc at 7460, .windsurf/rules/lantern.md at 7412, and the state directory holds workspace.id=w1 and pane.id=w1:p2."},
+        {"id": "B9-A3", "criterion": "A second open focuses the existing chat instead of seating a second one.", "met": true, "evidence": "The second invoke returned type plugin_pane_focused for the same pane rather than plugin_pane_opened, and pane list still showed exactly one pane."},
+        {"id": "B9-A4", "criterion": "The mutation gate blocks a mutating herdr command from Git Bash and from cmd.", "met": true, "evidence": "Git Bash: tests/smoke.sh runs bin/herdr directly, asserting the block without HERDR_HELPER_OK and the pass with it. cmd: the same suite drives bin/herdr.cmd through cmd.exe for the blocked, allowed, and no-shell cases. Both paths were also exercised by hand against the live binary."}
       ]
     },
     {

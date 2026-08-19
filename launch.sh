@@ -16,6 +16,10 @@ die() {
 plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
 # shellcheck disable=SC1091
 . "$plugin_root/lib.sh"
+# Herdr on Windows reports this as \\?\C:\path. The shell copes; the Python
+# snapshot scripts do not, once a child path is appended. Normalise it before
+# anything builds a path from it.
+plugin_root=$(helper_posix_path "$plugin_root")
 
 config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
 [ -n "$config_dir" ] || die "HERDR_PLUGIN_CONFIG_DIR is not set; run this through Herdr"

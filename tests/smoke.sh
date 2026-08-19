@@ -60,6 +60,27 @@ else
     [ "$native_home" = "$HOME" ] ||
         fail "helper_native_path should be identity here (got $native_home)"
 fi
+# helper_posix_path exists because Herdr on Windows reports the plugin root as
+# an extended-length path. The shell reads \\?\C:\path, but appending a child
+# gives a form Windows rejects, and the Python snapshot then fails silently.
+if command -v cygpath >/dev/null 2>&1; then
+    posix_root=$(helper_posix_path '\\?\C:\Claude\herdr-lantern')
+    case $posix_root in
+    /*) ;;
+    *) fail "helper_posix_path should return a POSIX path (got $posix_root)" ;;
+    esac
+    case $posix_root in
+    *'\\?\'*) fail "helper_posix_path left the extended-length prefix" ;;
+    esac
+else
+    [ "$(helper_posix_path "$HOME")" = "$HOME" ] ||
+        fail "helper_posix_path should be identity here"
+fi
+grep -q 'plugin_root=$(helper_posix_path "$plugin_root")' "$root/launch.sh" ||
+    fail "launch.sh should normalise the plugin root"
+grep -q 'plugin_root=$(helper_posix_path "$plugin_root")' "$root/open.sh" ||
+    fail "open.sh should normalise the plugin root"
+
 # launch.sh tests the search root with [ -d ], so that one must stay POSIX.
 [ "$(helper_normalize_root "$HOME")" = "$HOME" ] ||
     fail "helper_normalize_root must not convert the path form"
@@ -239,6 +260,10 @@ logged() { grep -qF -e "$1" "$STUB_LOG"; }
 reset_open
 run_open || fail "first open"
 logged 'workspace create --cwd' || fail "first open should create a workspace"
+# The exact form matters. herdr is native, so on Windows this has to be
+# C:\Users\name and not the /c/Users/name that Git Bash reports as $HOME.
+logged "workspace create --cwd $(helper_native_path "$HOME")" ||
+    fail "first open should pass the native path form to herdr"
 logged '--label 🔥 lantern' || fail "first open should use the lantern label"
 logged 'plugin pane open --plugin aigora.lantern --entrypoint helper --placement tab --workspace w9' ||
     fail "first open should seat a tab in the new workspace"

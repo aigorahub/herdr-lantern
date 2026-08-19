@@ -103,6 +103,7 @@ the Store alias on Windows.
 - [ ] B3-A2: `launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.
 - [ ] B3-A3: A missing interpreter skips the snapshot and never kills the pane.
 - [ ] B3-A4: `bin/goals-floor` decodes herdr output as UTF-8 with replacement, so pane text carrying box drawing or emoji cannot crash the snapshot on a Windows code page.
+- [ ] B3-A5: `bin/goals-floor` and `bin/elves-floor` force UTF-8 on stdout, because `launch.sh` redirects both into files and a redirected stream on Windows carries the locale code page.
 
 ### Batch 4: Path form handed to herdr
 
@@ -114,6 +115,7 @@ and native `herdr.exe` wants `C:\Users\Megan`.
 - [ ] B4-A1: `lib.sh` has `helper_native_path`, which converts with `cygpath -w` when cygpath exists and is identity otherwise.
 - [ ] B4-A2: `open.sh` passes the native form to `herdr workspace create --cwd`.
 - [ ] B4-A3: `helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.
+- [ ] B4-A4: `launch.sh`, `open.sh`, and `bin/herdr` normalise the plugin root with `helper_posix_path`, because Herdr on Windows reports it as an extended-length `\\?\C:\path` that a native child program cannot use once a child path is appended.
 
 ### Batch 5: Real herdr resolution with a Windows HERDR_BIN_PATH
 

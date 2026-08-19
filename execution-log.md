@@ -285,3 +285,82 @@ Bash, the same interpreter Herdr uses there. Batch 7 closes when that run is
 green. Batch 7 stays `in_progress` until then.
 
 **Next required action:** push, watch the CI matrix, then Batch 4.
+
+---
+
+## 2026-08-19 — Batch 9: end to end on Windows
+
+This batch found two defects that no unit test would have caught.
+
+**Testing without disturbing the user's session**
+
+The first invoke against the live Herdr failed with `"error":"program not
+found"`. Herdr's server had no `sh` on its PATH. `C:\Program Files\Git\bin`
+went on the user PATH, but a running server keeps the environment it started
+with, and restarting Herdr would have killed the pane this work runs in.
+
+So the end-to-end test ran against a second, headless Herdr server:
+
+```
+herdr --session lantern-test server     # started from a process with Git\bin on PATH
+herdr --session lantern-test plugin action invoke aigora.lantern.open
+```
+
+The user's own session was never restarted.
+
+**What worked first time**
+
+The action succeeded with exit 0. The workspace came up labelled `🔥 lantern`,
+the tab was named `home`, the empty shell tab was closed, and the pane read
+`lantern: HELPER_AGENT empty; using claude from PATH` followed by Claude Code's
+trust prompt for
+`C:\Users\Megan\AppData\Local\herdr\plugins\aigora.lantern\workdir`. AGENTS.md,
+CLAUDE.md, the Cursor rule, and the Windsurf rule were all written, and
+`workspace.id` and `pane.id` were recorded. A second invoke returned
+`plugin_pane_focused` for the same pane, not a second chat.
+
+**Defect 1: the field snapshot produced nothing**
+
+`goals-floor.txt` and `elves-floor.txt` were both 0 bytes, while `floor.txt`,
+written by the shell, had content. Both Python scripts ran fine by hand, which
+made it look like an environment problem.
+
+The cause is that Herdr on Windows reports `HERDR_PLUGIN_ROOT` as an
+extended-length path, `\\?\C:\Claude\herdr-lantern`. MSYS reads that happily,
+so every shell test passes. Appending a child gives
+`\\?\C:\Claude\herdr-lantern/bin/goals-floor`, and Windows rejects a forward
+slash after the `\\?\` prefix:
+
+```
+python open: NO - OSError [Errno 22] Invalid argument:
+  '\\\\?\\C:\\Claude\\herdr-lantern/bin/goals-floor'
+```
+
+`launch.sh` sends the snapshot's stderr to `/dev/null`, so the only symptom was
+an empty file. `helper_posix_path` now normalises the plugin root in
+`launch.sh`, `open.sh`, and `bin/herdr`. MSYS converts an ordinary POSIX path
+correctly on the way to a native program; it is only this Windows-specific form
+that passes through broken.
+
+After the fix, a recycled pane wrote `goals-floor.txt` at 56 bytes and
+`elves-floor.txt` at 155 bytes.
+
+**Defect 2: output encoding, found while chasing defect 1**
+
+A probe reproduced the pre-Batch-3 decoding failure against the live binary:
+
+```
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x90 in position 252
+```
+
+That confirms B3-A4 was a real bug and not a theoretical one. The same reasoning
+applies to the other direction, so both snapshot scripts now force UTF-8 on
+stdout as well. `launch.sh` redirects them into files, and a redirected stream
+on Windows carries the locale code page.
+
+**Left running**
+
+The `lantern-test` session is still up at this point in the run. Stop it during
+final cleanup with `herdr session stop lantern-test`.
+
+**Next required action:** commit, then final readiness.

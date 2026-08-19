@@ -135,6 +135,27 @@ helper_detect_python() {
     return 1
 }
 
+helper_posix_path() {
+    # Prints a path that both this shell and the programs it starts can use.
+    #
+    # Herdr on Windows reports HERDR_PLUGIN_ROOT as an extended-length path,
+    # \\?\C:\path. MSYS reads that happily, so every shell test passes, but
+    # appending a child gives \\?\C:\path/bin/goals-floor, and Windows does not
+    # accept a forward slash after the \\?\ prefix. Python answers OSError 22
+    # and, because the snapshot sends stderr to /dev/null, the only symptom is
+    # an empty file. MSYS converts an ordinary POSIX path correctly on the way
+    # to a native program, so convert once here and hand that form on.
+    #
+    # Identity wherever cygpath does not exist.
+    if command -v cygpath >/dev/null 2>&1; then
+        if _helper_posix=$(cygpath -u "$1" 2>/dev/null) && [ -n "$_helper_posix" ]; then
+            printf '%s' "$_helper_posix"
+            return 0
+        fi
+    fi
+    printf '%s' "$1"
+}
+
 helper_native_path() {
     # Prints a path in the form the native herdr binary expects.
     #
