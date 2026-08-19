@@ -27,7 +27,8 @@ fake_agents=
 argv_dir=
 open_dir=
 bridge_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"' EXIT
+elves_tmp=
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -631,6 +632,28 @@ fi
 
 # shellcheck disable=SC2086
 $smoke_python "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
+
+# An explicit --root has to be the whole search. The scan used to append
+# ~/aigora on top of whatever the caller asked for, so a scoped run reported
+# sessions from outside its root and walked the user's tree every time.
+elves_tmp=$(mktemp -d)
+# shellcheck disable=SC2086
+$smoke_python "$root/bin/elves-floor" --root "$elves_tmp" |
+    grep -q 'elves_detected 0' ||
+    fail "elves-floor --root should scan only the roots it was given"
+
+# A session file sitting exactly at the depth limit counts. Only the descent
+# past that directory stops.
+mkdir -p "$elves_tmp/a/b"
+printf '%s' '{"status":"executing","batches":[{"id":"B1","status":"open"}]}' \
+    >"$elves_tmp/a/b/.elves-session.json"
+# shellcheck disable=SC2086
+$smoke_python "$root/bin/elves-floor" --root "$elves_tmp" --max-depth 2 |
+    grep -q 'elves_detected 1' ||
+    fail "elves-floor should read a session at exactly --max-depth"
+rm -rf "$elves_tmp"
+elves_tmp=
+
 # shellcheck disable=SC2086
 $smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" \
     "$root/bin/lantern-bridge" || fail "py_compile"

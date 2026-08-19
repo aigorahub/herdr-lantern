@@ -53,6 +53,16 @@ All notable changes to Lantern, by Elves are documented here.
   the Homebrew directories landed in front of them. The stubs now sit in
   `$HOME/.local/bin` under the test's throwaway home and let
   `helper_extend_user_path` place the directory itself.
+- `bin/elves-floor` ignored the scope of an explicit `--root`. It appended
+  `~/aigora` to whatever roots the caller named, so a scoped scan reported
+  sessions from outside its root and walked the whole tree on every run. The
+  default roots are unchanged; explicit ones are now exact.
+- `bin/elves-floor` skipped a `.elves-session.json` sitting in a directory at
+  exactly `--max-depth`. The walk stopped before the filename check instead of
+  after it, so the last reachable level was read as if it were empty.
+- `howto.html` and `docs/index.html` were left at v0.3.0 and still said Herdr
+  was needed on macOS or Linux, three releases after 0.4.0 shipped Windows
+  support. Both pages now carry the current version and name Windows.
 
 ## [0.4.0] - 2026-08-19
 

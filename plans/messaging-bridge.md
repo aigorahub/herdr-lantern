@@ -235,6 +235,29 @@ CHANGELOG 0.5.0 entry, one-paragraph mentions in `howto.html` and
   `bridge.conf.example`, and the two files agree.
 - [ ] B6-A3: `sh tests/smoke.sh` fully green.
 
+### Batch 7: Repo review fixes
+
+Five findings from the repo review, each verified against the code. Scope is
+these fixes only: `bin/elves-floor` (explicit `--root` must be the whole
+search; a session file at exactly `--max-depth` must be read; drop the
+vestigial `kind\t` prefix `row()` added and the consumer immediately split
+off), `bin/goals-floor` (delete the dead `blob` assignment in
+`extract_signals`), and the two released pages `howto.html` and
+`docs/index.html`, still at v0.3.0 and still claiming macOS or Linux only
+after 0.4.0 shipped Windows. Two regression tests join `tests/smoke.sh` beside
+the existing `elves-floor` call.
+
+**Acceptance criteria**
+- [x] B7-A1: `elves-floor --root <dir>` scans only the roots it was given, and
+  `tests/smoke.sh` asserts `elves_detected 0` for a fresh empty root.
+- [x] B7-A2: A session file in a directory at exactly `--max-depth` is
+  reported, and `tests/smoke.sh` asserts `elves_detected 1` for one at depth 2
+  under `--max-depth 2`.
+- [x] B7-A3: The dead `blob` assignment and the `kind\t` row prefix are gone;
+  `py_compile` of both floor scripts is green.
+- [x] B7-A4: `howto.html` and `docs/index.html` read v0.5.0 and describe the
+  platforms as macOS, Linux, or Windows, with the Git for Windows note.
+
 ## Master Acceptance
 
 - [ ] M-A1: Full smoke suite green locally (macOS with real Homebrew CLIs
