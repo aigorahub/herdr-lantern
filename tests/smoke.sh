@@ -62,7 +62,7 @@ fake_ws=$(mktemp -d)
 cat >"$fake_ws/herdr" <<'EOF'
 #!/bin/sh
 if [ "$1" = workspace ] && [ "$2" = list ]; then
-    printf '%s\n' '{"result":{"workspaces":[{"label":"love-spark","workspace_id":"w1"},{"label":"lantern","workspace_id":"w7"}]}}'
+    printf '%s\n' '{"result":{"workspaces":[{"label":"love-spark","workspace_id":"w1"},{"label":"lantern","workspace_id":"w5"},{"label":"🏮 lantern","workspace_id":"w7"}]}}'
     exit 0
 fi
 if [ "$1" = workspace ] && [ "$2" = get ]; then
@@ -77,9 +77,13 @@ fi
 exit 1
 EOF
 chmod +x "$fake_ws/herdr"
-found=$(helper_workspace_id_by_label "$fake_ws/herdr" lantern)
-[ "$found" = w7 ] || fail "workspace by label ($found)"
+found=$(helper_workspace_id_by_label "$fake_ws/herdr" '🏮 lantern')
+[ "$found" = w7 ] || fail "workspace by lantern label ($found)"
+legacy=$(helper_workspace_id_by_label "$fake_ws/herdr" lantern)
+[ "$legacy" = w5 ] || fail "workspace by legacy label ($legacy)"
 [ -z "$(helper_workspace_id_by_label "$fake_ws/herdr" nope)" ] || fail "unknown label"
+grep -q "workspace_label='🏮 lantern'" "$root/open.sh" || fail "open.sh lantern label"
+grep -q 'legacy_label=lantern' "$root/open.sh" || fail "open.sh legacy label"
 helper_workspace_exists "$fake_ws/herdr" w7 || fail "workspace exists"
 if helper_workspace_exists "$fake_ws/herdr" w8; then fail "stale workspace id"; fi
 if helper_workspace_exists "$fake_ws/herdr" ""; then fail "empty workspace id"; fi

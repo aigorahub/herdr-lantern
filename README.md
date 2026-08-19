@@ -119,15 +119,18 @@ script or config edits; reopen the lantern.
 
 ## Where it sits
 
-The first open creates a workspace labelled **lantern** at your home
-directory and seats the chat there as a tab. It does not drop a tab into
-whatever workspace you are in, and it closes the empty shell tab the new
-workspace comes with, so the workspace holds the chat alone.
+The first open creates a workspace labelled **🏮 lantern** at your home
+directory and seats the chat there as a tab named **field**. It does not
+drop a tab into whatever workspace you are in, and it closes the empty
+shell tab the new workspace comes with, so the workspace holds the chat
+alone. The lantern in the sidebar is how you find it at a glance.
 
 Every later open reuses that workspace: Herdr focuses it and the chat
 already in it. You never get a second lantern workspace. Lantern
 remembers the workspace and pane ids under the plugin state directory
-(`workspace.id`, `pane.id`) and falls back to the `lantern` label.
+(`workspace.id`, `pane.id`), then falls back to the `🏮 lantern` label and
+to a plain `lantern` label if you made one by hand. Rename the workspace
+or the tab whenever you like; the remembered ids keep working.
 
 A new workspace lands **last** in the sidebar. There is no pin-to-top;
 drag it where you want it.
