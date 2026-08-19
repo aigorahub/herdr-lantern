@@ -1,0 +1,25 @@
+# Line endings.
+#
+# This plugin is POSIX shell. Herdr runs it as `sh launch.sh` and `sh open.sh`,
+# on Windows through Git Bash. A Windows checkout with core.autocrlf=true
+# rewrites those files to CRLF, which turns the `#!/bin/sh` line into a shebang
+# with a carriage return and can break the scripts in ways that read as syntax
+# errors. Pin the endings here so the checkout does not decide.
+
+* text=auto eol=lf
+
+# The interpreted files, named again so the intent survives an edit above.
+*.sh text eol=lf
+hsh text eol=lf
+bin/herdr text eol=lf
+bin/goals-floor text eol=lf
+bin/elves-floor text eol=lf
+
+# cmd.exe reads batch files line by line and wants CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Assets. Never convert.
+*.jpeg binary
+*.jpg binary
+*.png binary
