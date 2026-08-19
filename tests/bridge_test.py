@@ -501,6 +501,46 @@ class RunHelperTest(unittest.TestCase):
         self.assertEqual(reply, "the answer")
         self.assertTrue(lb.has_session(self.workdir))
 
+    def test_helper_env_drops_channel_secrets(self):
+        source = {
+            "PATH": "/bin",
+            "HOME": "/home/j",
+            "KEEP": "1",
+            "WHATSAPP_APP_SECRET": "x",
+            "SLACK_BOT_TOKEN": "y",
+            "TELEGRAM_BOT_TOKEN": "z",
+            "WHATSAPP_ACCESS_TOKEN": "a",
+            "WHATSAPP_VERIFY_TOKEN": "b",
+        }
+        env = lb.helper_env(source)
+        self.assertEqual(env["PATH"], "/bin")
+        self.assertEqual(env["KEEP"], "1")
+        for key in lb.SECRET_KEYS:
+            self.assertNotIn(key, env)
+        # The daemon still has the tokens; only the child copy is scrubbed.
+        self.assertEqual(source["WHATSAPP_APP_SECRET"], "x")
+
+    def test_run_helper_passes_the_scrubbed_env(self):
+        captured = {}
+        original = lb.subprocess.run
+        self.addCleanup(setattr, lb.subprocess, "run", original)
+
+        def fake_run(*args, **kwargs):
+            captured["env"] = kwargs.get("env")
+            done = type("Completed", (), {})()
+            done.returncode = 0
+            done.stdout = b"ok\n"
+            done.stderr = b""
+            return done
+
+        lb.subprocess.run = fake_run
+        lb.run_helper(base_config(BRIDGE_HELPER="claude"), "claude", self.workdir, "hi")
+        child = captured.get("env")
+        self.assertIsNotNone(child)
+        for key in lb.SECRET_KEYS:
+            self.assertNotIn(key, child)
+        self.assertIn("PATH", child)
+
 
 def telegram_update(
     update_id,

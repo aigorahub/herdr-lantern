@@ -85,10 +85,12 @@ answers anyone who finds the bot is a bridge that runs commands for anyone who
 finds the bot.
 
 **What an allowlisted member gets is a shell on this machine.** The headless
-helper runs as the account that started the bridge, with
-`--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox. `Bash` is an
-ordinary shell: it can read, write, and delete whatever that account can, and
-reach the network. The `bin/herdr` wrapper described further down gates
+helper runs as the account that started the bridge. Claude is started with
+`--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox flag. Codex is
+started as `codex exec` with no extra permission flags, so it uses that
+CLI's own defaults. `Bash` (when the helper has it) is an ordinary shell:
+it can read, write, and delete whatever that account can, and reach the
+network. The `bin/herdr` wrapper described further down gates
 mutating **`herdr` subcommands** and nothing else — it is not a sandbox, and it
 does not stand between a message and the rest of your files.
 

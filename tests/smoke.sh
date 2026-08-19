@@ -142,6 +142,8 @@ case $front_real in
 esac
 grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/launch.sh" ||
     fail "launch.sh should force the wrapper to the front of PATH"
+grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/bridge.sh" ||
+    fail "bridge.sh should force the wrapper to the front of PATH"
 rm -rf "$resolve_dir"
 
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
@@ -163,6 +165,9 @@ grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 # up typing into other people's panes with nobody's permission.
 if grep -q 'HERDR_HELPER_OK=1 herdr' "$root/prompt.md"; then
     fail "prompt.md should not hand out a prefixed herdr command to paste"
+fi
+if grep -q 'HERDR_HELPER_OK=1 herdr' "$root/bin/lantern-bridge"; then
+    fail "lantern-bridge should not hand out a prefixed herdr command to paste"
 fi
 for gated_verb in prompt send-keys start focus close remove; do
     grep -qF "$gated_verb" "$root/prompt.md" ||
@@ -211,6 +216,10 @@ for version_page in howto.html docs/index.html; do
         grep -qvF "v$version"; then
         fail "$version_page still carries a version that is not v$version"
     fi
+    grep -qF "Lantern Bridge" "$root/$version_page" ||
+        fail "$version_page does not name the Lantern Bridge"
+    grep -qF "bridge.conf" "$root/$version_page" ||
+        fail "$version_page does not name bridge.conf"
 done
 
 # Every key the example file offers has to be documented, or people fill in a

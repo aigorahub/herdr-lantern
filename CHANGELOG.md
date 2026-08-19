@@ -2,6 +2,37 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.5.1] - 2026-08-19
+
+### Fixed
+
+- `bridge.sh` used `helper_prepend_path` for the mutate-gate wrapper after
+  `helper_extend_user_path` had already put Homebrew in front. That is the
+  same PATH hole `launch.sh` closed in 0.5.0: on a machine whose PATH already
+  carried the plugin's `bin`, a bare `herdr` from an allowlisted chat sender
+  reached the real binary and nobody was asked. The bridge now force-fronts
+  the wrapper the same way the lantern pane does.
+- The remote appendix still handed the helper a ready-to-run
+  `HERDR_HELPER_OK=1 herdr …` line. `prompt.md` had that pattern removed in
+  0.5.0 so an agent would not paste the prefix without asking; the bridge
+  reintroduced it for the chat path. It now describes the prefix the same way
+  `launch.sh` does, without a command to copy.
+- Exported channel tokens reached the headless helper. The README tells
+  people to keep secrets in the environment, `subprocess.run` inherited
+  that environment, and the helper has Bash, so a prompt-injected turn
+  could `printenv` the WhatsApp app secret that gates the public webhook.
+  The child now gets a copy of the environment with those keys removed.
+  File-sourced secrets remain readable to the same account.
+
+### Changed
+
+- The published pages (`docs/index.html`, `howto.html`) now walk through
+  opening the bridge, filling `bridge.conf`, `--check`, and the Slack-first
+  trial, instead of one paragraph that pointed at the README. Version strings
+  on those pages, the README, and the manifest are 0.5.1.
+- "What a sender gets" named Claude's `--allowed-tools` list as if Codex got
+  it too. Codex is started as `codex exec` with no extra permission flags.
+
 ## [0.5.0] - 2026-08-19
 
 ### Added
