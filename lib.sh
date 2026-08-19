@@ -224,6 +224,29 @@ helper_lantern_pane_workspace() {
     printf '%s' "$_helper_pane_json" | helper_json_value workspace_id
 }
 
+helper_lantern_pane_in_workspace() {
+    # $1 real herdr, $2 workspace id, $3 pane title. Prints a live lantern
+    # chat already sitting in that workspace. Herdr does not deduplicate
+    # plugin panes, so this is what stops a second chat.
+    # `pane list` objects nest `scroll`, so the fragment that carries the
+    # title carries pane_id but not workspace_id. Each candidate is
+    # confirmed with `pane get`.
+    [ -n "${2:-}" ] || return 1
+    "$1" pane list 2>/dev/null |
+        tr '{' '\n' |
+        grep -F -e "\"label\":\"$3\"" |
+        sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p' |
+        while IFS= read -r _helper_cand; do
+            [ -n "$_helper_cand" ] || continue
+            _helper_cand_ws=$(helper_lantern_pane_workspace "$1" "$_helper_cand" "$3") ||
+                continue
+            if [ "$_helper_cand_ws" = "$2" ]; then
+                printf '%s' "$_helper_cand"
+                return 0
+            fi
+        done
+}
+
 helper_resolve_real_herdr() {
     if [ -n "${HERDR_REAL:-}" ] && [ -x "$HERDR_REAL" ]; then
         printf '%s' "$HERDR_REAL"

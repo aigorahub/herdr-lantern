@@ -133,6 +133,10 @@ case "$1 $2" in
     printf '{"result":{"pane":{"label":"%s","pane_id":"%s","scroll":{"viewport_rows":32},"tab_id":"%s:t2","workspace_id":"%s"}}}\n' \
         "$STUB_PANE_LABEL" "$3" "${3%%:*}" "${3%%:*}"
     ;;
+"pane list")
+    printf '{"result":{"panes":[{"agent_status":"idle","cwd":"/repo","pane_id":"w1:p1","scroll":{"viewport_rows":32},"tab_id":"w1:t1","workspace_id":"w1"}%s]}}\n' \
+        "$STUB_PANE_EXTRA"
+    ;;
 "workspace create")
     printf '{"result":{"root_pane":{"pane_id":"w9:p1","scroll":{"viewport_rows":32},"tab_id":"w9:t1","workspace_id":"w9"},"workspace":{"label":"new","workspace_id":"w9"}}}\n'
     ;;
@@ -149,12 +153,13 @@ EOF
 chmod +x "$open_dir/herdr"
 STUB_LOG=$open_dir/calls.txt
 export STUB_LOG STUB_WS_EXTRA STUB_WS STUB_WS_LABEL STUB_PANE STUB_PANE_LABEL
-export STUB_OPEN_WS STUB_OPEN_FAIL
+export STUB_OPEN_WS STUB_OPEN_FAIL STUB_PANE_EXTRA
 STUB_WS_EXTRA=
 STUB_WS=
 STUB_WS_LABEL=
 STUB_PANE=
 STUB_PANE_LABEL=Lantern
+STUB_PANE_EXTRA=
 STUB_OPEN_WS=w9
 STUB_OPEN_FAIL=
 
@@ -220,15 +225,50 @@ if logged 'pane close'; then fail "label match must not close a pane"; fi
 STUB_WS_EXTRA=
 STUB_OPEN_WS=w9
 
+# A workspace labelled by hand is not the lantern workspace.
+reset_open
+STUB_WS_EXTRA=',{"label":"lantern","workspace_id":"w5"}'
+run_open || fail "plain label"
+if logged '--workspace w5'; then fail "a plain lantern label must not be adopted"; fi
+logged 'workspace create --cwd' || fail "plain label should fall through to create"
+STUB_WS_EXTRA=
+
+# A chat already running in that workspace is focused, not duplicated.
+reset_open
+STUB_WS_EXTRA=',{"label":"🪔 lantern","workspace_id":"w7"}'
+STUB_PANE_EXTRA=',{"agent_status":"idle","cwd":"/state","label":"Lantern","pane_id":"w7:p2","scroll":{"viewport_rows":32},"tab_id":"w7:t2","workspace_id":"w7"}'
+STUB_PANE=w7:p2
+run_open || fail "duplicate guard"
+logged 'plugin pane focus w7:p2' || fail "an existing chat should be focused"
+if logged 'plugin pane open'; then fail "must not seat a second chat in w7"; fi
+[ "$(cat "$open_state/pane.id")" = w7:p2 ] || fail "duplicate guard pane state"
+STUB_WS_EXTRA=
+STUB_PANE_EXTRA=
+STUB_PANE=
+
+# Follow the workspace Herdr reports, and drop the one this run made.
+reset_open
+STUB_OPEN_WS=w8
+run_open || fail "adopt the reported workspace"
+logged 'workspace close w9' || fail "the unused new workspace should be closed"
+if logged 'pane close w9:p1'; then fail "must not close a pane in a dropped workspace"; fi
+[ "$(cat "$open_state/workspace.id")" = w8 ] || fail "adopted workspace state"
+STUB_OPEN_WS=w9
+
 # A chat that never starts must not leave an empty workspace behind.
 reset_open
+printf 'w1\n' >"$open_state/workspace.id"
+STUB_WS=w1
+STUB_WS_LABEL=repo
 STUB_OPEN_FAIL=1
 if run_open; then fail "failed open should exit nonzero"; fi
 logged 'workspace close w9' || fail "failed open should drop the new workspace"
 if [ -f "$open_state/workspace.id" ]; then
-    fail "failed open should not remember a workspace"
+    fail "failed open should forget the workspace"
 fi
 STUB_OPEN_FAIL=
+STUB_WS=
+STUB_WS_LABEL=
 
 # A second open while one is in flight does nothing.
 reset_open

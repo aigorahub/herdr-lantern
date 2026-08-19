@@ -39,10 +39,13 @@ lock_dir=$state_dir/open.lock
 
 # One open at a time. Two fast key presses must not make two workspaces.
 if ! mkdir "$lock_dir" 2>/dev/null; then
+    [ -d "$lock_dir" ] || die "could not lock $state_dir"
     if [ -n "$(find "$lock_dir" -prune -mmin +2 2>/dev/null)" ]; then
+        # Left behind by a kill or a crash.
         rmdir "$lock_dir" 2>/dev/null || true
-        mkdir "$lock_dir" 2>/dev/null || exit 0
+        mkdir "$lock_dir" 2>/dev/null || die "could not lock $state_dir"
     else
+        printf 'lantern: another open is in flight\n' >&2
         exit 0
     fi
 fi
@@ -61,10 +64,14 @@ if [ -n "$pane" ]; then
         workspace=
 fi
 if [ -n "$workspace" ]; then
-    printf '%s\n' "$workspace" >"$workspace_file" || true
     "$herdr" workspace focus "$workspace" >/dev/null 2>&1 || true
-    "$herdr" plugin pane focus "$pane"
-    exit 0
+    if "$herdr" plugin pane focus "$pane"; then
+        printf '%s\n' "$workspace" >"$workspace_file" || true
+        exit 0
+    fi
+    # The chat quit between the check and the focus. Seat a new one.
+    workspace=
+    pane=
 fi
 
 # 2. No live chat. The remembered workspace counts only while it still
@@ -98,7 +105,21 @@ if [ -z "$workspace" ]; then
     root_pane=$(printf '%s' "$created" | helper_json_value pane_id)
 fi
 
-# 5. Seat the chat as a tab in that workspace.
+# 5. A workspace we did not just make can already hold a chat, if the
+#    remembered pane id was lost. Herdr would open a second one.
+if [ -z "$root_pane" ]; then
+    running=$(helper_lantern_pane_in_workspace "$herdr" "$workspace" "$pane_title") ||
+        running=
+    if [ -n "$running" ]; then
+        printf '%s\n' "$workspace" >"$workspace_file" || true
+        printf '%s\n' "$running" >"$pane_file" || true
+        "$herdr" workspace focus "$workspace" >/dev/null 2>&1 || true
+        "$herdr" plugin pane focus "$running"
+        exit 0
+    fi
+fi
+
+# 6. Seat the chat as a tab in that workspace.
 if ! opened=$("$herdr" plugin pane open \
     --plugin aigora.lantern \
     --entrypoint helper \
@@ -135,7 +156,7 @@ if [ -n "$tab" ]; then
     "$herdr" tab rename "$tab" "$tab_label" >/dev/null 2>&1 || true
 fi
 
-# 6. A fresh workspace opens with an empty shell tab. The chat replaces it.
+# 7. A fresh workspace opens with an empty shell tab. The chat replaces it.
 if [ -n "$root_pane" ]; then
     "$herdr" pane close "$root_pane" >/dev/null 2>&1 || true
 fi
