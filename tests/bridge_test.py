@@ -9,11 +9,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import importlib.util
+import io
 import json
 import os
 import queue
+import socket
+import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -354,8 +358,24 @@ class WorkdirTest(unittest.TestCase):
         self.assertIn("chat", text)
 
 
-def telegram_update(update_id, chat_id, text=None, key="message", extra=None):
-    message = {"chat": {"id": chat_id}}
+def telegram_update(
+    update_id,
+    chat_id,
+    text=None,
+    key="message",
+    extra=None,
+    chat_type="private",
+    sender_id=None,
+):
+    """One Bot API update, shaped the way Telegram actually sends them.
+
+    Every real message carries `chat.type` and `message.from`, and in a
+    private chat the chat id and the sender's user id are the same number.
+    """
+    message = {
+        "chat": {"id": chat_id, "type": chat_type},
+        "from": {"id": chat_id if sender_id is None else sender_id},
+    }
     if text is not None:
         message["text"] = text
     if extra:
@@ -396,6 +416,60 @@ class TelegramParseTest(unittest.TestCase):
         self.assertEqual(accepted, [])
         # The cursor still advances, or a stranger's message replays forever.
         self.assertEqual(offset, 10)
+
+    def test_a_group_does_not_authorize_its_members(self):
+        # The reason this matters: an accepted message runs the helper CLI
+        # with Bash on this machine. Putting a group id on the allowlist would
+        # hand that to everyone who can post in the group.
+        cfg = base_config(
+            TELEGRAM_BOT_TOKEN="tok", TELEGRAM_ALLOWED_CHATS="-1001234567890"
+        )
+        adapter = lb.TelegramAdapter(cfg, queue.Queue())
+        accepted, offset = adapter.parse_updates(
+            {
+                "result": [
+                    telegram_update(
+                        3,
+                        -1001234567890,
+                        "run something",
+                        chat_type="supergroup",
+                        sender_id=99999999,
+                    )
+                ]
+            }
+        )
+        self.assertEqual(accepted, [])
+        self.assertEqual(offset, 4)
+
+    def test_a_group_message_from_an_allowlisted_person_is_accepted(self):
+        cfg = base_config(TELEGRAM_BOT_TOKEN="tok", TELEGRAM_ALLOWED_CHATS="42")
+        adapter = lb.TelegramAdapter(cfg, queue.Queue())
+        accepted, _offset = adapter.parse_updates(
+            {
+                "result": [
+                    telegram_update(
+                        3,
+                        -1001234567890,
+                        "hello",
+                        chat_type="supergroup",
+                        sender_id=42,
+                    )
+                ]
+            }
+        )
+        self.assertEqual(accepted, [("-1001234567890", "hello")])
+
+    def test_a_private_chat_from_an_allowlisted_person_is_accepted(self):
+        accepted, _offset = self.parse([telegram_update(3, 42, "hello")])
+        self.assertEqual(accepted, [("42", "hello")])
+
+    def test_a_non_private_chat_whose_id_is_listed_is_still_dropped(self):
+        # Same id, and the only difference is that it names a room rather than
+        # a person.
+        accepted, _offset = self.parse(
+            [telegram_update(3, 42, "hello", chat_type="group", sender_id=77)]
+        )
+        self.assertEqual(accepted, [])
 
     def test_offset_advances_past_the_highest_update(self):
         accepted, offset = self.parse(
@@ -640,6 +714,16 @@ class WhatsAppSignatureTest(unittest.TestCase):
         for header in ("", "sha1=deadbeef", "sha256=", "deadbeef", "sha256"):
             self.assertFalse(self.adapter.verify_signature(raw, header), header)
 
+    def test_a_non_ascii_digest_is_false_not_an_exception(self):
+        # http.client decodes headers as latin-1, so a byte like this reaches
+        # the comparison as a non-ASCII str. hmac.compare_digest raises
+        # TypeError on one, and an exception out of do_POST is a traceback in
+        # the bridge pane instead of a 401.
+        raw = b'{"a":1}'
+        self.assertFalse(self.adapter.verify_signature(raw, "sha256=" + "\u00ff" * 64))
+        self.assertFalse(self.adapter.verify_signature(raw, "sha256=" + "z" * 64))
+        self.assertFalse(self.adapter.verify_signature(raw, "sha256=deadbeef"))
+
     def test_uppercase_digest_is_accepted(self):
         raw = b'{"a":1}'
         self.assertTrue(self.adapter.verify_signature(raw, sign(raw).upper().replace("SHA256", "sha256")))
@@ -805,6 +889,153 @@ class WhatsAppWebhookTest(unittest.TestCase):
             with exc:
                 self.assertEqual(exc.code, 403)
                 self.assertNotIn(b"42424", exc.read())
+
+
+def peer_hung_up(sock, timeout=0.05) -> bool:
+    """True once the server has closed this connection.
+
+    A close with bytes still unread arrives as a reset rather than an
+    end-of-file on both platforms this runs on, so either answer counts.
+    """
+    sock.settimeout(timeout)
+    try:
+        return sock.recv(1) == b""
+    except (socket.timeout, TimeoutError):
+        return False
+    except OSError:
+        return True
+
+
+def read_head(sock, timeout=10) -> bytes:
+    """Everything up to the end of the response headers, or the close."""
+    sock.settimeout(timeout)
+    answer = b""
+    while b"\r\n\r\n" not in answer:
+        try:
+            chunk = sock.recv(4096)
+        except (socket.timeout, TimeoutError, OSError):
+            break
+        if not chunk:
+            break
+        answer += chunk
+    return answer
+
+
+class WebhookHardeningTest(unittest.TestCase):
+    """What the webhook has to survive from a caller with no credential.
+
+    Every case here reaches the handler before the signature is checked, and
+    the README asks people to publish this port through a tunnel.
+    """
+
+    STALLED = (
+        b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+        b"Content-Type: application/json\r\n"
+        b"Content-Length: 1048576\r\n\r\nA"
+    )
+
+    def start(self):
+        self.inbox = queue.Queue()
+        cfg = whatsapp_config(
+            WHATSAPP_WEBHOOK_HOST="127.0.0.1", WHATSAPP_WEBHOOK_PORT="0"
+        )
+        adapter = lb.WhatsAppAdapter(cfg, self.inbox)
+        server = adapter.start_server()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def stop():
+            server.shutdown()
+            thread.join(timeout=5)
+            server.server_close()
+
+        self.addCleanup(stop)
+        return server, server.server_address[1]
+
+    def connect(self, port, request: bytes):
+        sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+        self.addCleanup(sock.close)
+        sock.sendall(request)
+        return sock
+
+    def test_a_stalled_connection_is_dropped_on_the_socket_timeout(self):
+        # Inherited from StreamRequestHandler this is None, and None is what
+        # let one stalled socket hold a thread for as long as it liked.
+        self.assertIsNotNone(lb.WebhookHandler.timeout)
+        self.assertGreater(lb.WebhookHandler.timeout, 0)
+        # Shortened from here on only so the suite does not sit out the real
+        # one; what is under test is that the attribute is applied at all.
+        original = lb.WebhookHandler.timeout
+        lb.WebhookHandler.timeout = 0.5
+        self.addCleanup(setattr, lb.WebhookHandler, "timeout", original)
+        _server, port = self.start()
+        sock = self.connect(port, self.STALLED)
+        # One byte of a megabyte body and then nothing. No credential was
+        # offered, so the socket timeout is the only thing that ends this.
+        sock.settimeout(10)
+        self.assertEqual(sock.recv(4096), b"")
+
+    def test_stalled_connections_cannot_outgrow_the_cap(self):
+        server, port = self.start()
+        cap = server.max_connections
+        before = threading.active_count()
+        socks = [self.connect(port, self.STALLED) for _ in range(cap * 5)]
+        deadline = time.time() + 15
+        dropped = 0
+        while time.time() < deadline:
+            dropped = sum(1 for sock in socks if peer_hung_up(sock))
+            if dropped >= len(socks) - cap:
+                break
+        self.assertGreaterEqual(
+            dropped,
+            len(socks) - cap,
+            "connections past the cap should be dropped, not parked",
+        )
+        # The slack is for the accept thread and whatever else the interpreter
+        # is running; what must not happen is one thread per socket.
+        self.assertLessEqual(threading.active_count() - before, cap + 2)
+
+    def test_a_non_ascii_signature_is_401_and_not_a_traceback(self):
+        _server, port = self.start()
+        body = json.dumps(whatsapp_body()).encode("utf-8")
+        request = (
+            b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\n"
+            b"X-Hub-Signature-256: sha256=" + b"\xff" * 64 + b"\r\n"
+            b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body
+        )
+        # socketserver's default handle_error prints the whole stack, absolute
+        # source paths included, to the pane the docs call safe to paste.
+        captured = io.StringIO()
+        original = sys.stderr
+        sys.stderr = captured
+        try:
+            answer = read_head(self.connect(port, request))
+        finally:
+            sys.stderr = original
+        self.assertIn(b"401", answer.split(b"\r\n", 1)[0])
+        self.assertNotIn("Traceback", captured.getvalue())
+        self.assertNotIn(str(ROOT), captured.getvalue())
+        self.assertTrue(self.inbox.empty())
+
+    def test_an_oversize_body_is_413_and_closes_the_connection(self):
+        _server, port = self.start()
+        request = (
+            b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Content-Length: %d\r\n\r\n" % (lb.MAX_WEBHOOK_BODY + 1)
+        )
+        sock = self.connect(port, request)
+        answer = read_head(sock)
+        self.assertIn(b"413", answer.split(b"\r\n", 1)[0])
+        self.assertIn(b"connection: close", answer.lower())
+        # The declared body was never drained. On a kept-alive connection the
+        # bytes still to come would be parsed as the next request.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if peer_hung_up(sock, timeout=0.2):
+                break
+        else:
+            self.fail("the 413 left the connection open")
 
 
 class AdapterLoopTest(unittest.TestCase):

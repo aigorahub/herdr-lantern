@@ -104,6 +104,21 @@ WHATSAPP_API_VERSION = "v20.0"
 # message, and it is read into memory before it can be checked.
 MAX_WEBHOOK_BODY = 1 << 20
 
+# StreamRequestHandler applies this as a socket timeout. Without one, a
+# connection that announces a Content-Length and then stops sending parks a
+# thread for as long as it likes, and no credential is needed to open it: the
+# body is read before the signature can be checked. The README puts this port
+# behind a public tunnel, so a stall is a stranger's stall.
+WEBHOOK_TIMEOUT = 15
+# The ceiling on connections being served at once. Meta delivers a handful of
+# small POSTs; this is far above that and far below one thread per socket.
+WEBHOOK_MAX_CONNECTIONS = 8
+
+# What a signature header is allowed to be. http.client decodes headers as
+# latin-1, so anything else reaches hmac.compare_digest as a non-ASCII str and
+# it raises TypeError rather than returning False.
+HEX_DIGEST = re.compile(r"[0-9a-f]{64}")
+
 CLAUDE_TOOLS = "Bash,Read,Glob,Grep,LS"
 
 # Anything outside this set is replaced in a chat id before it becomes a
@@ -542,6 +557,19 @@ class TelegramAdapter(Adapter):
         )
         return "%s?%s" % (self.api("getUpdates"), query)
 
+    def authorized(self, chat_id, chat_type, sender_id) -> bool:
+        """Whether a person on the allowlist sent this, not merely a room.
+
+        An id in TELEGRAM_ALLOWED_CHATS is a person: their private chat with
+        the bot, whose id is their user id. A group id on that list would
+        authorize every member of the group, and what an accepted message buys
+        is a helper CLI with Bash on this machine. So a group is answered only
+        when the sender's own id is allowlisted; the room's id is not enough.
+        """
+        if sender_id is not None and str(sender_id) in self.allowed:
+            return True
+        return chat_type == "private" and str(chat_id) in self.allowed
+
     def parse_updates(self, payload: dict):
         """Returns (accepted, next_offset).
 
@@ -566,11 +594,18 @@ class TelegramAdapter(Adapter):
             if not isinstance(text, str) or not text.strip():
                 continue
             chat = message.get("chat")
-            chat_id = chat.get("id") if isinstance(chat, dict) else None
+            if not isinstance(chat, dict):
+                continue
+            chat_id = chat.get("id")
             if chat_id is None:
                 continue
-            if str(chat_id) not in self.allowed:
-                log("telegram: dropped a message from chat %s" % chat_id)
+            sender = message.get("from")
+            sender_id = sender.get("id") if isinstance(sender, dict) else None
+            if not self.authorized(chat_id, chat.get("type"), sender_id):
+                log(
+                    "telegram: dropped a message from chat %s (%s), sender %s"
+                    % (chat_id, chat.get("type") or "unknown", sender_id)
+                )
                 continue
             accepted.append((str(chat_id), text.strip()))
         return accepted, offset
@@ -706,6 +741,10 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
     server_version = "lantern-bridge"
     sys_version = ""
     protocol_version = "HTTP/1.1"
+    # StreamRequestHandler reads this and calls settimeout on the connection.
+    # Inherited it is None, which is what let one stalled socket hold a thread
+    # forever.
+    timeout = WEBHOOK_TIMEOUT
 
     def log_message(self, fmt, *args):
         # The default writes the request line to stderr. On the GET path that
@@ -713,11 +752,18 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
         # keeping.
         return
 
-    def respond(self, status: int, body: str = "") -> None:
+    def respond(self, status: int, body: str = "", close: bool = False) -> None:
         payload = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
+        if close:
+            # send_header sets close_connection itself when it sees this, but
+            # say it here too: an answer sent without reading the declared
+            # body must not leave a keep-alive connection open, or the bytes
+            # still in flight get parsed as the next request.
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.end_headers()
         if payload:
             self.wfile.write(payload)
@@ -738,11 +784,19 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
             self.respond(400, "bad request")
             return
         if length < 0 or length > MAX_WEBHOOK_BODY:
-            self.respond(413, "too large")
+            # The body is not drained, so this connection cannot be reused.
+            self.respond(413, "too large", close=True)
             return
         # The raw bytes, read once and hashed before anything looks at them.
         # Parsing first and re-serialising would sign a different document.
-        raw = self.rfile.read(length)
+        try:
+            raw = self.rfile.read(length)
+        except OSError:
+            # A socket timeout lands here, and the body arrives before any
+            # credential does, so this is the ordinary end of a stalled
+            # connection rather than an event worth a line.
+            self.close_connection = True
+            return
         signature = self.headers.get("X-Hub-Signature-256", "")
         if not self.adapter.verify_signature(raw, signature):
             log("whatsapp: rejected a POST with a bad signature (%d bytes)" % len(raw))
@@ -761,6 +815,54 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
         # Meta retries anything that is not answered quickly, so the reply goes
         # out now and the helper runs on the dispatch thread.
         self.respond(200, "ok")
+
+
+class BoundedWebhookServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer with a ceiling on the connections it will serve.
+
+    The base class starts one thread per accepted socket and caps nothing, so
+    a flood of connections that never finish a request costs a thread, a
+    buffer, and a file descriptor each -- and none of it needs a credential,
+    because the body is read before the signature is checked. This is the one
+    socket the README asks people to expose through a tunnel.
+
+    The invariant the semaphore rests on: socketserver calls shutdown_request
+    exactly once for every request that process_request handed to a thread,
+    on the error paths as well as the clean one. A connection refused here is
+    closed with close_request, which is the path that does not release.
+    """
+
+    max_connections = WEBHOOK_MAX_CONNECTIONS
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.Semaphore(self.max_connections)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            log(
+                "whatsapp: webhook already serving %d connections; dropped one"
+                % self.max_connections
+            )
+            self.close_request(request)
+            return
+        super().process_request(request, client_address)
+
+    def shutdown_request(self, request):
+        try:
+            super().shutdown_request(request)
+        finally:
+            self._slots.release()
+
+    def handle_error(self, request, client_address):
+        """One redacted line where socketserver would print a traceback.
+
+        The default writes the whole stack, absolute source paths included, to
+        the bridge pane -- the pane the docs call safe to paste when asking
+        for help. The client address is not logged either; it is a tunnel's.
+        """
+        exc = sys.exc_info()[1]
+        log("whatsapp: webhook request failed (%s)" % exc.__class__.__name__)
 
 
 class WhatsAppAdapter(Adapter):
@@ -823,10 +925,17 @@ class WhatsAppAdapter(Adapter):
         algorithm, _, digest = header.strip().partition("=")
         if algorithm != "sha256" or not digest:
             return False
+        digest = digest.strip().lower()
+        # A header is decoded as latin-1, so anything at all can arrive here.
+        # compare_digest raises TypeError on a non-ASCII str rather than
+        # answering False, and an exception out of do_POST is a traceback in
+        # the pane and no 401 at all. Nothing but 64 hex digits can be right.
+        if not HEX_DIGEST.fullmatch(digest):
+            return False
         expected = hmac.new(
             self.app_secret.encode("utf-8"), raw, hashlib.sha256
         ).hexdigest()
-        return hmac.compare_digest(expected, digest.lower())
+        return hmac.compare_digest(expected, digest)
 
     def extract_messages(self, payload: dict):
         """Every text message in one webhook body, allowlist not yet applied."""
@@ -868,7 +977,7 @@ class WhatsAppAdapter(Adapter):
 
     def start_server(self):
         handler = type("LanternWebhookHandler", (WebhookHandler,), {"adapter": self})
-        self.server = http.server.ThreadingHTTPServer((self.host, self.port), handler)
+        self.server = BoundedWebhookServer((self.host, self.port), handler)
         return self.server
 
     def poll_once(self) -> None:
