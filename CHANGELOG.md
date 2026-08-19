@@ -17,6 +17,10 @@ All notable changes to Lantern, by Elves are documented here.
   a carriage return.
 - A GitHub Actions job that runs `tests/smoke.sh` on Linux, macOS, and Windows
   for every pull request.
+- README records the step people will otherwise miss: after putting Git on
+  `PATH`, stop the Herdr server rather than only the window. The server is
+  persistent and keeps the environment it started with, so the action fails
+  with `program not found` until it is stopped and started again.
 
 ### Fixed
 

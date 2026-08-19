@@ -189,6 +189,19 @@ You need:
   not need it.
 - One helper CLI on `PATH`, the same as anywhere else.
 
+After you add that PATH entry, **stop the Herdr server**, not just the window:
+
+```powershell
+herdr server stop
+```
+
+Herdr keeps a persistent server, and your panes live inside it. Closing and
+reopening the app leaves that server running with the environment it started
+with, so it still cannot find `sh` and the action fails with
+`program not found`. Stopping the server ends every pane in it, so finish what
+is running first. Then start Herdr from a newly opened terminal, or sign out
+and back in, so the new server inherits the PATH you just set.
+
 Check the setup:
 
 ```powershell
