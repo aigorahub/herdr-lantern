@@ -781,21 +781,23 @@ printf 'ok: launch.sh argv for every helper CLI\n'
 bridge_dir=$(mktemp -d)
 mkdir -p "$bridge_dir/config" "$bridge_dir/state"
 run_bridge() {
-    # $@ goes to bridge.sh. Prints stdout and stderr together.
+    # $1 is the bridge.sh argument; the rest are KEY=value pairs for its
+    # environment. Every config key falls back to the environment, so a test
+    # never has to write a token to disk. Prints stdout and stderr together.
+    _bridge_arg=$1
+    shift
     env -i \
         HOME="$bridge_dir" \
         PATH="/usr/bin:/bin" \
         HERDR_PLUGIN_ROOT="$root" \
         HERDR_PLUGIN_CONFIG_DIR="$bridge_dir/config" \
         HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
-        BRIDGE_HELPER="$1" \
-        TELEGRAM_BOT_TOKEN="$2" \
-        TELEGRAM_ALLOWED_CHATS="$3" \
-        sh "$root/bridge.sh" "$4" </dev/null 2>&1
+        "$@" \
+        sh "$root/bridge.sh" "$_bridge_arg" </dev/null 2>&1
 }
 
 # No credentials at all: refuse, and say which file and which example.
-bridge_out=$(run_bridge "" "" "" --check) && fail "bridge with no channels should fail"
+bridge_out=$(run_bridge --check) && fail "bridge with no channels should fail"
 printf '%s\n' "$bridge_out" | grep -q "$bridge_dir/config/bridge.conf" ||
     fail "bridge should name the config file it wants filled in"
 printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
@@ -804,13 +806,38 @@ printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
 [ -f "$bridge_dir/config/prompt.md" ] || fail "bridge should seed prompt.md"
 
 # Credentials without an allowlist: still a refusal, naming the key to set.
-bridge_out=$(run_bridge claude 'secret-token-value' "" --check) &&
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value) &&
     fail "bridge with no allowlist should fail"
 printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_ALLOWED_CHATS' ||
     fail "bridge should name the empty allowlist key"
 
+# WhatsApp is the one channel that can be reached from outside this machine, so
+# the signature secret and the allowlist are both refusals, not warnings.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    WHATSAPP_ACCESS_TOKEN=access-token-value \
+    WHATSAPP_PHONE_NUMBER_ID=PN1 \
+    WHATSAPP_VERIFY_TOKEN=verify-token-value \
+    WHATSAPP_ALLOWED_NUMBERS=15551234567) &&
+    fail "whatsapp without an app secret should fail"
+printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_APP_SECRET' ||
+    fail "whatsapp should name the missing app secret"
+
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    WHATSAPP_ACCESS_TOKEN=access-token-value \
+    WHATSAPP_PHONE_NUMBER_ID=PN1 \
+    WHATSAPP_VERIFY_TOKEN=verify-token-value \
+    WHATSAPP_APP_SECRET=app-secret-value) &&
+    fail "whatsapp without an allowlist should fail"
+printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_ALLOWED_NUMBERS' ||
+    fail "whatsapp should name the missing allowlist"
+if printf '%s\n' "$bridge_out" | grep -q 'app-secret-value'; then
+    fail "bridge leaked the whatsapp app secret"
+fi
+
 # Armed: a redacted summary and a real argv, no network, exit 0.
-bridge_out=$(run_bridge claude 'secret-token-value' '4242' --check) ||
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242) ||
     fail "bridge --check with a full telegram config should pass"
 printf '%s\n' "$bridge_out" | grep -q 'channels: telegram' ||
     fail "bridge --check should report the enabled channel"
