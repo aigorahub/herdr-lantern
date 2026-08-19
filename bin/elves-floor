@@ -49,9 +49,10 @@ def find_sessions(roots: list[Path], max_depth: int) -> list[Path]:
             rel = Path(dirpath).relative_to(root)
             depth = 0 if rel == Path(".") else len(rel.parts)
             dirnames[:] = [d for d in dirnames if d not in SKIP_PARTS]
+            # At the depth limit the directory itself was still reached, so its
+            # files count. Only the descent stops here.
             if depth >= max_depth:
                 dirnames[:] = []
-                continue
             if ".elves-session.json" not in filenames:
                 continue
             p = Path(dirpath) / ".elves-session.json"
@@ -66,7 +67,10 @@ def find_sessions(roots: list[Path], max_depth: int) -> list[Path]:
 def load_session(path: Path) -> dict | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        # One non-UTF-8 byte in one session file used to end the whole scan.
+        # An unreadable file is skipped like any other; the rest of the floor
+        # is what the user asked for.
         return None
     return data if isinstance(data, dict) else None
 
@@ -175,7 +179,7 @@ def dedupe_key(data: dict, path: Path) -> str:
     return f"path:{path}"
 
 
-def row(path: Path, data: dict, kind: str, activity: float) -> str:
+def row(path: Path, data: dict, activity: float) -> str:
     repo = path.parent.name
     status = data.get("status") or "?"
     guard = data.get("continuation_guard") if isinstance(data.get("continuation_guard"), dict) else {}
@@ -195,7 +199,7 @@ def row(path: Path, data: dict, kind: str, activity: float) -> str:
     worktree = str(data.get("worktree_path") or "").strip()
     if worktree:
         parts.append(worktree)
-    return f"{kind}\t" + " — ".join(parts)
+    return " — ".join(parts)
 
 
 def main() -> int:
@@ -210,9 +214,6 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     roots = [Path(r) for r in args.root] if args.root else list(DEFAULT_ROOTS)
-    extra = Path.home() / "aigora"
-    if extra.is_dir() and extra not in [r.expanduser() for r in roots]:
-        roots.append(extra)
 
     buckets = {"in_progress": [], "waiting": [], "stale": []}
     seen: set[str] = set()
@@ -231,7 +232,7 @@ def main() -> int:
             continue
         seen.add(key)
         activity = last_activity(path, data)
-        buckets[kind].append((activity, row(path, data, kind, activity)))
+        buckets[kind].append((activity, row(path, data, activity)))
 
     found_any = any(buckets.values()) or dormant > 0
     if not found_any:
@@ -258,7 +259,7 @@ def main() -> int:
             continue
         print(title)
         for _, line in items:
-            print(f"- {line.split(chr(9), 1)[-1]}")
+            print(f"- {line}")
     print("For one run: read that repo's .elves-session.json and survival guide.")
     print("Live worker stream (no model): cobbler_agents.py native-worker status|follow")
     return 0

@@ -13,6 +13,15 @@ die() {
     exit 1
 }
 
+snapshot_unavailable() {
+    # $1 snapshot file, $2 why. The workdir survives between runs and
+    # prompt.md has the lantern read these files at light-up, so a snapshot
+    # left unrefreshed is last run's field reported as this one: who needs
+    # you, who is blocked, all of it hours old and stated as fact. An honest
+    # line is the only thing worth leaving here.
+    printf 'snapshot unavailable: %s\n' "$2" >"$1" 2>/dev/null || true
+}
+
 plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
 # shellcheck disable=SC1091
 . "$plugin_root/lib.sh"
@@ -25,7 +34,10 @@ config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
 [ -n "$config_dir" ] || die "HERDR_PLUGIN_CONFIG_DIR is not set; run this through Herdr"
 
 helper_extend_user_path
-helper_prepend_path "$plugin_root/bin"
+# After the user directories, and forced to the front: the wrapper is the
+# mutate gate, and a plugin bin that arrived on the inherited PATH would
+# otherwise keep its old position behind a real herdr.
+helper_force_front_path "$plugin_root/bin"
 
 if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "$HERDR_BIN_PATH" ]; then
     case $HERDR_BIN_PATH in
@@ -105,14 +117,18 @@ appendix=$(
 Runtime (injected by launch.sh; do not ignore):
 
 - Prefer \$HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.
-  Inspect commands (list/read/get) run as usual.
-  Mutating commands (create, start, focus, close, remove, prompt, send-*)
-  are blocked until the user confirms the exact path or target. Then rerun:
-    HERDR_HELPER_OK=1 herdr <same command>
+  Read-only commands (--help, status, agent list/read/get/wait/explain,
+  workspace list/get, worktree list, plugin list/log/logs/config-dir) run
+  as usual. Everything else changes the herd — create, start, focus,
+  close, remove, prompt, send-keys, send-text, kill — and is blocked
+  until the user confirms the exact path or target in this chat. Only
+  then rerun that same command with HERDR_HELPER_OK=1 in front of it.
   Never call /opt/homebrew/bin/herdr or another absolute herdr path.
-- \`herdr agent prompt\` through the wrapper adds \`--wait\` and retries
-  with Enter when the target pane stalls (Cursor often types into the
-  follow-up field without submitting). Read the pane before saying sent.
+- \`herdr agent prompt\` through the wrapper adds \`--wait\`. It presses
+  Enter only when the target pane stalls with the text still showing
+  (Cursor often types into the follow-up field without submitting), and
+  it fails when nothing shows the message went in. Read the pane before
+  saying sent.
 - Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
 - After workspace create, if agent start fails, wait two seconds and retry once
   (the new pane may still be coming up to a shell prompt).
@@ -136,7 +152,8 @@ fi
 if [ -n "$real_herdr" ]; then
     "$real_herdr" agent list >"$workdir/floor.txt" 2>/dev/null || true
 else
-    : >"$workdir/floor.txt"
+    snapshot_unavailable "$workdir/floor.txt" \
+        "the real herdr binary was not found from this pane"
 fi
 helper_python=$(helper_detect_python) || helper_python=
 if [ -n "$helper_python" ]; then
@@ -145,6 +162,9 @@ if [ -n "$helper_python" ]; then
         # shellcheck disable=SC2086
         $helper_python "$plugin_root/bin/goals-floor" --herdr "$real_herdr" \
             >"$workdir/goals-floor.txt" 2>/dev/null || true
+    else
+        snapshot_unavailable "$workdir/goals-floor.txt" \
+            "the real herdr binary was not found from this pane"
     fi
     if [ "$search_root" = "$HOME" ]; then
         # shellcheck disable=SC2086
@@ -155,6 +175,11 @@ if [ -n "$helper_python" ]; then
         $helper_python "$plugin_root/bin/elves-floor" --root "$search_root" \
             >"$workdir/elves-floor.txt" 2>/dev/null || true
     fi
+else
+    snapshot_unavailable "$workdir/goals-floor.txt" \
+        "no working python 3 interpreter was found on PATH"
+    snapshot_unavailable "$workdir/elves-floor.txt" \
+        "no working python 3 interpreter was found on PATH"
 fi
 
 printf '%s\n' "$full_prompt" >"$workdir/AGENTS.md" ||

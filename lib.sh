@@ -85,6 +85,36 @@ helper_prepend_path() {
     export PATH
 }
 
+helper_force_front_path() {
+    # Put a directory at the very front of PATH, wherever it already sits.
+    #
+    # This is for the wrapper directory only, and it is a security control,
+    # not a convenience. helper_prepend_path leaves a directory that is
+    # already on PATH in its inherited position, and helper_extend_user_path
+    # then puts /usr/local/bin and /opt/homebrew/bin ahead of it, so on a
+    # machine whose PATH already carries the plugin's bin a bare `herdr`
+    # reached the real binary and the mutate gate never ran.
+    #
+    # Every copy goes, so helper_resolve_real_herdr still finds the real
+    # binary when it strips this directory back out.
+    _helper_dir=$1
+    [ -d "$_helper_dir" ] || return 0
+    _helper_rest=
+    _helper_part=
+    IFS=:
+    for _helper_part in $PATH; do
+        [ "$_helper_part" = "$_helper_dir" ] && continue
+        if [ -n "$_helper_rest" ]; then
+            _helper_rest="$_helper_rest:$_helper_part"
+        else
+            _helper_rest=$_helper_part
+        fi
+    done
+    unset IFS
+    PATH="$_helper_dir${_helper_rest:+:$_helper_rest}"
+    export PATH
+}
+
 helper_extend_user_path() {
     helper_prepend_path /usr/local/bin
     helper_prepend_path /opt/homebrew/bin
@@ -231,9 +261,23 @@ helper_is_agent_prompt() {
     [ "${1:-}" = agent ] && [ "${2:-}" = prompt ] && [ -n "${3:-}" ] && [ -n "${4:-}" ]
 }
 
+helper_pane_holds_text() {
+    # True when pane text ($2) is showing the start of message ($1).
+    #
+    # A short probe on purpose: a pane wraps, and the input field carries a
+    # prefix, so anything longer is split across lines and never matches.
+    _helper_probe=$(printf '%s\n' "$1" | sed -n '1p' | cut -c1-24)
+    [ -n "$_helper_probe" ] || return 1
+    printf '%s\n' "$2" | grep -qF -- "$_helper_probe"
+}
+
 helper_relay_agent_prompt() {
-    # Submit through Herdr with --wait, then Enter + wait if the pane never
-    # leaves idle (common when Cursor keeps text in the follow-up field).
+    # Submit through Herdr with --wait. The Enter fallback is for one failure
+    # only: Cursor leaves the text in the follow-up field and the pane never
+    # leaves idle, so the prompt times out with the message visible in the
+    # pane. Any other failure - unknown target, herdr not running, a flag
+    # herdr rejected - never puts it there, and Enter into one of those is a
+    # keystroke nobody asked for typed into somebody else's session.
     _helper_real=$1
     shift
     _helper_target=$3
@@ -245,12 +289,29 @@ helper_relay_agent_prompt() {
     elif ! helper_argv_has_flag --timeout "$@"; then
         _helper_extra="--timeout 120000"
     fi
+    # An `if` that takes neither branch answers 0, so the failing status is
+    # kept off an AND-OR list instead.
     # shellcheck disable=SC2086
-    if "$_helper_real" agent prompt "$_helper_target" "$_helper_text" "$@" $_helper_extra; then
+    "$_helper_real" agent prompt "$_helper_target" "$_helper_text" "$@" $_helper_extra &&
         return 0
-    fi
+    _helper_status=$?
+    _helper_before=$("$_helper_real" agent read "$_helper_target" --lines 60 2>/dev/null) ||
+        _helper_before=
+    helper_pane_holds_text "$_helper_text" "$_helper_before" ||
+        return $_helper_status
     "$_helper_real" agent send-keys "$_helper_target" Enter || return $?
-    "$_helper_real" agent wait "$_helper_target" --timeout 120000
+    "$_helper_real" agent wait "$_helper_target" --timeout 120000 || return $?
+    # The wait proves nothing by itself: a pane that swallowed the Enter is
+    # idle already, so it returns at once and the caller is told the message
+    # went in. A pane that has not moved at all is the one answer that means
+    # it did not.
+    _helper_after=$("$_helper_real" agent read "$_helper_target" --lines 60 2>/dev/null) ||
+        _helper_after=
+    if [ "$_helper_after" = "$_helper_before" ]; then
+        printf '%s\n' "lantern: Enter did not submit the message in $_helper_target" >&2
+        return 1
+    fi
+    return 0
 }
 
 helper_json_value() {

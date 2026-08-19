@@ -1,0 +1,1440 @@
+#!/usr/bin/env python3
+"""Lantern Bridge: use the lantern from Telegram, WhatsApp, or Slack.
+
+Nothing here scrapes the lantern pane. Each conversation gets its own workdir
+under the plugin state directory, seeded with the lantern prompt plus a remote
+appendix, and the helper CLI runs headless in that workdir. Only `claude` and
+`codex` are supported: they are the two with a real one-shot mode that also
+resumes.
+
+bridge.sh puts the plugin's `bin` first on PATH and exports HERDR_BIN_PATH, so
+the headless helper hits the same inspect-by-default herdr wrapper the pane
+does. A confirmation for a mutating command is therefore a chat message.
+
+Standard library only, same rule as bin/goals-floor and bin/elves-floor.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import hmac
+import http.server
+import json
+import os
+import queue
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+# Order is the detection order when BRIDGE_HELPER is empty.
+SUPPORTED_HELPERS = ("claude", "codex")
+
+CONF_KEYS = (
+    "BRIDGE_HELPER",
+    "BRIDGE_MODEL",
+    "BRIDGE_EFFORT",
+    "BRIDGE_CWD",
+    "BRIDGE_SPAWN_KIND",
+    "BRIDGE_EXTRA_ARGS",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_ALLOWED_CHATS",
+    "SLACK_BOT_TOKEN",
+    "SLACK_CHANNEL",
+    "SLACK_ALLOWED_USERS",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_VERIFY_TOKEN",
+    "WHATSAPP_APP_SECRET",
+    "WHATSAPP_ALLOWED_NUMBERS",
+    "WHATSAPP_WEBHOOK_HOST",
+    "WHATSAPP_WEBHOOK_PORT",
+)
+
+# Values that must never reach a log line, a chat message, or --check output.
+SECRET_KEYS = frozenset(
+    {
+        "TELEGRAM_BOT_TOKEN",
+        "SLACK_BOT_TOKEN",
+        "WHATSAPP_ACCESS_TOKEN",
+        "WHATSAPP_VERIFY_TOKEN",
+        "WHATSAPP_APP_SECRET",
+    }
+)
+
+DEFAULTS = {
+    "BRIDGE_CWD": "~",
+    "BRIDGE_SPAWN_KIND": "claude",
+    "WHATSAPP_WEBHOOK_HOST": "127.0.0.1",
+    "WHATSAPP_WEBHOOK_PORT": "8787",
+}
+
+# The same reject set lib.sh applies to helper.conf. The parser never sources
+# the file, so this is belt and braces, but a value that looks like shell has
+# no business reaching a subprocess argument list either.
+UNSAFE_CHARS = "$`;|&<>(){}"
+
+# Per-channel outbound limits, from each provider's documented maximum.
+TELEGRAM_LIMIT = 4096
+SLACK_LIMIT = 4000
+WHATSAPP_LIMIT = 4096
+
+# A headless turn can legitimately run for minutes; it is still bounded.
+HELPER_TIMEOUT = 900
+
+# Telegram's long poll holds the connection for TELEGRAM_POLL seconds, so the
+# socket timeout has to be longer than that or every poll looks like a failure.
+TELEGRAM_POLL = 50
+# Slack has no long poll on this endpoint, so it is a plain interval.
+SLACK_POLL = 3.0
+HTTP_TIMEOUT = 30
+LONG_POLL_TIMEOUT = TELEGRAM_POLL + 15
+
+# One network blip must not end the daemon. Every adapter loop catches, logs a
+# single line, waits this long, and goes round again.
+BACKOFF = 5.0
+
+WHATSAPP_API_VERSION = "v20.0"
+# A webhook body is a handful of small JSON objects. Anything larger is not a
+# message, and it is read into memory before it can be checked.
+MAX_WEBHOOK_BODY = 1 << 20
+
+# StreamRequestHandler applies this as a socket timeout. Without one, a
+# connection that announces a Content-Length and then stops sending parks a
+# thread for as long as it likes, and no credential is needed to open it: the
+# body is read before the signature can be checked. The README puts this port
+# behind a public tunnel, so a stall is a stranger's stall.
+WEBHOOK_TIMEOUT = 15
+# The ceiling on connections being served at once. Meta delivers a handful of
+# small POSTs; this is far above that and far below one thread per socket.
+WEBHOOK_MAX_CONNECTIONS = 8
+
+# What a signature header is allowed to be. http.client decodes headers as
+# latin-1, so anything else reaches hmac.compare_digest as a non-ASCII str and
+# it raises TypeError rather than returning False.
+HEX_DIGEST = re.compile(r"[0-9a-f]{64}")
+
+CLAUDE_TOOLS = "Bash,Read,Glob,Grep,LS"
+
+# Flags BRIDGE_EXTRA_ARGS may not carry. The extra args land after the
+# bridge's own --allowed-tools and a later flag wins, so the escape hatch for
+# a renamed flag would otherwise also be the escape hatch out of the tool list
+# and the helper's sandbox -- and none of these holds a character UNSAFE_CHARS
+# rejects. launch.sh validates HELPER_PERMISSION against a fixed set for the
+# same reason.
+UNSAFE_EXTRA_ARGS = frozenset(
+    {
+        "--add-dir",
+        "--allowed-tools",
+        "--allowedtools",
+        "--ask-for-approval",
+        "--bypass-permissions",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-skip-permissions",
+        "--disallowed-tools",
+        "--disallowedtools",
+        "--full-auto",
+        "--permission-mode",
+        "--permission-prompt-tool",
+        "--sandbox",
+        "--yolo",
+        "-a",
+        "-s",
+    }
+)
+
+# Anything outside this set is replaced in a chat id before it becomes a
+# directory name, so a hostile id cannot walk out of the state directory.
+UNSAFE_ID = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+class ConfigError(Exception):
+    """A config file or environment value the bridge refuses to use."""
+
+
+def log(message: str) -> None:
+    """One line to stderr. Callers pass counts and ids, never bodies."""
+    sys.stderr.write("%s lantern-bridge: %s\n" % (time.strftime("%H:%M:%S"), message))
+    sys.stderr.flush()
+
+
+def unquote(raw: str) -> str:
+    """Strip one layer of matching quotes, then reject shell metacharacters."""
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    for char in value:
+        if char in UNSAFE_CHARS:
+            raise ConfigError("unsafe character %r in value" % char)
+    return value
+
+
+def check_env_value(key: str, value: str) -> str:
+    """The same reject set the file gets, for a value that came from the shell.
+
+    The file was the only side that was checked, and the environment is the
+    side README and docs/slack-trial.md actually recommend: they tell people
+    to export their tokens rather than write them down. build_argv splits
+    BRIDGE_EXTRA_ARGS on whitespace on the strength of this check, so the
+    trusted path had better be the checked one.
+    """
+    for char in value:
+        if char in UNSAFE_CHARS:
+            raise ConfigError(
+                "unsafe character %r in %s from the environment" % (char, key)
+            )
+    return value
+
+
+def parse_conf(text: str) -> dict:
+    """Read KEY=value lines. Unknown keys and unsafe values fail."""
+    values: dict = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            raise ConfigError("line %d: not KEY=value: %s" % (lineno, stripped))
+        key, _, raw = stripped.partition("=")
+        key = key.strip()
+        if key not in CONF_KEYS:
+            raise ConfigError("line %d: unknown config key: %s" % (lineno, key))
+        try:
+            values[key] = unquote(raw)
+        except ConfigError as exc:
+            raise ConfigError("line %d: %s for %s" % (lineno, exc, key)) from None
+    return values
+
+
+def load_config(conf_path: Path | None, env: dict | None = None) -> dict:
+    """Config file first, environment second, documented default last.
+
+    An empty conf line is not a decision to leave the key empty; it falls
+    through to the environment the same way an absent line does. That is what
+    lets a Herdr pane inherit secrets from the user's shell without ever
+    writing them to a file.
+    """
+    env = os.environ if env is None else env
+    cfg = {key: "" for key in CONF_KEYS}
+    if conf_path is not None and Path(conf_path).is_file():
+        cfg.update(parse_conf(Path(conf_path).read_text(encoding="utf-8")))
+    for key in CONF_KEYS:
+        if not cfg[key]:
+            cfg[key] = check_env_value(key, str(env.get(key, "")).strip())
+        if not cfg[key]:
+            cfg[key] = DEFAULTS.get(key, "")
+    return cfg
+
+
+def split_list(value: str) -> list:
+    """Comma-separated allowlist to a list, blanks dropped."""
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def only_digits(value: str) -> str:
+    """E.164 comparison without caring whether anyone typed + or spaces."""
+    return re.sub(r"\D", "", value or "")
+
+
+def redact(key: str, value: str) -> str:
+    """What a secret is allowed to look like anywhere outside the process."""
+    if not value:
+        return "(unset)"
+    if key in SECRET_KEYS:
+        return "(set, %d bytes)" % len(value)
+    return value
+
+
+def enabled_channels(cfg: dict) -> list:
+    """A channel is enabled by its credential, never by a flag."""
+    channels = []
+    if cfg["TELEGRAM_BOT_TOKEN"]:
+        channels.append("telegram")
+    if cfg["SLACK_BOT_TOKEN"]:
+        channels.append("slack")
+    if cfg["WHATSAPP_ACCESS_TOKEN"]:
+        channels.append("whatsapp")
+    return channels
+
+
+def validate(cfg: dict, conf_path: Path | None, example_path: Path | None) -> list:
+    """Every reason this config cannot start, so the user fixes them at once."""
+    problems = []
+    channels = enabled_channels(cfg)
+    if not channels:
+        problems.append(
+            "no channels configured: set TELEGRAM_BOT_TOKEN, SLACK_BOT_TOKEN, or "
+            "WHATSAPP_ACCESS_TOKEN in %s (copy the keys from %s)"
+            % (conf_path or "bridge.conf", example_path or "bridge.conf.example")
+        )
+    helper = cfg["BRIDGE_HELPER"]
+    if helper and helper not in SUPPORTED_HELPERS:
+        problems.append(
+            "unsupported BRIDGE_HELPER %r: the bridge runs headless, so only "
+            "claude and codex work here" % helper
+        )
+    kind = cfg["BRIDGE_SPAWN_KIND"]
+    if not re.fullmatch(r"[a-z][a-z0-9_-]*", kind or ""):
+        problems.append(
+            "BRIDGE_SPAWN_KIND must match [a-z][a-z0-9_-]* (got %r)" % kind
+        )
+    try:
+        extra_args(cfg)
+    except ConfigError as exc:
+        problems.append(str(exc))
+
+    # A channel with credentials and no allowlist would answer anyone who
+    # found the bot. That is a refusal, not a warning.
+    if "telegram" in channels and not split_list(cfg["TELEGRAM_ALLOWED_CHATS"]):
+        problems.append("TELEGRAM_ALLOWED_CHATS is empty; list the chat ids to answer")
+    if "slack" in channels:
+        if not cfg["SLACK_CHANNEL"]:
+            problems.append("SLACK_CHANNEL is empty; set the channel id to watch")
+        if not split_list(cfg["SLACK_ALLOWED_USERS"]):
+            problems.append("SLACK_ALLOWED_USERS is empty; list the member ids to answer")
+    if "whatsapp" in channels:
+        if not cfg["WHATSAPP_PHONE_NUMBER_ID"]:
+            problems.append("WHATSAPP_PHONE_NUMBER_ID is empty")
+        if not cfg["WHATSAPP_VERIFY_TOKEN"]:
+            problems.append("WHATSAPP_VERIFY_TOKEN is empty; the webhook GET needs it")
+        if not cfg["WHATSAPP_APP_SECRET"]:
+            problems.append(
+                "WHATSAPP_APP_SECRET is empty; the X-Hub-Signature-256 check is "
+                "mandatory and cannot run without it"
+            )
+        if not split_list(cfg["WHATSAPP_ALLOWED_NUMBERS"]):
+            problems.append(
+                "WHATSAPP_ALLOWED_NUMBERS is empty; list the sender numbers to answer"
+            )
+        # isdigit() alone let 99999 through validate() and fail at bind, and
+        # the daemon reports every channel healthy while that one is dead.
+        port = str(cfg["WHATSAPP_WEBHOOK_PORT"])
+        if not port.isdigit() or not 1 <= int(port) <= 65535:
+            problems.append(
+                "WHATSAPP_WEBHOOK_PORT must be 1-65535 (got %r)"
+                % cfg["WHATSAPP_WEBHOOK_PORT"]
+            )
+    return problems
+
+
+def resolve_helper(cfg: dict, which=None) -> str:
+    """The helper this config will run, or a ConfigError explaining why not."""
+    which = shutil.which if which is None else which
+    helper = cfg["BRIDGE_HELPER"]
+    if helper:
+        if helper not in SUPPORTED_HELPERS:
+            raise ConfigError(
+                "unsupported BRIDGE_HELPER %r (use claude or codex)" % helper
+            )
+        return helper
+    for candidate in SUPPORTED_HELPERS:
+        if which(candidate):
+            return candidate
+    raise ConfigError(
+        "no bridge helper on PATH: install claude or codex, or set BRIDGE_HELPER"
+    )
+
+
+def extra_args(cfg: dict) -> list:
+    """BRIDGE_EXTRA_ARGS as tokens, or a ConfigError naming the flag refused.
+
+    Split on whitespace only; the parsers refuse anything shell-shaped on both
+    the file and the environment side.
+    """
+    tokens = cfg["BRIDGE_EXTRA_ARGS"].split()
+    for token in tokens:
+        name = token.split("=", 1)[0].strip().lower()
+        if name in UNSAFE_EXTRA_ARGS:
+            raise ConfigError(
+                "BRIDGE_EXTRA_ARGS may not carry %s: it lands after the "
+                "bridge's own --allowed-tools and a later flag wins, so this "
+                "would hand an allowlisted sender a helper with no tool list "
+                "and no sandbox" % name
+            )
+    return tokens
+
+
+def build_argv(cfg: dict, text: str, resume: bool, helper: str | None = None) -> list:
+    """One place per helper, because headless flags drift between releases.
+
+    BRIDGE_EXTRA_ARGS is the escape hatch when they do, minus the flags that
+    would undo the permission model rather than adjust a name.
+    """
+    helper = helper or cfg["BRIDGE_HELPER"]
+    model = cfg["BRIDGE_MODEL"]
+    effort = cfg["BRIDGE_EFFORT"]
+    extra = extra_args(cfg)
+    if helper == "claude":
+        # The message is the value of -p, so it can never be read as a flag.
+        argv = [
+            "claude",
+            "-p",
+            text,
+            "--output-format",
+            "text",
+            "--allowed-tools",
+            CLAUDE_TOOLS,
+        ]
+        if resume:
+            argv.append("--continue")
+        if model:
+            argv += ["--model", model]
+        if effort:
+            argv += ["--effort", effort]
+        return argv + extra
+    if helper == "codex":
+        argv = ["codex", "exec"]
+        if resume:
+            argv += ["resume", "--last"]
+        argv.append("--skip-git-repo-check")
+        if model:
+            argv += ["--model", model]
+        if effort:
+            argv += ["--config", 'model_reasoning_effort="%s"' % effort]
+        argv += extra
+        # The message is a bare positional here, and it comes from a stranger.
+        # Without the end-of-options guard a message that is exactly a flag is
+        # parsed as one. Everything else has to precede it for the same reason.
+        return argv + ["--", text]
+    raise ConfigError("unsupported bridge helper %r" % helper)
+
+
+def split_message(text: str, limit: int) -> list:
+    """Chunks no longer than limit, cut on a line break where one is near.
+
+    A chat app truncates or rejects an over-long message rather than wrapping
+    it, so this has to happen before the send, not after.
+    """
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    if not text:
+        return [""]
+    chunks = []
+    rest = text
+    while len(rest) > limit:
+        window = rest[:limit]
+        cut = window.rfind("\n")
+        if cut <= 0:
+            cut = window.rfind(" ")
+        if cut <= 0:
+            cut = limit
+            chunks.append(rest[:cut])
+            rest = rest[cut:]
+            continue
+        chunk = rest[:cut].rstrip()
+        rest = rest[cut:].lstrip("\n ")
+        # A window that held nothing but whitespace up to the break leaves an
+        # empty chunk, and every provider rejects an empty message -- so the
+        # send raises, the dispatch loop logs one "send failed" line, and the
+        # whole reply is lost rather than one blank line of it.
+        if chunk:
+            chunks.append(chunk)
+    if rest:
+        chunks.append(rest)
+    return chunks or [""]
+
+
+def conversation_dir(state_dir, channel: str, chat_id) -> Path:
+    """State path for one conversation. Chat ids come from the network."""
+    slug = UNSAFE_ID.sub("_", str(chat_id))[:64]
+    # The allowlists gate every id that reaches this, but they are typed by
+    # hand. A slug of "." or ".." is still a directory name that resolves
+    # somewhere else, so it never gets to be one.
+    if not slug or not slug.strip("."):
+        slug = "unknown"
+    return Path(state_dir) / "bridge" / channel / slug
+
+
+def workdir_for(state_dir, channel: str, chat_id) -> Path:
+    return conversation_dir(state_dir, channel, chat_id) / "workdir"
+
+
+def remote_appendix(cfg: dict, channel: str, search_root: str) -> str:
+    """What the lantern prompt does not know: there is no pane and no terminal."""
+    return """
+
+Runtime (injected by the Lantern Bridge; do not ignore):
+
+- You are answering over a chat app (%s), not in a terminal pane. The person
+  is probably on a phone. Keep replies short and plain: no tables, no
+  headings, no code fences unless a command is the answer.
+- Prefer $HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.
+  Inspect commands (list/read/get) run as usual. Mutating commands (create,
+  start, focus, close, remove, prompt, send-*) are blocked until the user
+  confirms the exact path or target. Ask for that confirmation as a chat
+  message, wait for their answer, then rerun:
+    HERDR_HELPER_OK=1 herdr <same command>
+  There is no approval UI here. The chat is the only place to ask.
+- Never call /opt/homebrew/bin/herdr or another absolute herdr path.
+- Default --kind for agent start is %s unless the user names one.
+- Search from %s plus the usual project roots. You are the lantern, not an
+  elf; do not edit files in this workdir.
+- The floor.txt, goals-floor.txt, and elves-floor.txt snapshots the lantern
+  pane writes do not exist here. Run `herdr agent list` yourself, or
+  `python3 $HERDR_PLUGIN_ROOT/bin/goals-floor`, when you need the field.
+- One message in, one message out. At most one question per reply.
+- There is no lantern pane in this conversation. Never close a workspace, a
+  tab, or a pane unless the user names it.
+""" % (
+        channel,
+        cfg["BRIDGE_SPAWN_KIND"],
+        search_root,
+    )
+
+
+def seed_workdir(workdir: Path, prompt_text: str, appendix: str) -> bool:
+    """Write the helper's instruction files once, and only once.
+
+    Once is the point: the helper edits nothing here, but a rewrite on every
+    turn would churn the mtimes a resumed session watches, and it would undo a
+    user who tuned the file by hand.
+    """
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    full = prompt_text.rstrip("\n") + appendix
+    seeded = False
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        target = workdir / name
+        if not target.exists():
+            target.write_text(full, encoding="utf-8")
+            seeded = True
+    return seeded
+
+
+def has_session(workdir: Path) -> bool:
+    """True once a turn has completed here, so the next one resumes.
+
+    The marker sits beside the workdir rather than inside it: the helper reads
+    its own cwd, and a stray file there is one more thing to explain.
+    """
+    return (Path(workdir).parent / "session.marker").exists()
+
+
+def mark_session(workdir: Path) -> None:
+    marker = Path(workdir).parent / "session.marker"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+
+
+def run_helper(cfg: dict, helper: str, workdir: Path, text: str, timeout=HELPER_TIMEOUT):
+    """Run one headless turn. Returns the reply text for the channel.
+
+    Helper stderr never reaches the chat. It can carry file paths, argv, and
+    whatever the CLI decided to print about its own credentials.
+    """
+    resume = has_session(workdir)
+    argv = build_argv(cfg, text, resume, helper=helper)
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=str(workdir),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        log("helper timed out after %ds" % timeout)
+        return "The lantern took too long to answer. Try a smaller question."
+    except OSError as exc:
+        log("helper could not start: %s" % exc.__class__.__name__)
+        return "The lantern helper could not start. Check the bridge pane."
+    out = proc.stdout.decode("utf-8", "replace").strip()
+    if proc.returncode != 0:
+        log(
+            "helper exited %d (stdout %d bytes, stderr %d bytes)"
+            % (proc.returncode, len(proc.stdout), len(proc.stderr))
+        )
+        # No marker on a run that failed, whatever it printed on the way out.
+        # The marker is what makes the next turn pass --continue, and a
+        # --continue for a session the helper never opened wedges the
+        # conversation: every turn after it resumes something that is not
+        # there.
+        if not out:
+            return "The lantern helper failed (exit %d). Check the bridge pane." % (
+                proc.returncode,
+            )
+        return out
+    mark_session(workdir)
+    return out or "(the lantern had nothing to say)"
+
+
+def http_json(url: str, payload=None, headers=None, timeout=HTTP_TIMEOUT):
+    """One JSON round trip, always with an explicit timeout.
+
+    Errors are raised, not swallowed: the adapter loop above is what decides to
+    log a line and back off. The URL is never logged, because a Telegram bot
+    token lives inside it.
+    """
+    data = None
+    request_headers = {"Accept": "application/json"}
+    if headers:
+        request_headers.update(headers)
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        request_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=request_headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read()
+    if not body:
+        return {}
+    return json.loads(body.decode("utf-8", "replace"))
+
+
+class Adapter:
+    """One channel. A thread runs poll_once forever; the main thread replies."""
+
+    name = "adapter"
+    limit = 4000
+
+    def __init__(self, cfg: dict, inbox):
+        self.cfg = cfg
+        self.inbox = inbox
+
+    def poll_once(self) -> None:
+        raise NotImplementedError
+
+    def send(self, chat_id, text: str) -> None:
+        raise NotImplementedError
+
+    def offer(self, chat_id, text: str) -> None:
+        self.inbox.put((self.name, str(chat_id), text))
+
+    def run(self) -> None:
+        while True:
+            try:
+                self.poll_once()
+            except Exception as exc:  # noqa: BLE001 - a blip must not end the daemon
+                log(
+                    "%s: %s while polling; retrying in %.0fs"
+                    % (self.name, exc.__class__.__name__, BACKOFF)
+                )
+                time.sleep(BACKOFF)
+
+
+class TelegramAdapter(Adapter):
+    """Bot API long poll. No webhook, so nothing has to be reachable."""
+
+    name = "telegram"
+    limit = TELEGRAM_LIMIT
+
+    def __init__(self, cfg: dict, inbox):
+        super().__init__(cfg, inbox)
+        self.token = cfg["TELEGRAM_BOT_TOKEN"]
+        self.allowed = set(split_list(cfg["TELEGRAM_ALLOWED_CHATS"]))
+        # getUpdates replays everything until an offset acknowledges it, so the
+        # cursor is the only thing standing between a restart and a re-answer.
+        self.offset = 0
+
+    def api(self, method: str) -> str:
+        return "https://api.telegram.org/bot%s/%s" % (self.token, method)
+
+    def updates_url(self) -> str:
+        query = urllib.parse.urlencode(
+            {
+                "timeout": TELEGRAM_POLL,
+                "offset": self.offset,
+                "allowed_updates": '["message"]',
+            }
+        )
+        return "%s?%s" % (self.api("getUpdates"), query)
+
+    def authorized(self, chat_id, chat_type, sender_id) -> bool:
+        """Whether a person on the allowlist sent this, not merely a room.
+
+        An id in TELEGRAM_ALLOWED_CHATS is a person: their private chat with
+        the bot, whose id is their user id. A group id on that list would
+        authorize every member of the group, and what an accepted message buys
+        is a helper CLI with Bash on this machine. So a group is answered only
+        when the sender's own id is allowlisted; the room's id is not enough.
+        """
+        if sender_id is not None and str(sender_id) in self.allowed:
+            return True
+        return chat_type == "private" and str(chat_id) in self.allowed
+
+    def parse_updates(self, payload: dict):
+        """Returns (accepted, next_offset).
+
+        The offset advances for every update seen, including the ones dropped.
+        Anything else and one message from a stranger stalls the cursor and the
+        bot replays it forever.
+        """
+        accepted = []
+        offset = self.offset
+        for update in payload.get("result") or []:
+            if not isinstance(update, dict):
+                continue
+            update_id = update.get("update_id")
+            if isinstance(update_id, int) and update_id >= offset:
+                offset = update_id + 1
+            # Only fresh messages. edited_message, channel_post, and the
+            # callback kinds are somebody else's feature.
+            message = update.get("message")
+            if not isinstance(message, dict):
+                continue
+            text = message.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            chat = message.get("chat")
+            if not isinstance(chat, dict):
+                continue
+            chat_id = chat.get("id")
+            if chat_id is None:
+                continue
+            sender = message.get("from")
+            sender_id = sender.get("id") if isinstance(sender, dict) else None
+            if not self.authorized(chat_id, chat.get("type"), sender_id):
+                log(
+                    "telegram: dropped a message from chat %s (%s), sender %s"
+                    % (chat_id, chat.get("type") or "unknown", sender_id)
+                )
+                continue
+            accepted.append((str(chat_id), text.strip()))
+        return accepted, offset
+
+    def poll_once(self) -> None:
+        payload = http_json(self.updates_url(), timeout=LONG_POLL_TIMEOUT)
+        accepted, offset = self.parse_updates(payload)
+        self.offset = offset
+        for chat_id, text in accepted:
+            self.offer(chat_id, text)
+
+    def send_payloads(self, chat_id, text: str):
+        # parse_mode is left off on purpose: an answer full of paths and
+        # underscores is not Markdown, and Telegram rejects the whole message
+        # when it disagrees.
+        return [
+            (self.api("sendMessage"), {"chat_id": str(chat_id), "text": chunk})
+            for chunk in split_message(text, self.limit)
+        ]
+
+    def send(self, chat_id, text: str) -> None:
+        for url, payload in self.send_payloads(chat_id, text):
+            http_json(url, payload)
+
+
+class SlackAdapter(Adapter):
+    """Web API polling. Socket Mode needs websockets, which the stdlib lacks,
+    and the Events API needs a public server; conversations.history needs
+    neither and one channel is all this watches."""
+
+    name = "slack"
+    limit = SLACK_LIMIT
+
+    def __init__(self, cfg: dict, inbox, now=None):
+        super().__init__(cfg, inbox)
+        self.token = cfg["SLACK_BOT_TOKEN"]
+        self.channel = cfg["SLACK_CHANNEL"]
+        self.allowed = set(split_list(cfg["SLACK_ALLOWED_USERS"]))
+        # History starts at startup. Whatever the channel said before the
+        # bridge existed is somebody else's conversation, not a backlog.
+        self.oldest = "%.6f" % (time.time() if now is None else now)
+        # `oldest` is a boundary, not an acknowledgement: the message that sets
+        # the cursor can come back on the next poll. Remembering the ts is what
+        # stops a double answer.
+        self.seen = set()
+
+    def headers(self) -> dict:
+        return {"Authorization": "Bearer %s" % self.token}
+
+    def history_url(self) -> str:
+        query = urllib.parse.urlencode(
+            {
+                "channel": self.channel,
+                "oldest": self.oldest,
+                "limit": 100,
+                "inclusive": "false",
+            }
+        )
+        return "https://slack.com/api/conversations.history?%s" % query
+
+    def remember(self, ts: str) -> None:
+        self.seen.add(ts)
+        if len(self.seen) > 512:
+            # Bounded on purpose: this runs for weeks. Anything this old is
+            # far behind the cursor and can never come back.
+            for old in sorted(self.seen)[:256]:
+                self.seen.discard(old)
+
+    def parse_history(self, payload: dict):
+        """Returns (accepted, next_oldest). history comes back newest first."""
+        accepted = []
+        oldest = self.oldest
+        messages = payload.get("messages") or []
+        for message in reversed(messages):
+            if not isinstance(message, dict):
+                continue
+            ts = message.get("ts")
+            if not isinstance(ts, str):
+                continue
+            try:
+                if float(ts) > float(oldest):
+                    oldest = ts
+            except ValueError:
+                continue
+            if ts in self.seen:
+                continue
+            self.remember(ts)
+            # The bridge's own replies come back through history. So do joins,
+            # topic changes, and every other subtype.
+            if message.get("bot_id") or message.get("subtype"):
+                continue
+            user = message.get("user")
+            if not isinstance(user, str) or user not in self.allowed:
+                if isinstance(user, str):
+                    log("slack: dropped a message from %s" % user)
+                continue
+            text = message.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            accepted.append((self.channel, text.strip()))
+        return accepted, oldest
+
+    def poll_once(self) -> None:
+        payload = http_json(self.history_url(), headers=self.headers())
+        if not payload.get("ok", False):
+            # Slack reports failure in the body with HTTP 200. The error slug
+            # is a fixed vocabulary, never a token.
+            raise RuntimeError("slack api error: %s" % payload.get("error", "unknown"))
+        accepted, oldest = self.parse_history(payload)
+        self.oldest = oldest
+        for chat_id, text in accepted:
+            self.offer(chat_id, text)
+        time.sleep(SLACK_POLL)
+
+    def send_payloads(self, chat_id, text: str):
+        return [
+            (
+                "https://slack.com/api/chat.postMessage",
+                {"channel": self.channel, "text": chunk},
+            )
+            for chunk in split_message(text, self.limit)
+        ]
+
+    def send(self, chat_id, text: str) -> None:
+        for url, payload in self.send_payloads(chat_id, text):
+            http_json(url, payload, headers=self.headers())
+
+
+class WebhookHandler(http.server.BaseHTTPRequestHandler):
+    """Meta Cloud API webhook. A subclass carries the adapter as `adapter`."""
+
+    adapter = None
+    server_version = "lantern-bridge"
+    sys_version = ""
+    protocol_version = "HTTP/1.1"
+    # StreamRequestHandler reads this and calls settimeout on the connection.
+    # Inherited it is None, which is what let one stalled socket hold a thread
+    # forever.
+    timeout = WEBHOOK_TIMEOUT
+
+    def log_message(self, fmt, *args):
+        # The default writes the request line to stderr. On the GET path that
+        # line contains hub.verify_token, so there is no version of this worth
+        # keeping.
+        return
+
+    def respond(self, status: int, body: str = "", close: bool = False) -> None:
+        payload = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        if close:
+            # send_header sets close_connection itself when it sees this, but
+            # say it here too: an answer sent without reading the declared
+            # body must not leave a keep-alive connection open, or the bytes
+            # still in flight get parsed as the next request.
+            self.send_header("Connection", "close")
+            self.close_connection = True
+        self.end_headers()
+        if payload:
+            self.wfile.write(payload)
+
+    def do_GET(self):  # noqa: N802 - http.server's naming
+        query = urllib.parse.urlparse(self.path).query
+        params = urllib.parse.parse_qs(query)
+        challenge = self.adapter.verify_challenge(params)
+        if challenge is None:
+            self.respond(403, "forbidden")
+            return
+        self.respond(200, challenge)
+
+    def do_POST(self):  # noqa: N802 - http.server's naming
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self.respond(400, "bad request")
+            return
+        if length < 0 or length > MAX_WEBHOOK_BODY:
+            # The body is not drained, so this connection cannot be reused.
+            self.respond(413, "too large", close=True)
+            return
+        # The raw bytes, read once and hashed before anything looks at them.
+        # Parsing first and re-serialising would sign a different document.
+        try:
+            raw = self.rfile.read(length)
+        except OSError:
+            # A socket timeout lands here, and the body arrives before any
+            # credential does, so this is the ordinary end of a stalled
+            # connection rather than an event worth a line.
+            self.close_connection = True
+            return
+        signature = self.headers.get("X-Hub-Signature-256", "")
+        if not self.adapter.verify_signature(raw, signature):
+            log("whatsapp: rejected a POST with a bad signature (%d bytes)" % len(raw))
+            self.respond(401, "unauthorized")
+            return
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.respond(400, "bad request")
+            return
+        if not isinstance(payload, dict):
+            self.respond(400, "bad request")
+            return
+        for sender, text in self.adapter.accepted_from(payload):
+            self.adapter.offer(sender, text)
+        # Meta retries anything that is not answered quickly, so the reply goes
+        # out now and the helper runs on the dispatch thread.
+        self.respond(200, "ok")
+
+
+class BoundedWebhookServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer with a ceiling on the connections it will serve.
+
+    The base class starts one thread per accepted socket and caps nothing, so
+    a flood of connections that never finish a request costs a thread, a
+    buffer, and a file descriptor each -- and none of it needs a credential,
+    because the body is read before the signature is checked. This is the one
+    socket the README asks people to expose through a tunnel.
+
+    The invariant the semaphore rests on: socketserver calls shutdown_request
+    exactly once for every request that process_request handed to a thread,
+    on the error paths as well as the clean one. A connection refused here is
+    closed with close_request, which is the path that does not release.
+    """
+
+    max_connections = WEBHOOK_MAX_CONNECTIONS
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.Semaphore(self.max_connections)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            log(
+                "whatsapp: webhook already serving %d connections; dropped one"
+                % self.max_connections
+            )
+            self.close_request(request)
+            return
+        super().process_request(request, client_address)
+
+    def shutdown_request(self, request):
+        try:
+            super().shutdown_request(request)
+        finally:
+            self._slots.release()
+
+    def handle_error(self, request, client_address):
+        """One redacted line where socketserver would print a traceback.
+
+        The default writes the whole stack, absolute source paths included, to
+        the bridge pane -- the pane the docs call safe to paste when asking
+        for help. The client address is not logged either; it is a tunnel's.
+        """
+        exc = sys.exc_info()[1]
+        log("whatsapp: webhook request failed (%s)" % exc.__class__.__name__)
+
+
+class WhatsAppAdapter(Adapter):
+    """Meta Cloud API. Inbound is a webhook, so this one listens rather than
+    polls. It binds localhost; a tunnel gives Meta the public HTTPS URL."""
+
+    name = "whatsapp"
+    limit = WHATSAPP_LIMIT
+
+    def __init__(self, cfg: dict, inbox):
+        super().__init__(cfg, inbox)
+        self.token = cfg["WHATSAPP_ACCESS_TOKEN"]
+        self.phone_number_id = cfg["WHATSAPP_PHONE_NUMBER_ID"]
+        self.verify_token = cfg["WHATSAPP_VERIFY_TOKEN"]
+        self.app_secret = cfg["WHATSAPP_APP_SECRET"]
+        self.allowed = {only_digits(n) for n in split_list(cfg["WHATSAPP_ALLOWED_NUMBERS"])}
+        self.allowed.discard("")
+        self.host = cfg["WHATSAPP_WEBHOOK_HOST"] or "127.0.0.1"
+        self.port = int(cfg["WHATSAPP_WEBHOOK_PORT"] or 8787)
+        self.server = None
+        # These three are re-checked here, not only in validate(), because this
+        # object is the thing that opens a socket to the internet.
+        if not self.verify_token:
+            raise ConfigError(
+                "WHATSAPP_VERIFY_TOKEN is required: compare_digest of two empty "
+                "strings is a match, so an empty one lets any GET pass the "
+                "webhook verification"
+            )
+        if not self.app_secret:
+            raise ConfigError(
+                "WHATSAPP_APP_SECRET is required: without it the "
+                "X-Hub-Signature-256 check cannot run and anyone who finds the "
+                "webhook can drive the lantern"
+            )
+        if not self.allowed:
+            raise ConfigError(
+                "WHATSAPP_ALLOWED_NUMBERS is required: list the sender numbers "
+                "the bridge may answer"
+            )
+
+    def verify_challenge(self, params: dict):
+        """The GET Meta sends once, when the webhook is registered."""
+        mode = (params.get("hub.mode") or [""])[0]
+        token = (params.get("hub.verify_token") or [""])[0]
+        challenge = (params.get("hub.challenge") or [""])[0]
+        if mode != "subscribe" or not challenge:
+            return None
+        if not hmac.compare_digest(str(token), self.verify_token):
+            return None
+        return challenge
+
+    def verify_signature(self, raw: bytes, header: str) -> bool:
+        """HMAC-SHA256 of the raw body, compared in constant time.
+
+        Mandatory, not optional. This is the only thing standing between the
+        public tunnel and a helper CLI running as the user.
+        """
+        if not header or not self.app_secret:
+            return False
+        algorithm, _, digest = header.strip().partition("=")
+        if algorithm != "sha256" or not digest:
+            return False
+        digest = digest.strip().lower()
+        # A header is decoded as latin-1, so anything at all can arrive here.
+        # compare_digest raises TypeError on a non-ASCII str rather than
+        # answering False, and an exception out of do_POST is a traceback in
+        # the pane and no 401 at all. Nothing but 64 hex digits can be right.
+        if not HEX_DIGEST.fullmatch(digest):
+            return False
+        expected = hmac.new(
+            self.app_secret.encode("utf-8"), raw, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(expected, digest)
+
+    def extract_messages(self, payload: dict):
+        """Every text message in one webhook body, allowlist not yet applied."""
+        found = []
+        for entry in payload.get("entry") or []:
+            if not isinstance(entry, dict):
+                continue
+            for change in entry.get("changes") or []:
+                if not isinstance(change, dict):
+                    continue
+                value = change.get("value")
+                if not isinstance(value, dict):
+                    continue
+                for message in value.get("messages") or []:
+                    if not isinstance(message, dict):
+                        continue
+                    # statuses (delivered, read) come through the same hook,
+                    # and so do images, audio, and reactions.
+                    if message.get("type") != "text":
+                        continue
+                    body = message.get("text")
+                    text = body.get("body") if isinstance(body, dict) else None
+                    sender = message.get("from")
+                    if not isinstance(sender, str) or not isinstance(text, str):
+                        continue
+                    if not text.strip():
+                        continue
+                    found.append((sender, text.strip()))
+        return found
+
+    def accepted_from(self, payload: dict):
+        accepted = []
+        for sender, text in self.extract_messages(payload):
+            if only_digits(sender) not in self.allowed:
+                log("whatsapp: dropped a message from an unlisted number")
+                continue
+            accepted.append((sender, text))
+        return accepted
+
+    def start_server(self):
+        handler = type("LanternWebhookHandler", (WebhookHandler,), {"adapter": self})
+        self.server = BoundedWebhookServer((self.host, self.port), handler)
+        return self.server
+
+    def poll_once(self) -> None:
+        # Not a poll: this blocks until the socket dies, and then the base
+        # class's backoff brings it back.
+        server = self.start_server()
+        log(
+            "whatsapp: webhook listening on %s:%d"
+            % (self.host, server.server_address[1])
+        )
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+            self.server = None
+
+    def send_payloads(self, chat_id, text: str):
+        url = "https://graph.facebook.com/%s/%s/messages" % (
+            WHATSAPP_API_VERSION,
+            self.phone_number_id,
+        )
+        return [
+            (
+                url,
+                {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": str(chat_id),
+                    "type": "text",
+                    "text": {"preview_url": False, "body": chunk},
+                },
+            )
+            for chunk in split_message(text, self.limit)
+        ]
+
+    def send(self, chat_id, text: str) -> None:
+        headers = {"Authorization": "Bearer %s" % self.token}
+        for url, payload in self.send_payloads(chat_id, text):
+            http_json(url, payload, headers=headers)
+
+
+ADAPTERS = {
+    "telegram": TelegramAdapter,
+    "slack": SlackAdapter,
+    "whatsapp": WhatsAppAdapter,
+}
+
+
+def daemon_lock_path(state_dir) -> Path:
+    return Path(state_dir) / "bridge" / "daemon.lock"
+
+
+# Where the Windows lock byte sits. A Windows byte-range lock is mandatory,
+# not advisory the way flock is: whatever it covers stops answering reads from
+# every other handle, this process included. Locking byte 0 would therefore
+# take the pid down with it, and the pid is written to be read. Lock a byte
+# far past anything the file will ever hold instead. LockFile is happy beyond
+# the end of a file and does not extend it.
+LOCK_BYTE_OFFSET = 1 << 30
+
+
+def _take_lock(fd):
+    """True taken, False held by another process, None no locking here.
+
+    Leaves the file position at 0 on success, because the caller writes the
+    pid next.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    if fcntl is not None:
+        # flock covers the whole file and is advisory, so a reader is
+        # unaffected and the position never moves.
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return False
+        return True
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+    # msvcrt.locking works from the current position, so seek out to the
+    # sentinel byte, and back to the start whatever the answer was.
+    try:
+        os.lseek(fd, LOCK_BYTE_OFFSET, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+    finally:
+        os.lseek(fd, 0, os.SEEK_SET)
+    return True
+
+
+def acquire_daemon_lock(state_dir):
+    """One bridge per state directory. Returns the fd to hold, or None.
+
+    Two daemons on one config is not a duplicate window. Two Telegram long
+    polls on the same bot token make getUpdates answer 409 and fight over the
+    offset, two Slack pollers both reply to every message, and the second
+    WhatsApp webhook cannot bind its port and retries in a loop forever.
+
+    The lock is advisory, not a file that must not exist: a daemon killed with
+    -9 leaves the file behind either way, and the kernel drops the lock when
+    the process goes. An exclusive-create marker would refuse to start until
+    somebody deleted it by hand.
+    """
+    path = daemon_lock_path(state_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+    taken = _take_lock(fd)
+    if taken is None:
+        os.close(fd)
+        log(
+            "single-instance guard unavailable on this Python (no fcntl, no "
+            "msvcrt); starting without it"
+        )
+        return None
+    if not taken:
+        os.close(fd)
+        raise ConfigError(
+            "a lantern bridge is already running: %s is locked. Stop that one "
+            "before starting another, or two pollers will answer every message "
+            "twice." % path
+        )
+    # For a human reading the file; the lock itself is what the kernel holds.
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, ("%d\n" % os.getpid()).encode("ascii"))
+    except OSError:
+        pass
+    return fd
+
+
+# The lock lives as long as the process does. Closing the fd releases it, so
+# the daemon keeps a reference where nothing can collect it.
+_DAEMON_LOCKS = []
+
+
+def release_daemon_locks() -> None:
+    """Drop every lock this process holds. For tests, not for the daemon.
+
+    A daemon holds its lock until it exits, so nothing in the normal path
+    calls this. A test that runs serve() in the same interpreter does need
+    it: Windows refuses to delete a file that still has an open handle, so a
+    leaked fd turns a temporary directory's cleanup into a PermissionError.
+    """
+    while _DAEMON_LOCKS:
+        try:
+            os.close(_DAEMON_LOCKS.pop())
+        except OSError:
+            pass
+
+
+def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
+    """One thread per channel in, one helper turn at a time out.
+
+    Serialising the helper is deliberate for a first version: two headless
+    turns in the same repository at the same time is a worse problem than a
+    queued message.
+    """
+    # Before a single adapter thread exists: a second daemon would poll the
+    # same tokens as this one.
+    try:
+        lock_fd = acquire_daemon_lock(state_dir)
+    except (ConfigError, OSError) as exc:
+        die(str(exc))
+        return 2
+    if lock_fd is not None:
+        _DAEMON_LOCKS.append(lock_fd)
+
+    inbox = queue.Queue()
+    adapters = {}
+    for channel in enabled_channels(cfg):
+        factory = ADAPTERS.get(channel)
+        if factory is None:
+            die("no adapter for channel %s in this build" % channel)
+        try:
+            adapters[channel] = factory(cfg, inbox)
+        except (ConfigError, ValueError) as exc:
+            die("%s: %s" % (channel, exc))
+    for channel, adapter in adapters.items():
+        threading.Thread(target=adapter.run, name=channel, daemon=True).start()
+        log("%s: listening" % channel)
+
+    search_root = expand_root(cfg["BRIDGE_CWD"])
+    while True:
+        channel, chat_id, text = inbox.get()
+        # The adapters are daemon threads, so an exception that escapes here
+        # ends the process and takes them with it, silently. A full disk in
+        # seed_workdir is not a reason to stop answering the other channels.
+        try:
+            adapter = adapters[channel]
+            workdir = workdir_for(state_dir, channel, chat_id)
+            seed_workdir(workdir, prompt_text, remote_appendix(cfg, channel, search_root))
+            log("%s %s: %d bytes in" % (channel, chat_id, len(text.encode("utf-8"))))
+            reply = run_helper(cfg, helper, workdir, text)
+            log("%s %s: %d bytes out" % (channel, chat_id, len(reply.encode("utf-8"))))
+            try:
+                adapter.send(chat_id, reply)
+            except Exception as exc:  # noqa: BLE001 - a failed send is not fatal
+                log(
+                    "%s %s: send failed (%s)"
+                    % (channel, chat_id, exc.__class__.__name__)
+                )
+        except Exception as exc:  # noqa: BLE001 - one bad turn must not end the daemon
+            log(
+                "%s %s: turn failed (%s); continuing"
+                % (channel, chat_id, exc.__class__.__name__)
+            )
+            # The person is waiting on a reply that is never coming. Telling
+            # them is best effort: whatever broke the turn may break this too.
+            try:
+                adapters[channel].send(
+                    chat_id, "The lantern hit an error on that one. Try again."
+                )
+            except Exception as exc2:  # noqa: BLE001 - never fatal
+                log(
+                    "%s %s: could not report the failure (%s)"
+                    % (channel, chat_id, exc2.__class__.__name__)
+                )
+
+
+def home_dir():
+    """The user's home, or None when nothing in the environment says.
+
+    Path.home() reads USERPROFILE on Windows and HOME everywhere else, and
+    raises RuntimeError rather than returning anything when its variable is
+    unset. A shell that exports only HOME is therefore fine on macOS and
+    Linux and fatal on Windows, which is a difference worth absorbing here
+    rather than at three call sites.
+    """
+    try:
+        return Path.home()
+    except RuntimeError:
+        pass
+    for key in ("HOME", "USERPROFILE"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return Path(value)
+    return None
+
+
+def expand_root(value: str) -> str:
+    """~ the way lib.sh expands it, so both entrypoints agree.
+
+    The search root is a hint handed to the helper, nothing the bridge acts
+    on itself. An environment that will not say where home is leaves the
+    value unexpanded and says so, because ending the daemon over a hint --
+    and BRIDGE_CWD defaults to ~, so this is the ordinary path -- would be
+    out of all proportion.
+    """
+    value = (value or "~").strip()
+    if value == "~" or value.startswith("~/"):
+        home = home_dir()
+        if home is None:
+            log("no home directory in this environment; BRIDGE_CWD stays %s" % value)
+            return value
+        return str(home) if value == "~" else str(home / value[2:])
+    return value.rstrip("/") or "/"
+
+
+def check(cfg: dict, args, conf_path, example_path) -> int:
+    """Validate the config and show the argv, without touching the network."""
+    problems = validate(cfg, conf_path, example_path)
+    for problem in problems:
+        sys.stderr.write("lantern-bridge: %s\n" % problem)
+    print("config: %s" % (conf_path or "(none)"))
+    for key in CONF_KEYS:
+        print("  %-26s %s" % (key, redact(key, cfg[key])))
+    print("channels: %s" % (", ".join(enabled_channels(cfg)) or "(none)"))
+    try:
+        helper = resolve_helper(cfg)
+    except ConfigError as exc:
+        sys.stderr.write("lantern-bridge: %s\n" % exc)
+        return 2
+    print("helper: %s%s" % (helper, "" if shutil.which(helper) else " (not on PATH)"))
+    search_root = expand_root(cfg["BRIDGE_CWD"])
+    print("search root: %s" % search_root)
+    print("workdir: %s" % workdir_for(args.state, "telegram", "<chat-id>"))
+    if cfg["BRIDGE_EXTRA_ARGS"].strip():
+        # Loud on purpose. These tokens land after the bridge's own flags, and
+        # the reader is the only person who can say whether that is intended.
+        print("!! BRIDGE_EXTRA_ARGS is set, and it lands after the bridge's own")
+        print("!! flags, so anything a later flag can override, it overrides:")
+        print("!!   %s" % cfg["BRIDGE_EXTRA_ARGS"].strip())
+    try:
+        print("first turn:  %s" % " ".join(build_argv(cfg, "hello", False, helper)))
+        print("later turn:  %s" % " ".join(build_argv(cfg, "hello", True, helper)))
+    except ConfigError as exc:
+        sys.stderr.write("lantern-bridge: %s\n" % exc)
+        return 2
+    return 2 if problems else 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="lantern-bridge",
+        description="Relay Telegram, WhatsApp, and Slack messages to the lantern helper.",
+    )
+    parser.add_argument("--conf", default="", help="path to bridge.conf")
+    parser.add_argument("--example", default="", help="path to bridge.conf.example")
+    parser.add_argument("--prompt", default="", help="path to the lantern prompt")
+    parser.add_argument("--state", default=".", help="plugin state directory")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate the config and print a redacted summary, then exit",
+    )
+    return parser
+
+
+def die(message: str) -> None:
+    sys.stderr.write("\nlantern-bridge: %s\n" % message)
+    if sys.stdin.isatty():
+        sys.stderr.write("Fix the config, then reopen the bridge. Press Enter.\n")
+        try:
+            sys.stdin.readline()
+        except (KeyboardInterrupt, OSError):
+            pass
+    raise SystemExit(2)
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    conf_path = Path(args.conf) if args.conf else None
+    example_path = Path(args.example) if args.example else None
+    try:
+        cfg = load_config(conf_path)
+    except ConfigError as exc:
+        # A refused value can come from either side now, and the message says
+        # which, so framing it all as "could not read the file" would lie.
+        die(str(exc))
+        return 2
+    except OSError as exc:
+        die("could not read %s: %s" % (conf_path, exc))
+        return 2
+
+    if args.check:
+        return check(cfg, args, conf_path, example_path)
+
+    problems = validate(cfg, conf_path, example_path)
+    if problems:
+        die("\n  ".join(["cannot start:"] + problems))
+    try:
+        helper = resolve_helper(cfg)
+    except ConfigError as exc:
+        die(str(exc))
+        return 2
+    if not shutil.which(helper):
+        die("bridge helper not found on PATH: %s" % helper)
+
+    prompt_text = ""
+    if args.prompt and Path(args.prompt).is_file():
+        prompt_text = Path(args.prompt).read_text(encoding="utf-8")
+    if not prompt_text.strip():
+        # Not fatal: the helper still has the appendix, which is the part that
+        # explains the mutate gate. Worth one line, because the answers get
+        # noticeably worse without the lantern prompt.
+        log("no lantern prompt at %s; running with the remote appendix only" % args.prompt)
+
+    log("helper %s, channels %s" % (helper, ", ".join(enabled_channels(cfg))))
+    try:
+        return serve(cfg, helper, prompt_text, args.state)
+    except KeyboardInterrupt:
+        log("stopped")
+        return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

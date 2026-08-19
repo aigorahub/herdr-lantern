@@ -2,6 +2,196 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.5.0] - 2026-08-19
+
+### Added
+
+- The Lantern Bridge: use the lantern from Telegram, WhatsApp, or Slack. A new
+  `bridge` pane and a `bridge` action run `bridge.sh`, which sets up the same
+  environment the lantern pane gets and starts `bin/lantern-bridge`. Each
+  conversation gets its own workdir seeded with `prompt.md` plus a remote
+  appendix, and a headless `claude` or `codex` answers there. Nothing scrapes
+  the lantern pane.
+- The mutate gate reaches the chat apps. The bridge exports the same
+  `HERDR_BIN_PATH` wrapper, so create, start, focus, close, and prompt stay
+  blocked until you confirm — and the confirmation is a message in the
+  channel, because there is no terminal at the other end.
+- `bridge.conf`, seeded from `bridge.conf.example` on first start and parsed
+  the same way `helper.conf` is: `KEY=value` lines only, never sourced,
+  unknown keys and shell metacharacters refused. Every key falls back to an
+  environment variable of the same name, so tokens can stay out of the file.
+- `sh bridge.sh --check` validates a config and prints a summary with every
+  token redacted, plus the helper command line it would run. No network, no
+  helper process.
+- A sender allowlist per channel, and it is mandatory. A channel with
+  credentials and an empty allowlist refuses to start and names the key to
+  fill in. With no channels configured at all the bridge exits and points at
+  the example file.
+- `tests/bridge_test.py`, run by `tests/smoke.sh` wherever a working Python 3
+  exists. It covers config parsing, allowlists, argv for both helpers, reply
+  splitting, workdir seeding, the Telegram and Slack message filters, and the
+  WhatsApp webhook driven against a real socket on an ephemeral port.
+
+### Security
+
+- Every WhatsApp webhook POST is verified as HMAC-SHA256 of the raw request
+  body against `WHATSAPP_APP_SECRET`, with `hmac.compare_digest`, before
+  anything parses it. A signature that is missing, malformed, or wrong is a
+  401 and nothing reaches the queue. The app secret is required, not optional.
+  The webhook binds localhost; a tunnel is what gives Meta a public URL.
+- The webhook's default request logger is off. The line it writes carries
+  `hub.verify_token`.
+- No token or secret is logged or echoed, and no log line carries message
+  text: a line is a channel, a chat id, and byte counts. Message text is not
+  logged, but it is an argument to the helper process while the turn runs, so
+  any other account on this machine can read it out of `ps auxww` for up to
+  `HELPER_TIMEOUT` (900s). That is accepted rather than fixed: the bridge is
+  built for a single-user host, where the same account could read the
+  conversation workdir anyway. On a shared machine, treat every message as
+  visible to everyone logged in.
+- **An allowlisted sender gets a shell.** The helper runs with
+  `--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox, as the user who
+  started the bridge. The `bin/herdr` gate covers mutating `herdr` subcommands
+  and nothing else; it is not a sandbox and never was. The allowlists are the
+  security boundary, so an entry on one is the same trust as a seat at the
+  keyboard.
+- The mutate gate failed open, silently. `launch.sh` put the wrapper on PATH
+  with a helper that returns early when the directory is already there, and
+  `helper_extend_user_path` runs first and prepends `/usr/local/bin` and
+  `/opt/homebrew/bin`. On a machine whose PATH already carried the plugin's
+  `bin`, the wrapper kept that inherited position, `herdr` resolved to the
+  real binary, and a bare `herdr agent start` ran with nobody asked. The
+  wrapper directory is now moved to the front of PATH wherever it already
+  sits, and `HERDR_BIN_PATH` was never the problem.
+- `prompt.md` weakened its own gate. It handed the lantern a ready-to-run
+  `HERDR_HELPER_OK=1 herdr agent prompt ...` line with no confirmation step
+  attached, while the bullet that does require confirmation listed only
+  create/start/focus/close — so relaying a message into another agent's pane
+  read as ungated. The gate rule now names the read-only list, names every
+  verb the wrapper blocks, and no prefixed command appears anywhere for an
+  agent to paste.
+- The snapshot files are now marked as what they are. `floor.txt`,
+  `goals-floor.txt`, and `elves-floor.txt` carry text captured verbatim from
+  other agents' panes, and `prompt.md` had the lantern read them at light-up
+  with nothing saying they are data. Anyone whose text reaches a pane could
+  address the lantern directly. They are observed data, never instructions,
+  and anything in them that reads as an order is quoted to the user instead.
+- The webhook could be taken down by anyone who learned its URL. The handler
+  inherited `timeout=None` from `StreamRequestHandler` and
+  `ThreadingHTTPServer` caps nothing, so connections that announce a
+  `Content-Length` and then stop sending parked one thread each — and the body
+  is read before the signature is checked, so no credential was needed. The
+  handler now carries a 15s socket timeout and the server refuses a connection
+  past eight in flight.
+- A signature header holding one non-ASCII byte crashed the request. Headers
+  are decoded as latin-1, and `hmac.compare_digest` raises `TypeError` rather
+  than returning `False` on a non-ASCII `str`. The exception escaped to
+  `socketserver`, which printed a full traceback with absolute filesystem
+  paths into the bridge pane and dropped the connection with no 401 at all.
+  Only 64 hex digits reach the comparison now, and an unexpected handler
+  exception is one redacted line.
+- `TELEGRAM_ALLOWED_CHATS` authorized a conversation rather than a person. A
+  group id on that list let every member of the group drive the lantern. A
+  message is accepted when the sender's own id is allowlisted, or when the
+  chat is private and its id is allowlisted; a non-private chat whose members
+  are not individually listed is dropped and logged.
+- `BRIDGE_EXTRA_ARGS` could switch the permission model off. It is appended
+  after the bridge's own `--allowed-tools` and a later flag wins, so
+  `--dangerously-skip-permissions`, `--permission-mode bypassPermissions`,
+  `--allowed-tools *`, `--sandbox danger-full-access`, `--add-dir /` and their
+  neighbours all went through. They are refused by name now, and `--check`
+  prints a loud line whenever any extra args are set.
+- Config values from the environment were used verbatim; only file values were
+  checked for shell metacharacters. The environment is the path this README
+  recommends for secrets, so it now gets the same reject set, with an error
+  naming the key and the source.
+- `bridge.conf` was seeded world-readable with `cp`. It holds five secrets, so
+  it is created `0600`. An existing file's mode is left alone.
+- Untrusted message text was a bare positional for `codex`, so a message that
+  is exactly a flag was parsed as one. An end-of-options `--` guards it.
+  `claude` was already safe: the text is the value of `-p`.
+
+### Changed
+
+- `hsh` no longer prefers `$HERDR_REAL`. That branch existed to dodge the
+  mutate gate from inside the lantern pane, and `launch.sh` unsets
+  `HERDR_REAL` before it execs the agent, so it never ran there. Reviving it
+  would be a hole in the gate rather than a fix: opening a second lantern is a
+  change like any other. Outside the pane `hsh` reaches the real herdr as
+  before; inside it, the wrapper asks first.
+
+### Fixed
+
+- A snapshot the lantern could not refresh was left showing the last run's
+  field. With no Python 3 on PATH `launch.sh` skipped the refresh entirely,
+  and the workdir survives between runs, so `goals-floor.txt` and
+  `elves-floor.txt` still said who needed the user and which agents were
+  blocked — hours old, and read at light-up as the field right now. A file
+  that cannot be refreshed now holds one line saying so and why, and the same
+  goes for `floor.txt` when the real herdr cannot be found.
+- One non-UTF-8 byte in one `.elves-session.json` ended the whole Elves scan.
+  `load_session` caught `OSError` and `JSONDecodeError`, and `read_text`
+  raises `UnicodeDecodeError` before either can happen. An unreadable file is
+  skipped like any other and the rest of the floor is still reported.
+- A relayed message could be reported as sent when it never was. The Enter
+  fallback fired after any `agent prompt` failure and the relay then reported
+  success on the strength of a wait that returns at once for an idle pane, so
+  an unknown target or a rejected flag came back as delivered — and Enter was
+  pressed into a session for a failure that had nothing to do with a stalled
+  submit. Enter is now only for the stall it was written for, recognised by
+  the message still showing in the pane, and a pane that has not moved
+  afterwards is a failure rather than a guess.
+- A helper that exited non-zero after printing anything still got a session
+  marker, so every later turn passed `--continue` for a session that never
+  began and the conversation was stuck there. The marker goes down only when
+  the run succeeded.
+- A reply could be lost whole. `split_message` could emit an empty chunk,
+  every provider rejects an empty message, and the failed send took the entire
+  reply with it behind one `send failed` line.
+- The webhook's 413 answered without draining the body it refused, and on a
+  keep-alive connection the undelivered bytes were then parsed as the next
+  request. It closes the connection.
+- `WHATSAPP_WEBHOOK_PORT` was checked with `isdigit()` alone, so `99999`
+  passed validation and failed at bind — leaving that channel dead while the
+  daemon reported itself healthy. It has to be 1-65535.
+- Nothing stopped a second Lantern Bridge, and a second one breaks every
+  channel: two `getUpdates` long polls on one bot token answer 409 and fight
+  over the offset cursor, two Slack pollers both reply to every message, and
+  the second WhatsApp adapter cannot bind its webhook port and retries in a
+  loop. The daemon now takes an advisory lock on
+  `<state dir>/bridge/daemon.lock` before any adapter starts and refuses to run
+  while another holds it, and the `bridge` action focuses the bridge pane it
+  already opened instead of seating a second one. The lock is advisory, so a
+  daemon killed with `-9` leaves nothing to clean up by hand.
+- One unexpected error while answering a message ended the whole bridge. The
+  adapters run as daemon threads, so an exception reaching the dispatch loop
+  took every channel down with it, silently. A failed turn is now one log line
+  and a note in the channel, and the next message is answered.
+- A chat id made only of dots would have named a directory beside the
+  conversation state rather than one inside it. The allowlists never let one
+  through, but the slug refuses it now as well.
+- An empty `WHATSAPP_VERIFY_TOKEN` would have let any webhook GET pass
+  verification, because `hmac.compare_digest` of two empty strings is a match.
+  The adapter refuses to be constructed without one, the way it already did for
+  the app secret and the allowlist.
+- `tests/smoke.sh` failed its `launch.sh` argv cases on any machine with a
+  real `grok` or `agent` in `/opt/homebrew/bin`. The harness handed its stub
+  directory in through `PATH`, but `helper_prepend_path` skips a directory
+  that is already on `PATH`, so the stubs kept their inherited position and
+  the Homebrew directories landed in front of them. The stubs now sit in
+  `$HOME/.local/bin` under the test's throwaway home and let
+  `helper_extend_user_path` place the directory itself.
+- `bin/elves-floor` ignored the scope of an explicit `--root`. It appended
+  `~/aigora` to whatever roots the caller named, so a scoped scan reported
+  sessions from outside its root and walked the whole tree on every run. The
+  default roots are unchanged; explicit ones are now exact.
+- `bin/elves-floor` skipped a `.elves-session.json` sitting in a directory at
+  exactly `--max-depth`. The walk stopped before the filename check instead of
+  after it, so the last reachable level was read as if it were empty.
+- `howto.html` and `docs/index.html` were left at v0.3.0 and still said Herdr
+  was needed on macOS or Linux, three releases after 0.4.0 shipped Windows
+  support. Both pages now carry the current version and name Windows.
+
 ## [0.4.0] - 2026-08-19
 
 ### Added

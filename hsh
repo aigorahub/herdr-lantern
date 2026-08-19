@@ -1,9 +1,12 @@
 #!/bin/sh
 # Short launcher: open the lantern.
-# Prefer the real herdr. Inside the helper pane, HERDR_BIN_PATH is the
-# mutate-gated wrapper and `plugin action invoke` would be blocked.
+#
+# Plain `herdr` on purpose. This used to prefer $HERDR_REAL so that
+# `plugin action invoke` would dodge the wrapper inside the lantern pane, but
+# launch.sh unsets HERDR_REAL before it execs the agent, so the branch never
+# ran there — and it should not: opening a second lantern is a mutation, and
+# the gate is the only thing that makes the lantern ask first. Outside the
+# pane this is the real herdr. Inside it, the wrapper blocks and says how to
+# rerun once the user has said yes.
 set -eu
-if [ -n "${HERDR_REAL:-}" ] && [ -x "$HERDR_REAL" ]; then
-    exec "$HERDR_REAL" plugin action invoke aigora.lantern.open
-fi
 exec herdr plugin action invoke aigora.lantern.open

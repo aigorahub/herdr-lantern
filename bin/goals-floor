@@ -128,7 +128,6 @@ def first_sentence(text: str, limit: int = 140) -> str:
 def extract_signals(text: str, title: str) -> dict[str, str]:
     lines = text.splitlines()
     recap = collect_recap(lines)
-    blob = recap or clean_line(" ".join(lines[-12:]))
     goal_age = ""
     for line in lines:
         match = GOAL_ACTIVE_RE.search(line)

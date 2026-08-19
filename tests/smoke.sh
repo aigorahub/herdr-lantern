@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr hsh tests/smoke.sh; do
+for f in launch.sh open.sh bridge.sh lib.sh bin/herdr hsh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -26,7 +26,9 @@ fake_py=
 fake_agents=
 argv_dir=
 open_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
+bridge_dir=
+elves_tmp=
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -108,12 +110,45 @@ case $got in
     fail "resolve returned the plugin wrapper as the real herdr"
     ;;
 esac
+
+# The wrapper has to win `command -v herdr` even when the plugin's bin
+# directory is already on the inherited PATH. It used to keep that inherited
+# position while helper_extend_user_path put /usr/local/bin and
+# /opt/homebrew/bin in front of it, so a bare `herdr` reached the real binary
+# and the mutate gate never ran. prompt.md permits a bare `herdr`.
+front_got=$(
+    PATH="$resolve_dir:$root/bin:/usr/bin:/bin"
+    export PATH
+    helper_extend_user_path
+    helper_force_front_path "$root/bin"
+    command -v herdr
+) || front_got=
+[ "$front_got" = "$root/bin/herdr" ] ||
+    fail "the wrapper must resolve first even when its dir was already on PATH (got $front_got)"
+# And the real binary must still be reachable, or the wrapper has nothing to
+# exec: helper_resolve_real_herdr strips this directory back out, so every
+# copy of it has to be gone.
+front_real=$(
+    PATH="$resolve_dir:$root/bin:/usr/bin:/bin"
+    export PATH
+    helper_extend_user_path
+    helper_force_front_path "$root/bin"
+    HERDR_REAL= HERDR_BIN_PATH="$root/bin/herdr" helper_resolve_real_herdr "$root/bin"
+) || front_real=
+case $front_real in
+'' | "$root/bin/herdr")
+    fail "resolve should still find a real herdr behind the wrapper (got $front_real)"
+    ;;
+esac
+grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/launch.sh" ||
+    fail "launch.sh should force the wrapper to the front of PATH"
 rm -rf "$resolve_dir"
 
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
 # WSL launcher in WindowsApps, so that call would start Linux. Herdr runs these
 # files with `sh`, and nothing here needs more than that.
-if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" "$root/lib.sh" "$root/bin/herdr" |
+if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" "$root/bridge.sh" \
+    "$root/lib.sh" "$root/bin/herdr" |
     grep -qE '(^|[^A-Za-z_/-])bash([^A-Za-z_]|$)'; then
     fail "plugin shell code must not invoke bare bash"
 fi
@@ -122,7 +157,68 @@ if grep -q 'WindowsApps' "$root/lib.sh"; then
 fi
 grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 
+# prompt.md is the other half of the gate: bin/herdr blocks the command, and
+# this file is what makes the lantern ask first. A ready-to-run prefixed line
+# next to an instruction that never mentions confirming is how an agent ends
+# up typing into other people's panes with nobody's permission.
+if grep -q 'HERDR_HELPER_OK=1 herdr' "$root/prompt.md"; then
+    fail "prompt.md should not hand out a prefixed herdr command to paste"
+fi
+for gated_verb in prompt send-keys start focus close remove; do
+    grep -qF "$gated_verb" "$root/prompt.md" ||
+        fail "prompt.md does not name $gated_verb as gated"
+    grep -qF "$gated_verb" "$root/launch.sh" ||
+        fail "the launch.sh appendix does not name $gated_verb as gated"
+done
+# hsh carried a HERDR_REAL branch to dodge the wrapper, and launch.sh unsets
+# HERDR_REAL before it execs the agent, so inside the pane that branch never
+# ran. Nothing should put a bypass back: opening a second lantern is a
+# mutation, and the gate is what makes the lantern ask first.
+if grep -vE '^[[:space:]]*#' "$root/hsh" | grep -q 'HERDR_REAL'; then
+    fail "hsh should not carry a path around the mutate gate"
+fi
+
+# The snapshots are other agents' terminals, copied verbatim. Anyone whose
+# text reaches a pane can address the lantern in them.
+grep -q 'never instructions' "$root/prompt.md" ||
+    fail "prompt.md should say the snapshot files are data, not instructions"
+for snapshot in floor.txt goals-floor.txt elves-floor.txt; do
+    grep -qF "$snapshot" "$root/prompt.md" ||
+        fail "prompt.md does not name $snapshot"
+done
+
 grep -q '^placement = "tab"$' "$root/herdr-plugin.toml" || fail "pane placement is tab"
+grep -q '^title = "Lantern Bridge"$' "$root/herdr-plugin.toml" ||
+    fail "manifest should declare the bridge pane"
+grep -q '^command = \["sh", "bridge.sh"\]$' "$root/herdr-plugin.toml" ||
+    fail "the bridge pane should run bridge.sh"
+grep -q '^command = \["sh", "bridge.sh", "--open"\]$' "$root/herdr-plugin.toml" ||
+    fail "the bridge action should open the bridge pane"
+
+# One version, every file that prints it. A manifest bump nobody echoed is how
+# a marketplace listing and a README start disagreeing — and howto.html and
+# docs/index.html are the two that actually drifted, three releases behind,
+# while this case checked the two that had not.
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/herdr-plugin.toml")
+[ -n "$version" ] || fail "no version in herdr-plugin.toml"
+grep -qF "**v$version**" "$root/README.md" || fail "README does not say v$version"
+grep -qF "## [$version]" "$root/CHANGELOG.md" || fail "CHANGELOG has no $version entry"
+for version_page in howto.html docs/index.html; do
+    grep -qF "v$version" "$root/$version_page" ||
+        fail "$version_page does not say v$version"
+    # And nothing older left behind next to it.
+    if grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' "$root/$version_page" |
+        grep -qvF "v$version"; then
+        fail "$version_page still carries a version that is not v$version"
+    fi
+done
+
+# Every key the example file offers has to be documented, or people fill in a
+# key the README never explains.
+for bridge_key in $(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$root/bridge.conf.example"); do
+    grep -qF "$bridge_key" "$root/README.md" ||
+        fail "README does not document $bridge_key"
+done
 if grep -qE '^(width|height) =' "$root/herdr-plugin.toml"; then
     fail "pane still sizes a popup"
 fi
@@ -441,18 +537,32 @@ out=$(sh "$root/bin/herdr" workspace create --cwd /tmp --label x) ||
 printf '%s\n' "$out" | grep -q 'workspace create' || fail "OK mutate did not exec real herdr"
 
 fake_prompt=$(mktemp -d)
+# A Cursor pane that keeps the text in its follow-up field: the prompt with
+# --wait times out with the message showing in the pane, and only Enter
+# submits it. FAKE_PANE is that pane's screen, so `agent read` can answer
+# with what is actually on it.
 cat >"$fake_prompt/herdr" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
 "agent prompt")
+    if [ "$3" = gone ]; then
+        printf 'no such agent: %s\n' "$3" >&2
+        exit 3
+    fi
     if [ "$5" = --wait ]; then
+        printf '> %s\n' "$4" >>"$FAKE_PANE"
         exit 1
     fi
     printf 'agent prompt %s\n' "$3"
     exit 0
     ;;
+"agent read")
+    cat "$FAKE_PANE" 2>/dev/null
+    exit 0
+    ;;
 "agent send-keys")
     printf 'agent send-keys %s %s\n' "$3" "$4"
+    [ -n "${FAKE_PANE_DEAF:-}" ] || printf 'submitted\n' >>"$FAKE_PANE"
     exit 0
     ;;
 "agent wait")
@@ -466,13 +576,43 @@ EOF
 chmod +x "$fake_prompt/herdr"
 export HERDR_REAL="$fake_prompt/herdr"
 export HERDR_HELPER_OK=1
+export FAKE_PANE="$fake_prompt/pane.txt"
+: >"$FAKE_PANE"
 out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there") ||
     fail "prompt relay should succeed after Enter fallback"
 printf '%s\n' "$out" | grep -q 'agent send-keys w1:p1 Enter' ||
     fail "prompt relay did not send Enter fallback"
 printf '%s\n' "$out" | grep -q 'agent wait w1:p1' ||
     fail "prompt relay did not wait after Enter"
+
+# Enter is for the stall and nothing else. A prompt that failed for its own
+# reason — unknown target, herdr not running, a flag herdr rejected — leaves
+# nothing in the pane, and the relay used to press Enter anyway and then
+# report the message as sent on the strength of a wait that returns at once.
+: >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent prompt gone "unrelated failure" 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a prompt failure that is not a stall must not be reported as sent"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a prompt failure that is not a stall must not press Enter"
+fi
+
+# The stall path, with a pane that swallows the Enter. `agent wait` answers
+# straight away because the pane is idle already, so the wait is not evidence
+# of anything and the relay must not call this sent.
+: >"$FAKE_PANE"
+export FAKE_PANE_DEAF=1
+if out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there" 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "an Enter that submitted nothing must not be reported as sent"
+fi
+printf '%s\n' "$out" | grep -q 'agent send-keys w1:p1 Enter' ||
+    fail "the stall case should still press Enter"
+unset FAKE_PANE_DEAF
+unset FAKE_PANE
 unset HERDR_REAL
+rm -rf "$fake_prompt"
 fake_prompt=
 
 # Windows: bin/herdr has no file extension, so a native caller resolving
@@ -609,8 +749,75 @@ fi
 
 # shellcheck disable=SC2086
 $smoke_python "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
+
+# An explicit --root has to be the whole search. The scan used to append
+# ~/aigora on top of whatever the caller asked for, so a scoped run reported
+# sessions from outside its root and walked the user's tree every time.
+#
+# The bait sits under this run's own HOME, because ~/aigora is precisely what
+# the old append reached for. An empty root alone proves nothing: on a machine
+# with no ~/aigora — every CI runner — the old scan also answered
+# elves_detected 0, and the regression this case exists for went unguarded in
+# the one place it would show up first. USERPROFILE is set as well; that is
+# what Path.home() reads on Windows.
+elves_tmp=$(mktemp -d)
+mkdir -p "$elves_tmp/home/aigora/outside" "$elves_tmp/scan"
+printf '%s' '{"status":"executing","batches":[{"id":"B1","status":"open"}]}' \
+    >"$elves_tmp/home/aigora/outside/.elves-session.json"
 # shellcheck disable=SC2086
-$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" || fail "py_compile"
+HOME="$elves_tmp/home" USERPROFILE="$elves_tmp/home" \
+    $smoke_python "$root/bin/elves-floor" --root "$elves_tmp/scan" >"$tmp" 2>&1 ||
+    fail "elves-floor --root should still run"
+if grep -q 'outside' "$tmp"; then
+    cat "$tmp" >&2
+    fail "elves-floor --root reported a session from outside its root"
+fi
+grep -q 'elves_detected 0' "$tmp" ||
+    fail "elves-floor --root should scan only the roots it was given"
+rm -rf "$elves_tmp/home"
+
+# One session file with one byte that is not UTF-8 used to end the whole
+# scan: load_session caught OSError and JSONDecodeError, and read_text raises
+# UnicodeDecodeError before either of those can happen. A file nobody can read
+# is skipped, and every other run on the floor still gets reported.
+mkdir -p "$elves_tmp/broken" "$elves_tmp/live"
+printf '{"status":"exec\377uting","batches":[]}' \
+    >"$elves_tmp/broken/.elves-session.json"
+printf '%s' '{"status":"executing","batches":[{"id":"B1","status":"open"}]}' \
+    >"$elves_tmp/live/.elves-session.json"
+# shellcheck disable=SC2086
+$smoke_python "$root/bin/elves-floor" --root "$elves_tmp" >"$tmp" 2>&1 ||
+    fail "one unreadable session file should not end the elves scan"
+grep -q 'elves_detected 1' "$tmp" ||
+    fail "the readable session should still be reported"
+grep -q -- '- live —' "$tmp" ||
+    fail "elves-floor should still list the run it could read"
+rm -rf "$elves_tmp/broken" "$elves_tmp/live"
+
+# A session file sitting exactly at the depth limit counts. Only the descent
+# past that directory stops.
+mkdir -p "$elves_tmp/a/b"
+printf '%s' '{"status":"executing","batches":[{"id":"B1","status":"open"}]}' \
+    >"$elves_tmp/a/b/.elves-session.json"
+# shellcheck disable=SC2086
+$smoke_python "$root/bin/elves-floor" --root "$elves_tmp" --max-depth 2 |
+    grep -q 'elves_detected 1' ||
+    fail "elves-floor should read a session at exactly --max-depth"
+rm -rf "$elves_tmp"
+elves_tmp=
+
+# shellcheck disable=SC2086
+$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" \
+    "$root/bin/lantern-bridge" || fail "py_compile"
+
+# The unit suite's own output is the diagnosis. Swallowing it and saying "run
+# it directly" is advice nobody can take on a CI runner, which is exactly where
+# a platform-specific failure shows up first.
+# shellcheck disable=SC2086
+if ! $smoke_python "$root/tests/bridge_test.py" >"$tmp" 2>&1; then
+    cat "$tmp" >&2
+    fail "tests/bridge_test.py"
+fi
 
 grep -q 'helper_detect_python' "$root/launch.sh" ||
     fail "launch.sh should use the detected interpreter"
@@ -677,13 +884,24 @@ printf '%s\n' "$goals" | grep -q '/goal 2h' || fail "goals-floor goal age"
 # This runs launch.sh for real against stub binaries. HOME points at an empty
 # directory so helper_extend_user_path cannot find a genuine CLI, and
 # HERDR_BIN_PATH points at a stub so no live herdr is touched.
+#
+# The stubs live in $HOME/.local/bin and that directory is deliberately left
+# out of the PATH handed to launch.sh. helper_extend_user_path is what puts it
+# there, and it prepends /usr/local/bin and /opt/homebrew/bin first. Handing
+# the stub dir in through PATH is worse than useless: helper_prepend_path skips
+# a directory that is already on PATH, so the stub dir keeps its inherited
+# position and the Homebrew dirs land in front of it. A machine with a real
+# grok or agent then runs that instead of the stub, and the ARGV line never
+# appears. Let the function place the dir, and only $HOME/.grok/bin outranks
+# it — absent under this throwaway home.
 argv_dir=$(mktemp -d)
 argv_home=$argv_dir/home
-mkdir -p "$argv_home" "$argv_dir/bin" "$argv_dir/config" "$argv_dir/state"
+argv_bin=$argv_home/.local/bin
+mkdir -p "$argv_bin" "$argv_dir/config" "$argv_dir/state"
 for stub_bin in agent devin claude codex grok herdr; do
     printf '%s\n' '#!/bin/sh' 'printf "ARGV:"' 'for a in "$@"; do printf " [%s]" "$a"; done' \
-        'printf "\n"' 'exit 0' >"$argv_dir/bin/$stub_bin"
-    chmod +x "$argv_dir/bin/$stub_bin"
+        'printf "\n"' 'exit 0' >"$argv_bin/$stub_bin"
+    chmod +x "$argv_bin/$stub_bin"
 done
 
 run_launch() {
@@ -693,11 +911,11 @@ run_launch() {
     mkdir -p "$argv_dir/state"
     env -i \
         HOME="$argv_home" \
-        PATH="$argv_dir/bin:/usr/bin:/bin" \
+        PATH="/usr/bin:/bin" \
         HERDR_PLUGIN_ROOT="$root" \
         HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
         HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
-        HERDR_BIN_PATH="$argv_dir/bin/herdr" \
+        HERDR_BIN_PATH="$argv_bin/herdr" \
         sh "$root/launch.sh" </dev/null 2>/dev/null |
         grep '^ARGV:' | tail -1
 }
@@ -753,8 +971,296 @@ HELPER_MODEL=""
 HELPER_EXTRA_ARGS="--verbose --foo"
 HELPER_CWD="~"' ' [--verbose] [--foo]'
 
+printf 'ok: launch.sh argv for every helper CLI\n'
+
+# A snapshot that cannot be refreshed must not be left behind. prompt.md has
+# the lantern read these files at light-up and lead with who needs the user,
+# so last run's field would be reported as this one.
+#
+# The stubs go in $HOME/.grok/bin because helper_extend_user_path prepends
+# that last, which puts it ahead of the real /opt/homebrew/bin. Handing them
+# in through PATH would not work: this machine has a genuine python3 in one of
+# the directories that function puts in front. Non-zero on purpose — that is
+# the one answer that is neither a Microsoft Store alias nor a working python.
+nopy_dir=$argv_home/.grok/bin
+mkdir -p "$nopy_dir"
+for stub_bin in python3 python py; do
+    printf '%s\n' '#!/bin/sh' 'exit 1' >"$nopy_dir/$stub_bin"
+    chmod +x "$nopy_dir/$stub_bin"
+done
+rm -rf "$argv_dir/state"
+mkdir -p "$argv_dir/state/workdir"
+stale_workdir=$argv_dir/state/workdir
+printf '%s\n' 'NEEDS YOU' '- stale-agent — waiting on you since the last run' \
+    >"$stale_workdir/goals-floor.txt"
+printf '%s\n' 'elves_detected 1' 'IN PROGRESS' '- stale-run — 2/5 open B3' \
+    >"$stale_workdir/elves-floor.txt"
+printf '%s\n' 'HELPER_AGENT="claude"' 'HELPER_CWD="~"' \
+    >"$argv_dir/config/helper.conf"
+env -i \
+    HOME="$argv_home" \
+    PATH="/usr/bin:/bin" \
+    HERDR_PLUGIN_ROOT="$root" \
+    HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
+    HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
+    HERDR_BIN_PATH="$argv_bin/herdr" \
+    sh "$root/launch.sh" </dev/null >/dev/null 2>&1 ||
+    fail "launch.sh should still start with no interpreter on PATH"
+for stale_file in goals-floor elves-floor; do
+    if grep -q 'stale-' "$stale_workdir/$stale_file.txt"; then
+        fail "launch.sh left last run's $stale_file.txt in place"
+    fi
+    grep -q 'snapshot unavailable' "$stale_workdir/$stale_file.txt" ||
+        fail "$stale_file.txt should say why it could not be refreshed"
+done
+printf 'ok: launch.sh replaces a snapshot it cannot refresh\n'
+
 rm -rf "$argv_dir"
 argv_dir=
-printf 'ok: launch.sh argv for every helper CLI\n'
+
+# bridge.sh end to end. Same stub-home trick as above: the bridge helper is
+# claude or codex, and both exist on plenty of machines, so the config names
+# one explicitly and nothing here ever runs it.
+bridge_dir=$(mktemp -d)
+mkdir -p "$bridge_dir/config" "$bridge_dir/state"
+# The interpreter has to be reachable from the scrubbed environment below.
+# launch.sh treats a missing Python as "no snapshot" and carries on, but the
+# bridge is a Python daemon and dies without one -- and on Windows the
+# interpreter is under C:\hostedtoolcache, which /usr/bin:/bin does not
+# contain. Without this the bridge fails for the wrong reason, still exits
+# non-zero, and every case below asserts against the wrong error.
+bridge_path=/usr/bin:/bin
+bridge_py_bin=${smoke_python%% *}
+if bridge_py_path=$(command -v "$bridge_py_bin" 2>/dev/null); then
+    bridge_path="$(dirname "$bridge_py_path"):$bridge_path"
+fi
+
+run_bridge() {
+    # $1 is the bridge.sh argument; the rest are KEY=value pairs for its
+    # environment. Every config key falls back to the environment, so a test
+    # never has to write a token to disk. Prints stdout and stderr together.
+    _bridge_arg=$1
+    shift
+    env -i \
+        HOME="$bridge_dir" \
+        PATH="$bridge_path" \
+        HERDR_PLUGIN_ROOT="$root" \
+        HERDR_PLUGIN_CONFIG_DIR="$bridge_dir/config" \
+        HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+        "$@" \
+        sh "$root/bridge.sh" "$_bridge_arg" </dev/null 2>&1
+}
+
+bridge_fail() {
+    # Every case below turns on the content of $bridge_out, and a bridge that
+    # died for an unrelated reason exits non-zero exactly like one that
+    # refused on purpose. Print what actually came back. Guessing at it from
+    # the assertion name has already cost this suite several CI rounds, all
+    # of them on the platform nobody develops on.
+    printf 'bridge --check said:\n%s\n' "$bridge_out" >&2
+    fail "$1"
+}
+
+# No credentials at all: refuse, and say which file and which example.
+bridge_out=$(run_bridge --check) && bridge_fail "bridge with no channels should fail"
+# What this asserts is that the refusal names the config file, and the only
+# portable way to say that is to match the tail of the path.
+#
+# The whole path cannot be compared. Python here is a native Windows program,
+# so MSYS rewrites the --conf argument on the way to it and Path() prints it
+# back with backslashes; and cygpath answers with the 8.3 short form of a
+# temporary directory (C:\Users\RUNNER~1\...) where Python has the long one
+# (C:\Users\runneradmin\...). Two spellings of one path, neither wrong.
+#
+# Match the refusal line itself. `check()` prints an unconditional
+# "config: <path>" header, so a bare path match passed whether or not the
+# refusal ever named a file to fill in.
+printf '%s\n' "$bridge_out" |
+    grep -qE 'no channels configured:.*config[/\\]bridge\.conf' ||
+    bridge_fail "the refusal should name the config file it wants filled in"
+printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
+    bridge_fail "bridge should name the example file"
+[ -f "$bridge_dir/config/bridge.conf" ] || bridge_fail "bridge should seed bridge.conf"
+[ -f "$bridge_dir/config/prompt.md" ] || bridge_fail "bridge should seed prompt.md"
+
+# bridge.conf is the documented home of five secrets, and cp would leave it
+# world-readable. Windows ignores the permission bits, so probe with a file of
+# our own rather than fail on a platform that cannot express the mode -- the
+# same shape as the unlockable state dir case above.
+mode_probe=$bridge_dir/mode.probe
+: >"$mode_probe"
+chmod 600 "$mode_probe"
+case $(ls -l "$mode_probe" | cut -c1-10) in
+-rw-------)
+    case $(ls -l "$bridge_dir/config/bridge.conf" | cut -c1-10) in
+    -rw-------) ;;
+    *) bridge_fail "bridge.conf should be seeded 0600; it holds five secrets" ;;
+    esac
+    ;;
+*)
+    printf 'SKIP: platform ignores file permission bits (bridge.conf mode)\n'
+    ;;
+esac
+rm -f "$mode_probe"
+
+# Credentials without an allowlist: still a refusal, naming the key to set.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value) &&
+    bridge_fail "bridge with no allowlist should fail"
+printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_ALLOWED_CHATS' ||
+    bridge_fail "bridge should name the empty allowlist key"
+
+# WhatsApp is the one channel that can be reached from outside this machine, so
+# the signature secret and the allowlist are both refusals, not warnings.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    WHATSAPP_ACCESS_TOKEN=access-token-value \
+    WHATSAPP_PHONE_NUMBER_ID=PN1 \
+    WHATSAPP_VERIFY_TOKEN=verify-token-value \
+    WHATSAPP_ALLOWED_NUMBERS=15551234567) &&
+    bridge_fail "whatsapp without an app secret should fail"
+printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_APP_SECRET' ||
+    bridge_fail "whatsapp should name the missing app secret"
+
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    WHATSAPP_ACCESS_TOKEN=access-token-value \
+    WHATSAPP_PHONE_NUMBER_ID=PN1 \
+    WHATSAPP_VERIFY_TOKEN=verify-token-value \
+    WHATSAPP_APP_SECRET=app-secret-value) &&
+    bridge_fail "whatsapp without an allowlist should fail"
+printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_ALLOWED_NUMBERS' ||
+    bridge_fail "whatsapp should name the missing allowlist"
+if printf '%s\n' "$bridge_out" | grep -q 'app-secret-value'; then
+    bridge_fail "bridge leaked the whatsapp app secret"
+fi
+
+# Armed: a redacted summary and a real argv, no network, exit 0.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242) ||
+    bridge_fail "bridge --check with a full telegram config should pass"
+printf '%s\n' "$bridge_out" | grep -q 'channels: telegram' ||
+    bridge_fail "bridge --check should report the enabled channel"
+printf '%s\n' "$bridge_out" | grep -q -- '--output-format text' ||
+    bridge_fail "bridge --check should print the helper argv"
+if printf '%s\n' "$bridge_out" | grep -q 'secret-token-value'; then
+    bridge_fail "bridge --check leaked a token"
+fi
+printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_BOT_TOKEN *(set,' ||
+    bridge_fail "bridge --check should report the token as redacted"
+
+# BRIDGE_EXTRA_ARGS lands after the bridge's own --allowed-tools and a later
+# flag wins, so the flags that would undo the permission model are refused by
+# name rather than printed without comment.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
+    BRIDGE_EXTRA_ARGS=--dangerously-skip-permissions) &&
+    bridge_fail "extra args that skip the permission prompt should fail"
+printf '%s\n' "$bridge_out" | grep -q 'BRIDGE_EXTRA_ARGS' ||
+    bridge_fail "the refusal should name BRIDGE_EXTRA_ARGS"
+
+# An ordinary extra arg still passes, and --check says out loud that it is set.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
+    BRIDGE_EXTRA_ARGS=--verbose) ||
+    bridge_fail "an ordinary extra arg should still pass"
+printf '%s\n' "$bridge_out" | grep -q '!! BRIDGE_EXTRA_ARGS' ||
+    bridge_fail "bridge --check should say when extra args are set"
+
+# The environment is the path the docs recommend for secrets, so it gets the
+# same reject set the file gets.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
+    'BRIDGE_MODEL=opus; rm -rf /') &&
+    bridge_fail "a shell-shaped value from the environment should fail"
+printf '%s\n' "$bridge_out" | grep -q 'BRIDGE_MODEL' ||
+    bridge_fail "the refusal should name the key it came from"
+printf '%s\n' "$bridge_out" | grep -q 'environment' ||
+    bridge_fail "the refusal should name the environment as the source"
+
+# The example file and the parser have to agree, or a fresh install refuses to
+# start on its own seeded config.
+grep -q 'bridge.conf.example' "$root/bridge.sh" || fail "bridge.sh should seed from the example"
+
+# The action cannot become the daemon itself, so it asks Herdr to seat the
+# pane. Check the call it makes against a stub herdr.
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*"' >"$bridge_dir/herdr"
+chmod +x "$bridge_dir/herdr"
+bridge_out=$(HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+    sh "$root/bridge.sh" --open </dev/null) || fail "bridge --open should succeed"
+[ "$bridge_out" = "plugin pane open --plugin aigora.lantern --entrypoint bridge --placement tab" ] ||
+    fail "bridge --open should seat the bridge pane (got $bridge_out)"
+
+# Two bridges on one config is not a duplicate window: two pollers on one
+# token answer every message twice. A second --open must focus the pane that
+# is already there, not open another. This stub answers like Herdr does.
+cat >"$bridge_dir/herdr" <<'BRIDGE_STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$BRIDGE_STUB_LOG"
+case "$1 $2" in
+"plugin pane")
+    case "$3" in
+    open) printf '{"pane_id":"p42","tab_id":"t1","workspace_id":"w1"}\n' ;;
+    focus) printf 'focused\n' ;;
+    esac
+    ;;
+"pane get")
+    printf '{"pane_id":"p42","label":"Lantern Bridge","workspace_id":"w1"}\n'
+    ;;
+esac
+exit 0
+BRIDGE_STUB
+chmod +x "$bridge_dir/herdr"
+rm -rf "$bridge_dir/state/bridge"
+BRIDGE_STUB_LOG="$bridge_dir/open.log"
+: >"$BRIDGE_STUB_LOG"
+export BRIDGE_STUB_LOG
+HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
+    fail "bridge --open should succeed"
+[ "$(cat "$bridge_dir/state/bridge/pane.id" 2>/dev/null)" = "p42" ] ||
+    fail "bridge --open should remember the pane it opened"
+HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
+    fail "a second bridge --open should succeed"
+[ "$(grep -c 'plugin pane open' "$BRIDGE_STUB_LOG")" = "1" ] ||
+    fail "a second bridge --open opened a second bridge pane"
+grep -q 'plugin pane focus p42' "$BRIDGE_STUB_LOG" ||
+    fail "a second bridge --open should focus the pane already running"
+
+# A remembered id that no longer carries the bridge label is stale: Herdr
+# reuses pane ids, so it must be reopened rather than focused.
+printf 'p42\n' >"$bridge_dir/state/bridge/pane.id"
+: >"$BRIDGE_STUB_LOG"
+cat >"$bridge_dir/herdr" <<'BRIDGE_STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$BRIDGE_STUB_LOG"
+case "$1 $2" in
+"plugin pane")
+    case "$3" in
+    open) printf '{"pane_id":"p77","tab_id":"t2","workspace_id":"w2"}\n' ;;
+    esac
+    ;;
+"pane get")
+    printf '{"pane_id":"p42","label":"Somebody Else","workspace_id":"w1"}\n'
+    ;;
+esac
+exit 0
+BRIDGE_STUB
+chmod +x "$bridge_dir/herdr"
+HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
+    fail "bridge --open should reopen after a stale pane id"
+grep -q 'plugin pane open' "$BRIDGE_STUB_LOG" ||
+    fail "a stale pane id should be reopened, not focused"
+[ "$(cat "$bridge_dir/state/bridge/pane.id" 2>/dev/null)" = "p77" ] ||
+    fail "bridge --open should remember the pane it reopened"
+unset BRIDGE_STUB_LOG
+
+rm -rf "$bridge_dir"
+bridge_dir=
+printf 'ok: bridge.sh config gate and redacted --check\n'
 
 printf 'ok\n'
