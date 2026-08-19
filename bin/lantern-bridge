@@ -16,12 +16,17 @@ Standard library only, same rule as bin/goals-floor and bin/elves-floor.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 # Order is the detection order when BRIDGE_HELPER is empty.
@@ -78,6 +83,16 @@ WHATSAPP_LIMIT = 4096
 
 # A headless turn can legitimately run for minutes; it is still bounded.
 HELPER_TIMEOUT = 900
+
+# Telegram's long poll holds the connection for TELEGRAM_POLL seconds, so the
+# socket timeout has to be longer than that or every poll looks like a failure.
+TELEGRAM_POLL = 50
+HTTP_TIMEOUT = 30
+LONG_POLL_TIMEOUT = TELEGRAM_POLL + 15
+
+# One network blip must not end the daemon. Every adapter loop catches, logs a
+# single line, waits this long, and goes round again.
+BACKOFF = 5.0
 
 CLAUDE_TOOLS = "Bash,Read,Glob,Grep,LS"
 
@@ -427,6 +442,178 @@ def run_helper(cfg: dict, helper: str, workdir: Path, text: str, timeout=HELPER_
     return out or "(the lantern had nothing to say)"
 
 
+def http_json(url: str, payload=None, headers=None, timeout=HTTP_TIMEOUT):
+    """One JSON round trip, always with an explicit timeout.
+
+    Errors are raised, not swallowed: the adapter loop above is what decides to
+    log a line and back off. The URL is never logged, because a Telegram bot
+    token lives inside it.
+    """
+    data = None
+    request_headers = {"Accept": "application/json"}
+    if headers:
+        request_headers.update(headers)
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        request_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=request_headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read()
+    if not body:
+        return {}
+    return json.loads(body.decode("utf-8", "replace"))
+
+
+class Adapter:
+    """One channel. A thread runs poll_once forever; the main thread replies."""
+
+    name = "adapter"
+    limit = 4000
+
+    def __init__(self, cfg: dict, inbox):
+        self.cfg = cfg
+        self.inbox = inbox
+
+    def poll_once(self) -> None:
+        raise NotImplementedError
+
+    def send(self, chat_id, text: str) -> None:
+        raise NotImplementedError
+
+    def offer(self, chat_id, text: str) -> None:
+        self.inbox.put((self.name, str(chat_id), text))
+
+    def run(self) -> None:
+        while True:
+            try:
+                self.poll_once()
+            except Exception as exc:  # noqa: BLE001 - a blip must not end the daemon
+                log(
+                    "%s: %s while polling; retrying in %.0fs"
+                    % (self.name, exc.__class__.__name__, BACKOFF)
+                )
+                time.sleep(BACKOFF)
+
+
+class TelegramAdapter(Adapter):
+    """Bot API long poll. No webhook, so nothing has to be reachable."""
+
+    name = "telegram"
+    limit = TELEGRAM_LIMIT
+
+    def __init__(self, cfg: dict, inbox):
+        super().__init__(cfg, inbox)
+        self.token = cfg["TELEGRAM_BOT_TOKEN"]
+        self.allowed = set(split_list(cfg["TELEGRAM_ALLOWED_CHATS"]))
+        # getUpdates replays everything until an offset acknowledges it, so the
+        # cursor is the only thing standing between a restart and a re-answer.
+        self.offset = 0
+
+    def api(self, method: str) -> str:
+        return "https://api.telegram.org/bot%s/%s" % (self.token, method)
+
+    def updates_url(self) -> str:
+        query = urllib.parse.urlencode(
+            {
+                "timeout": TELEGRAM_POLL,
+                "offset": self.offset,
+                "allowed_updates": '["message"]',
+            }
+        )
+        return "%s?%s" % (self.api("getUpdates"), query)
+
+    def parse_updates(self, payload: dict):
+        """Returns (accepted, next_offset).
+
+        The offset advances for every update seen, including the ones dropped.
+        Anything else and one message from a stranger stalls the cursor and the
+        bot replays it forever.
+        """
+        accepted = []
+        offset = self.offset
+        for update in payload.get("result") or []:
+            if not isinstance(update, dict):
+                continue
+            update_id = update.get("update_id")
+            if isinstance(update_id, int) and update_id >= offset:
+                offset = update_id + 1
+            # Only fresh messages. edited_message, channel_post, and the
+            # callback kinds are somebody else's feature.
+            message = update.get("message")
+            if not isinstance(message, dict):
+                continue
+            text = message.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            chat = message.get("chat")
+            chat_id = chat.get("id") if isinstance(chat, dict) else None
+            if chat_id is None:
+                continue
+            if str(chat_id) not in self.allowed:
+                log("telegram: dropped a message from chat %s" % chat_id)
+                continue
+            accepted.append((str(chat_id), text.strip()))
+        return accepted, offset
+
+    def poll_once(self) -> None:
+        payload = http_json(self.updates_url(), timeout=LONG_POLL_TIMEOUT)
+        accepted, offset = self.parse_updates(payload)
+        self.offset = offset
+        for chat_id, text in accepted:
+            self.offer(chat_id, text)
+
+    def send_payloads(self, chat_id, text: str):
+        # parse_mode is left off on purpose: an answer full of paths and
+        # underscores is not Markdown, and Telegram rejects the whole message
+        # when it disagrees.
+        return [
+            (self.api("sendMessage"), {"chat_id": str(chat_id), "text": chunk})
+            for chunk in split_message(text, self.limit)
+        ]
+
+    def send(self, chat_id, text: str) -> None:
+        for url, payload in self.send_payloads(chat_id, text):
+            http_json(url, payload)
+
+
+ADAPTERS = {
+    "telegram": TelegramAdapter,
+}
+
+
+def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
+    """One thread per channel in, one helper turn at a time out.
+
+    Serialising the helper is deliberate for a first version: two headless
+    turns in the same repository at the same time is a worse problem than a
+    queued message.
+    """
+    inbox = queue.Queue()
+    adapters = {}
+    for channel in enabled_channels(cfg):
+        factory = ADAPTERS.get(channel)
+        if factory is None:
+            die("no adapter for channel %s in this build" % channel)
+        adapters[channel] = factory(cfg, inbox)
+    for channel, adapter in adapters.items():
+        threading.Thread(target=adapter.run, name=channel, daemon=True).start()
+        log("%s: listening" % channel)
+
+    search_root = expand_root(cfg["BRIDGE_CWD"])
+    while True:
+        channel, chat_id, text = inbox.get()
+        adapter = adapters[channel]
+        workdir = workdir_for(state_dir, channel, chat_id)
+        seed_workdir(workdir, prompt_text, remote_appendix(cfg, channel, search_root))
+        log("%s %s: %d bytes in" % (channel, chat_id, len(text.encode("utf-8"))))
+        reply = run_helper(cfg, helper, workdir, text)
+        log("%s %s: %d bytes out" % (channel, chat_id, len(reply.encode("utf-8"))))
+        try:
+            adapter.send(chat_id, reply)
+        except Exception as exc:  # noqa: BLE001 - a failed send is not fatal
+            log("%s %s: send failed (%s)" % (channel, chat_id, exc.__class__.__name__))
+
+
 def expand_root(value: str) -> str:
     """~ the way lib.sh expands it, so both entrypoints agree."""
     value = (value or "~").strip()
@@ -512,9 +699,21 @@ def main(argv=None) -> int:
     if not shutil.which(helper):
         die("bridge helper not found on PATH: %s" % helper)
 
+    prompt_text = ""
+    if args.prompt and Path(args.prompt).is_file():
+        prompt_text = Path(args.prompt).read_text(encoding="utf-8")
+    if not prompt_text.strip():
+        # Not fatal: the helper still has the appendix, which is the part that
+        # explains the mutate gate. Worth one line, because the answers get
+        # noticeably worse without the lantern prompt.
+        log("no lantern prompt at %s; running with the remote appendix only" % args.prompt)
+
     log("helper %s, channels %s" % (helper, ", ".join(enabled_channels(cfg))))
-    die("no channel adapter is wired into this build yet")
-    return 2
+    try:
+        return serve(cfg, helper, prompt_text, args.state)
+    except KeyboardInterrupt:
+        log("stopped")
+        return 0
 
 
 if __name__ == "__main__":

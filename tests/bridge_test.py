@@ -7,6 +7,7 @@ name. SourceFileLoader is how you import one of those.
 from __future__ import annotations
 
 import importlib.util
+import queue
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -328,6 +329,132 @@ class WorkdirTest(unittest.TestCase):
         text = lb.remote_appendix(base_config(), "whatsapp", "/root")
         self.assertIn("HERDR_HELPER_OK=1", text)
         self.assertIn("chat", text)
+
+
+def telegram_update(update_id, chat_id, text=None, key="message", extra=None):
+    message = {"chat": {"id": chat_id}}
+    if text is not None:
+        message["text"] = text
+    if extra:
+        message.update(extra)
+    return {"update_id": update_id, key: message}
+
+
+class TelegramParseTest(unittest.TestCase):
+    def setUp(self):
+        self.inbox = queue.Queue()
+        cfg = base_config(TELEGRAM_BOT_TOKEN="tok", TELEGRAM_ALLOWED_CHATS="42, 43")
+        self.adapter = lb.TelegramAdapter(cfg, self.inbox)
+
+    def parse(self, updates):
+        return self.adapter.parse_updates({"ok": True, "result": updates})
+
+    def test_text_message_from_an_allowed_chat_is_accepted(self):
+        accepted, offset = self.parse([telegram_update(7, 42, " hello there ")])
+        self.assertEqual(accepted, [("42", "hello there")])
+        self.assertEqual(offset, 8)
+
+    def test_edited_message_is_ignored(self):
+        accepted, offset = self.parse(
+            [telegram_update(7, 42, "hello", key="edited_message")]
+        )
+        self.assertEqual(accepted, [])
+        self.assertEqual(offset, 8)
+
+    def test_non_text_message_is_ignored(self):
+        accepted, _ = self.parse([telegram_update(7, 42, None, extra={"photo": []})])
+        self.assertEqual(accepted, [])
+
+    def test_empty_text_is_ignored(self):
+        self.assertEqual(self.parse([telegram_update(7, 42, "   ")])[0], [])
+
+    def test_disallowed_chat_is_dropped_but_still_acknowledged(self):
+        accepted, offset = self.parse([telegram_update(9, 99, "let me in")])
+        self.assertEqual(accepted, [])
+        # The cursor still advances, or a stranger's message replays forever.
+        self.assertEqual(offset, 10)
+
+    def test_offset_advances_past_the_highest_update(self):
+        accepted, offset = self.parse(
+            [
+                telegram_update(4, 42, "one"),
+                telegram_update(9, 43, "two"),
+                telegram_update(6, 42, "three"),
+            ]
+        )
+        self.assertEqual([c for c, _ in accepted], ["42", "43", "42"])
+        self.assertEqual(offset, 10)
+
+    def test_poll_url_carries_the_cursor_and_the_long_poll(self):
+        self.adapter.offset = 11
+        url = self.adapter.updates_url()
+        self.assertIn("offset=11", url)
+        self.assertIn("timeout=%d" % lb.TELEGRAM_POLL, url)
+        self.assertIn("/bottok/getUpdates", url)
+
+    def test_long_poll_socket_timeout_outlives_the_poll(self):
+        self.assertGreater(lb.LONG_POLL_TIMEOUT, lb.TELEGRAM_POLL)
+
+    def test_garbage_payload_does_not_raise(self):
+        self.assertEqual(self.adapter.parse_updates({}), ([], 0))
+        self.assertEqual(self.adapter.parse_updates({"result": [None, 5]}), ([], 0))
+
+
+class TelegramSendTest(unittest.TestCase):
+    def setUp(self):
+        cfg = base_config(TELEGRAM_BOT_TOKEN="tok", TELEGRAM_ALLOWED_CHATS="42")
+        self.adapter = lb.TelegramAdapter(cfg, queue.Queue())
+
+    def test_payload_shape(self):
+        sends = self.adapter.send_payloads(42, "hi")
+        self.assertEqual(len(sends), 1)
+        url, payload = sends[0]
+        self.assertEqual(url, "https://api.telegram.org/bottok/sendMessage")
+        self.assertEqual(payload, {"chat_id": "42", "text": "hi"})
+
+    def test_no_parse_mode(self):
+        _url, payload = self.adapter.send_payloads(42, "a_b_c")[0]
+        self.assertNotIn("parse_mode", payload)
+
+    def test_long_reply_is_split_on_line_boundaries(self):
+        line = "x" * 200
+        text = "\n".join([line] * 60)
+        sends = self.adapter.send_payloads(42, text)
+        self.assertGreater(len(sends), 1)
+        for _url, payload in sends:
+            self.assertLessEqual(len(payload["text"]), lb.TELEGRAM_LIMIT)
+            self.assertTrue(payload["text"].startswith("x"))
+
+    def test_offer_puts_a_named_tuple_on_the_queue(self):
+        inbox = queue.Queue()
+        cfg = base_config(TELEGRAM_BOT_TOKEN="tok", TELEGRAM_ALLOWED_CHATS="42")
+        lb.TelegramAdapter(cfg, inbox).offer(42, "hi")
+        self.assertEqual(inbox.get_nowait(), ("telegram", "42", "hi"))
+
+
+class AdapterLoopTest(unittest.TestCase):
+    def test_a_network_error_backs_off_and_continues(self):
+        calls = []
+
+        class Flaky(lb.Adapter):
+            name = "flaky"
+
+            def poll_once(self):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise OSError("connection reset")
+                raise KeyboardInterrupt
+
+        slept = []
+        real_sleep = lb.time.sleep
+        lb.time.sleep = lambda s: slept.append(s)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                Flaky(base_config(), queue.Queue()).run()
+        finally:
+            lb.time.sleep = real_sleep
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(slept, [lb.BACKOFF])
 
 
 class ExpandRootTest(unittest.TestCase):
