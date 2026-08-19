@@ -883,6 +883,26 @@ printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
 [ -f "$bridge_dir/config/bridge.conf" ] || bridge_fail "bridge should seed bridge.conf"
 [ -f "$bridge_dir/config/prompt.md" ] || bridge_fail "bridge should seed prompt.md"
 
+# bridge.conf is the documented home of five secrets, and cp would leave it
+# world-readable. Windows ignores the permission bits, so probe with a file of
+# our own rather than fail on a platform that cannot express the mode -- the
+# same shape as the unlockable state dir case above.
+mode_probe=$bridge_dir/mode.probe
+: >"$mode_probe"
+chmod 600 "$mode_probe"
+case $(ls -l "$mode_probe" | cut -c1-10) in
+-rw-------)
+    case $(ls -l "$bridge_dir/config/bridge.conf" | cut -c1-10) in
+    -rw-------) ;;
+    *) bridge_fail "bridge.conf should be seeded 0600; it holds five secrets" ;;
+    esac
+    ;;
+*)
+    printf 'SKIP: platform ignores file permission bits (bridge.conf mode)\n'
+    ;;
+esac
+rm -f "$mode_probe"
+
 # Credentials without an allowlist: still a refusal, naming the key to set.
 bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
     TELEGRAM_BOT_TOKEN=secret-token-value) &&
@@ -926,6 +946,35 @@ if printf '%s\n' "$bridge_out" | grep -q 'secret-token-value'; then
 fi
 printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_BOT_TOKEN *(set,' ||
     bridge_fail "bridge --check should report the token as redacted"
+
+# BRIDGE_EXTRA_ARGS lands after the bridge's own --allowed-tools and a later
+# flag wins, so the flags that would undo the permission model are refused by
+# name rather than printed without comment.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
+    BRIDGE_EXTRA_ARGS=--dangerously-skip-permissions) &&
+    bridge_fail "extra args that skip the permission prompt should fail"
+printf '%s\n' "$bridge_out" | grep -q 'BRIDGE_EXTRA_ARGS' ||
+    bridge_fail "the refusal should name BRIDGE_EXTRA_ARGS"
+
+# An ordinary extra arg still passes, and --check says out loud that it is set.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
+    BRIDGE_EXTRA_ARGS=--verbose) ||
+    bridge_fail "an ordinary extra arg should still pass"
+printf '%s\n' "$bridge_out" | grep -q '!! BRIDGE_EXTRA_ARGS' ||
+    bridge_fail "bridge --check should say when extra args are set"
+
+# The environment is the path the docs recommend for secrets, so it gets the
+# same reject set the file gets.
+bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
+    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
+    'BRIDGE_MODEL=opus; rm -rf /') &&
+    bridge_fail "a shell-shaped value from the environment should fail"
+printf '%s\n' "$bridge_out" | grep -q 'BRIDGE_MODEL' ||
+    bridge_fail "the refusal should name the key it came from"
+printf '%s\n' "$bridge_out" | grep -q 'environment' ||
+    bridge_fail "the refusal should name the environment as the source"
 
 # The example file and the parser have to agree, or a fresh install refuses to
 # start on its own seeded config.

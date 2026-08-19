@@ -104,6 +104,24 @@ class LoadConfigTest(unittest.TestCase):
         cfg = lb.load_config(Path(self.dir.name) / "absent.conf", {"BRIDGE_MODEL": "m"})
         self.assertEqual(cfg["BRIDGE_MODEL"], "m")
 
+    def test_an_env_value_is_checked_exactly_like_a_file_value(self):
+        # The environment is the path the README and docs/slack-trial.md
+        # recommend for secrets, and it was the one side nothing checked.
+        for value in ("a; rm -rf /", "$(id)", "a`id`", "a|b", "a&b", "a>b", "a{b}"):
+            with self.assertRaises(lb.ConfigError, msg=value) as caught:
+                lb.load_config(None, {"BRIDGE_MODEL": value})
+            message = str(caught.exception)
+            self.assertIn("BRIDGE_MODEL", message)
+            self.assertIn("environment", message)
+            # The file side refuses the same value, and always did.
+            with self.assertRaises(lb.ConfigError):
+                lb.parse_conf('BRIDGE_MODEL="%s"\n' % value)
+
+    def test_a_plain_env_value_still_arrives(self):
+        cfg = lb.load_config(None, {"BRIDGE_MODEL": "opus-4.6", "BRIDGE_CWD": "~/code"})
+        self.assertEqual(cfg["BRIDGE_MODEL"], "opus-4.6")
+        self.assertEqual(cfg["BRIDGE_CWD"], "~/code")
+
     def test_example_file_parses_and_matches_the_key_list(self):
         text = (ROOT / "bridge.conf.example").read_text(encoding="utf-8")
         parsed = lb.parse_conf(text)
@@ -156,6 +174,23 @@ class AllowlistTest(unittest.TestCase):
         )
         problems = lb.validate(cfg, None, None)
         self.assertTrue(any("WHATSAPP_APP_SECRET" in p for p in problems))
+
+    def test_a_webhook_port_out_of_range_refuses(self):
+        # isdigit() alone passed validate() and then failed at bind, leaving
+        # the channel dead while the daemon called itself healthy.
+        for port, ok in (("8787", True), ("1", True), ("65535", True),
+                         ("0", False), ("65536", False), ("99999", False),
+                         ("-1", False), ("http", False)):
+            cfg = base_config(
+                WHATSAPP_ACCESS_TOKEN="t",
+                WHATSAPP_PHONE_NUMBER_ID="1",
+                WHATSAPP_VERIFY_TOKEN="v",
+                WHATSAPP_APP_SECRET="s",
+                WHATSAPP_ALLOWED_NUMBERS="15551234567",
+                WHATSAPP_WEBHOOK_PORT=port,
+            )
+            named = [p for p in lb.validate(cfg, None, None) if "PORT" in p]
+            self.assertEqual(bool(named), not ok, "%s should be %s" % (port, ok))
 
     def test_bad_spawn_kind_refuses(self):
         cfg = base_config(
@@ -221,12 +256,59 @@ class ArgvTest(unittest.TestCase):
         cfg = base_config(BRIDGE_HELPER="codex")
         self.assertEqual(
             lb.build_argv(cfg, "hi", False),
-            ["codex", "exec", "hi", "--skip-git-repo-check"],
+            ["codex", "exec", "--skip-git-repo-check", "--", "hi"],
         )
         self.assertEqual(
             lb.build_argv(cfg, "hi", True),
-            ["codex", "exec", "resume", "--last", "hi", "--skip-git-repo-check"],
+            ["codex", "exec", "resume", "--last", "--skip-git-repo-check", "--", "hi"],
         )
+
+    def test_codex_guards_the_positional_against_a_message_that_is_a_flag(self):
+        # The text arrives from a stranger and is a bare positional for codex.
+        # Without the guard, "--help" is a flag rather than a question.
+        cfg = base_config(BRIDGE_HELPER="codex", BRIDGE_MODEL="gpt-x")
+        for resume in (False, True):
+            argv = lb.build_argv(cfg, "--help", resume)
+            self.assertEqual(argv[-2:], ["--", "--help"])
+            # Everything else has to precede the guard, or it becomes a
+            # positional too.
+            self.assertNotIn("--", argv[:-2])
+            self.assertIn("gpt-x", argv[:-2])
+
+    def test_extra_args_stay_ahead_of_the_codex_guard(self):
+        cfg = base_config(BRIDGE_HELPER="codex", BRIDGE_EXTRA_ARGS="--verbose")
+        argv = lb.build_argv(cfg, "hi", False)
+        self.assertEqual(argv[-3:], ["--verbose", "--", "hi"])
+
+    def test_extra_args_may_not_undo_the_permission_model(self):
+        # Each of these is appended after --allowed-tools, and a later flag
+        # wins. None holds a character UNSAFE_CHARS would have caught.
+        for value, flag in (
+            ("--dangerously-skip-permissions", "--dangerously-skip-permissions"),
+            ("--permission-mode bypassPermissions", "--permission-mode"),
+            ("--permission-mode=bypassPermissions", "--permission-mode"),
+            ("--allowed-tools *", "--allowed-tools"),
+            (
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--dangerously-bypass-approvals-and-sandbox",
+            ),
+            ("--sandbox danger-full-access", "--sandbox"),
+            ("--add-dir /", "--add-dir"),
+            ("--verbose --yolo", "--yolo"),
+        ):
+            cfg = base_config(BRIDGE_HELPER="claude", BRIDGE_EXTRA_ARGS=value)
+            with self.assertRaises(lb.ConfigError, msg=value) as caught:
+                lb.build_argv(cfg, "hi", False)
+            self.assertIn(flag, str(caught.exception))
+            # And --check has to say so rather than print the argv and stop.
+            self.assertTrue(
+                any("BRIDGE_EXTRA_ARGS" in p for p in lb.validate(cfg, None, None)),
+                value,
+            )
+
+    def test_an_ordinary_extra_arg_still_passes(self):
+        cfg = base_config(BRIDGE_HELPER="claude", BRIDGE_EXTRA_ARGS="--verbose")
+        self.assertEqual(lb.build_argv(cfg, "hi", False)[-1], "--verbose")
 
     def test_codex_effort_uses_config_key(self):
         cfg = base_config(BRIDGE_HELPER="codex", BRIDGE_EFFORT="high")

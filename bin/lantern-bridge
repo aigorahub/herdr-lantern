@@ -121,6 +121,33 @@ HEX_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 CLAUDE_TOOLS = "Bash,Read,Glob,Grep,LS"
 
+# Flags BRIDGE_EXTRA_ARGS may not carry. The extra args land after the
+# bridge's own --allowed-tools and a later flag wins, so the escape hatch for
+# a renamed flag would otherwise also be the escape hatch out of the tool list
+# and the helper's sandbox -- and none of these holds a character UNSAFE_CHARS
+# rejects. launch.sh validates HELPER_PERMISSION against a fixed set for the
+# same reason.
+UNSAFE_EXTRA_ARGS = frozenset(
+    {
+        "--add-dir",
+        "--allowed-tools",
+        "--allowedtools",
+        "--ask-for-approval",
+        "--bypass-permissions",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-skip-permissions",
+        "--disallowed-tools",
+        "--disallowedtools",
+        "--full-auto",
+        "--permission-mode",
+        "--permission-prompt-tool",
+        "--sandbox",
+        "--yolo",
+        "-a",
+        "-s",
+    }
+)
+
 # Anything outside this set is replaced in a chat id before it becomes a
 # directory name, so a hostile id cannot walk out of the state directory.
 UNSAFE_ID = re.compile(r"[^A-Za-z0-9_.-]")
@@ -144,6 +171,23 @@ def unquote(raw: str) -> str:
     for char in value:
         if char in UNSAFE_CHARS:
             raise ConfigError("unsafe character %r in value" % char)
+    return value
+
+
+def check_env_value(key: str, value: str) -> str:
+    """The same reject set the file gets, for a value that came from the shell.
+
+    The file was the only side that was checked, and the environment is the
+    side README and docs/slack-trial.md actually recommend: they tell people
+    to export their tokens rather than write them down. build_argv splits
+    BRIDGE_EXTRA_ARGS on whitespace on the strength of this check, so the
+    trusted path had better be the checked one.
+    """
+    for char in value:
+        if char in UNSAFE_CHARS:
+            raise ConfigError(
+                "unsafe character %r in %s from the environment" % (char, key)
+            )
     return value
 
 
@@ -181,7 +225,7 @@ def load_config(conf_path: Path | None, env: dict | None = None) -> dict:
         cfg.update(parse_conf(Path(conf_path).read_text(encoding="utf-8")))
     for key in CONF_KEYS:
         if not cfg[key]:
-            cfg[key] = str(env.get(key, "")).strip()
+            cfg[key] = check_env_value(key, str(env.get(key, "")).strip())
         if not cfg[key]:
             cfg[key] = DEFAULTS.get(key, "")
     return cfg
@@ -239,6 +283,10 @@ def validate(cfg: dict, conf_path: Path | None, example_path: Path | None) -> li
         problems.append(
             "BRIDGE_SPAWN_KIND must match [a-z][a-z0-9_-]* (got %r)" % kind
         )
+    try:
+        extra_args(cfg)
+    except ConfigError as exc:
+        problems.append(str(exc))
 
     # A channel with credentials and no allowlist would answer anyone who
     # found the bot. That is a refusal, not a warning.
@@ -263,9 +311,12 @@ def validate(cfg: dict, conf_path: Path | None, example_path: Path | None) -> li
             problems.append(
                 "WHATSAPP_ALLOWED_NUMBERS is empty; list the sender numbers to answer"
             )
-        if not str(cfg["WHATSAPP_WEBHOOK_PORT"]).isdigit():
+        # isdigit() alone let 99999 through validate() and fail at bind, and
+        # the daemon reports every channel healthy while that one is dead.
+        port = str(cfg["WHATSAPP_WEBHOOK_PORT"])
+        if not port.isdigit() or not 1 <= int(port) <= 65535:
             problems.append(
-                "WHATSAPP_WEBHOOK_PORT must be a number (got %r)"
+                "WHATSAPP_WEBHOOK_PORT must be 1-65535 (got %r)"
                 % cfg["WHATSAPP_WEBHOOK_PORT"]
             )
     return problems
@@ -289,16 +340,37 @@ def resolve_helper(cfg: dict, which=None) -> str:
     )
 
 
+def extra_args(cfg: dict) -> list:
+    """BRIDGE_EXTRA_ARGS as tokens, or a ConfigError naming the flag refused.
+
+    Split on whitespace only; the parsers refuse anything shell-shaped on both
+    the file and the environment side.
+    """
+    tokens = cfg["BRIDGE_EXTRA_ARGS"].split()
+    for token in tokens:
+        name = token.split("=", 1)[0].strip().lower()
+        if name in UNSAFE_EXTRA_ARGS:
+            raise ConfigError(
+                "BRIDGE_EXTRA_ARGS may not carry %s: it lands after the "
+                "bridge's own --allowed-tools and a later flag wins, so this "
+                "would hand an allowlisted sender a helper with no tool list "
+                "and no sandbox" % name
+            )
+    return tokens
+
+
 def build_argv(cfg: dict, text: str, resume: bool, helper: str | None = None) -> list:
     """One place per helper, because headless flags drift between releases.
 
-    BRIDGE_EXTRA_ARGS is the escape hatch when they do. It is split on
-    whitespace only; the conf parser already refused anything shell-shaped.
+    BRIDGE_EXTRA_ARGS is the escape hatch when they do, minus the flags that
+    would undo the permission model rather than adjust a name.
     """
     helper = helper or cfg["BRIDGE_HELPER"]
     model = cfg["BRIDGE_MODEL"]
     effort = cfg["BRIDGE_EFFORT"]
+    extra = extra_args(cfg)
     if helper == "claude":
+        # The message is the value of -p, so it can never be read as a flag.
         argv = [
             "claude",
             "-p",
@@ -314,19 +386,22 @@ def build_argv(cfg: dict, text: str, resume: bool, helper: str | None = None) ->
             argv += ["--model", model]
         if effort:
             argv += ["--effort", effort]
-    elif helper == "codex":
+        return argv + extra
+    if helper == "codex":
+        argv = ["codex", "exec"]
         if resume:
-            argv = ["codex", "exec", "resume", "--last", text, "--skip-git-repo-check"]
-        else:
-            argv = ["codex", "exec", text, "--skip-git-repo-check"]
+            argv += ["resume", "--last"]
+        argv.append("--skip-git-repo-check")
         if model:
             argv += ["--model", model]
         if effort:
             argv += ["--config", 'model_reasoning_effort="%s"' % effort]
-    else:
-        raise ConfigError("unsupported bridge helper %r" % helper)
-    argv += cfg["BRIDGE_EXTRA_ARGS"].split()
-    return argv
+        argv += extra
+        # The message is a bare positional here, and it comes from a stranger.
+        # Without the end-of-options guard a message that is exactly a flag is
+        # parsed as one. Everything else has to precede it for the same reason.
+        return argv + ["--", text]
+    raise ConfigError("unsupported bridge helper %r" % helper)
 
 
 def split_message(text: str, limit: int) -> list:
@@ -1260,8 +1335,18 @@ def check(cfg: dict, args, conf_path, example_path) -> int:
     search_root = expand_root(cfg["BRIDGE_CWD"])
     print("search root: %s" % search_root)
     print("workdir: %s" % workdir_for(args.state, "telegram", "<chat-id>"))
-    print("first turn:  %s" % " ".join(build_argv(cfg, "hello", False, helper)))
-    print("later turn:  %s" % " ".join(build_argv(cfg, "hello", True, helper)))
+    if cfg["BRIDGE_EXTRA_ARGS"].strip():
+        # Loud on purpose. These tokens land after the bridge's own flags, and
+        # the reader is the only person who can say whether that is intended.
+        print("!! BRIDGE_EXTRA_ARGS is set, and it lands after the bridge's own")
+        print("!! flags, so anything a later flag can override, it overrides:")
+        print("!!   %s" % cfg["BRIDGE_EXTRA_ARGS"].strip())
+    try:
+        print("first turn:  %s" % " ".join(build_argv(cfg, "hello", False, helper)))
+        print("later turn:  %s" % " ".join(build_argv(cfg, "hello", True, helper)))
+    except ConfigError as exc:
+        sys.stderr.write("lantern-bridge: %s\n" % exc)
+        return 2
     return 2 if problems else 0
 
 
@@ -1299,7 +1384,12 @@ def main(argv=None) -> int:
     example_path = Path(args.example) if args.example else None
     try:
         cfg = load_config(conf_path)
-    except (ConfigError, OSError) as exc:
+    except ConfigError as exc:
+        # A refused value can come from either side now, and the message says
+        # which, so framing it all as "could not read the file" would lie.
+        die(str(exc))
+        return 2
+    except OSError as exc:
         die("could not read %s: %s" % (conf_path, exc))
         return 2
 

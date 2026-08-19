@@ -110,8 +110,14 @@ export HERDR_PLUGIN_ROOT="$plugin_root"
 
 conf="$config_dir/bridge.conf"
 if [ ! -f "$conf" ]; then
-    cp "$plugin_root/bridge.conf.example" "$conf" ||
+    # This file is the documented home of five secrets. A plain cp lands it
+    # 0644 -- readable by every other account on the machine -- so create it
+    # under a tight umask and pin the mode afterwards, in case a cp on some
+    # platform copies the example's bits instead. Only the file just created
+    # is touched; an existing one keeps whatever mode its owner chose.
+    (umask 077 && cp "$plugin_root/bridge.conf.example" "$conf") ||
         die "could not seed config at $conf"
+    chmod 600 "$conf" || die "could not restrict permissions on $conf"
 fi
 
 # The bridge answers with the same lantern prompt the pane uses, so it reads
