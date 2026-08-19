@@ -2,7 +2,7 @@
 # Action entrypoint: light the lantern in its own workspace.
 #
 # First open: create a workspace labelled "🔥 lantern" with --cwd $HOME and
-# seat the lantern chat there as a tab named "field", then drop the empty
+# seat the lantern chat there as a tab named "home", then drop the empty
 # shell tab the new workspace came with. Later opens: focus the chat that
 # is already running, or seat a new one in that same workspace. Herdr
 # appends a new workspace at the end of the sidebar; there is no
@@ -19,7 +19,7 @@ plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
 # pane_title must match [[panes]].title in herdr-plugin.toml, because
 # open.sh uses it to recognise a live lantern chat.
 workspace_label='🔥 lantern'
-tab_label=field
+tab_label=home
 pane_title=Lantern
 
 die() {

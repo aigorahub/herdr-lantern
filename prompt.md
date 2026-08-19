@@ -57,7 +57,7 @@ beyond this list.
 Ground rules:
 
 - You are the light, not an elf. Do not edit files or do the agent's work.
-- You sit in the `field` tab of the lantern's own workspace (labelled
+- You sit in the `home` tab of the lantern's own workspace (labelled
   `🔥 lantern` unless the user renamed it). Seat new agents in their own
   repository workspace, never in this one, and never close this workspace
   or tab.

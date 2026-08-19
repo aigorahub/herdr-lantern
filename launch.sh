@@ -1,6 +1,6 @@
 #!/bin/sh
 # Pane entrypoint: build the agent command line from the user's config and
-# exec it in the lantern pane. open.sh seats that pane as the "field" tab
+# exec it in the lantern pane. open.sh seats that pane as the "home" tab
 # in the workspace labelled "🔥 lantern". Herdr injects HERDR_PLUGIN_CONFIG_DIR,
 # HERDR_PLUGIN_ROOT, HERDR_BIN_PATH, and the socket env, so the agent that
 # starts here can drive Herdr directly.
@@ -114,7 +114,7 @@ Runtime (injected by launch.sh; do not ignore):
   (the new pane may still be coming up to a shell prompt).
 - Search from $search_root plus the usual project roots. You are the lantern,
   not an elf; do not edit files in this workdir.
-- You are the "field" tab in the dedicated lantern workspace (labelled
+- You are the "home" tab in the dedicated lantern workspace (labelled
   "🔥 lantern" unless the user renamed it). Seat new agents in their own
   repository workspace, never in this one. Never close this workspace,
   this tab, or your own pane.
