@@ -8,13 +8,11 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "helper"
 title = "Lantern"
-placement = "popup"
-width = "90%"
-height = "90%"
+placement = "tab"
 command = ["sh", "launch.sh"]
 
 [[actions]]
 id = "open"
 title = "Open lantern"
-description = "Open the lantern popup"
+description = "Open the lantern chat in its own workspace"
 command = ["sh", "open.sh"]

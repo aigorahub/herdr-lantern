@@ -11,8 +11,9 @@ the field: who needs you, what they are working toward, jump to a pane,
 start a new agent. The sidebar already marks working, blocked, done, or
 idle. This plugin does not replace Herdr or wrap the agent CLIs.
 
-It opens at 90% and starts the helper CLI you already use (Cursor `agent`,
-Devin, Claude Code, Codex, or Grok). That CLI drives `herdr`.
+It opens as a chat tab in its own Herdr workspace and starts the helper CLI
+you already use (Cursor `agent`, Devin, Claude Code, Codex, or Grok). That
+CLI drives `herdr`.
 
 Requires Herdr **0.7.5+** on macOS or Linux.
 
@@ -36,7 +37,7 @@ Do not run link and GitHub install at the same time for the same plugin id.
 
 ## Pick your helper CLI
 
-The popup runs **one** CLI as the lantern. That is independent of
+The lantern chat runs **one** CLI. That is independent of
 `HELPER_SPAWN_KIND`, which is only the default `--kind` when the helper starts
 an agent for your work (usually `claude`).
 
@@ -114,9 +115,39 @@ description = "Open lantern"
 ```
 
 Then `herdr server reload-config`. No Herdr restart is needed for plugin
-script or config edits; reopen the popup.
+script or config edits; reopen the lantern.
 
-The popup closes when the agent exits. Herdr does not take Escape until then.
+## Where it sits
+
+The first open creates a workspace labelled **🪔 lantern** at your home
+directory and seats the chat there as a tab named **field**. It does not
+drop a tab into whatever workspace you are in, and it closes the empty
+shell tab the new workspace comes with, so the workspace holds the chat
+alone. The lantern in the sidebar is how you find it at a glance.
+
+Every later open reuses it. A chat that is still running is focused
+wherever it sits, so moving or renaming that tab is safe. If the chat has
+exited, Lantern seats a new one in the same workspace and closes nothing
+else. It does not open a second lantern workspace, and two fast key
+presses cannot race into two.
+
+Lantern remembers both ids under the plugin state directory
+(`workspace.id`, `pane.id`) and checks them before it uses them: Herdr
+reuses ids after a restart, so a remembered workspace counts only while it
+still carries the `🪔 lantern` label, and a remembered pane only while it
+is still a lantern chat. Keep that label if you want the workspace reused
+after the chat closes. Rename it and the next open makes a fresh one.
+
+A new workspace lands **last** in the sidebar. There is no pin-to-top;
+drag it where you want it.
+
+The chat runs in the plugin state workdir. Home is only where the
+workspace sits and the search root the helper is told about
+(`HELPER_CWD`). Your repositories keep their own workspaces.
+
+The tab closes when the helper CLI exits, and the lantern workspace goes
+with it when that chat was the only tab in it. Herdr does not take Escape
+until then; Escape stays inside the CLI.
 
 For Cursor `agent`: **Ctrl+C** (twice if a turn is running), or **Ctrl+D** on an
 empty prompt.

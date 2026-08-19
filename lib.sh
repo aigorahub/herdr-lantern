@@ -182,6 +182,73 @@ helper_relay_agent_prompt() {
     "$_helper_real" agent wait "$_helper_target" --timeout 120000
 }
 
+helper_json_value() {
+    # Print the first string value for a JSON key read from stdin.
+    # Splits on JSON punctuation first so the match cannot run past the
+    # field it belongs to. Only for flat string fields.
+    _helper_json_key=$1
+    tr '{},' '\n\n\n' |
+        sed -n "s/.*\"$_helper_json_key\":\"\([^\"]*\)\".*/\1/p" |
+        sed -n '1p'
+}
+
+helper_workspace_id_by_label() {
+    # $1 real herdr, $2 label. Prints the first workspace id with that label.
+    # Objects in `workspace list` are flat, so one '{' fragment is one
+    # workspace and key order does not matter.
+    "$1" workspace list 2>/dev/null |
+        tr '{' '\n' |
+        grep -F "\"label\":\"$2\"," |
+        sed -n 's/.*"workspace_id":"\([^"]*\)".*/\1/p' |
+        sed -n '1p'
+}
+
+helper_workspace_label() {
+    # $1 real herdr, $2 workspace id. Prints the label of that workspace.
+    # Fails when the id is empty or gone.
+    [ -n "${2:-}" ] || return 1
+    _helper_ws_json=$("$1" workspace get "$2" 2>/dev/null) || return 1
+    printf '%s' "$_helper_ws_json" | helper_json_value label
+}
+
+helper_lantern_pane_workspace() {
+    # $1 real herdr, $2 pane id, $3 pane title. Prints the workspace that
+    # pane sits in, but only while it is still a live lantern chat. Herdr
+    # reuses pane ids after a restart, so the title is checked as well.
+    [ -n "${2:-}" ] || return 1
+    _helper_pane_json=$("$1" pane get "$2" 2>/dev/null) || return 1
+    case $_helper_pane_json in
+    *"\"label\":\"$3\""*) ;;
+    *) return 1 ;;
+    esac
+    printf '%s' "$_helper_pane_json" | helper_json_value workspace_id
+}
+
+helper_lantern_pane_in_workspace() {
+    # $1 real herdr, $2 workspace id, $3 pane title. Prints a live lantern
+    # chat already sitting in that workspace. Herdr does not deduplicate
+    # plugin panes, so this is what stops a second chat.
+    # `pane list` objects nest `scroll`, so the fragment that carries the
+    # title carries pane_id but not workspace_id. Each candidate is
+    # confirmed with `pane get`.
+    [ -n "${2:-}" ] || return 1
+    _helper_cands=$("$1" pane list 2>/dev/null |
+        tr '{' '\n' |
+        grep -F -e "\"label\":\"$3\"" |
+        sed -n 's/.*"pane_id":"\([^"]*\)".*/\1/p') || return 1
+    # Pane ids hold no spaces, so a plain word loop keeps this out of a
+    # subshell and lets the function fail when it finds nothing.
+    for _helper_cand in $_helper_cands; do
+        _helper_cand_ws=$(helper_lantern_pane_workspace "$1" "$_helper_cand" "$3") ||
+            continue
+        if [ "$_helper_cand_ws" = "$2" ]; then
+            printf '%s' "$_helper_cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
 helper_resolve_real_herdr() {
     if [ -n "${HERDR_REAL:-}" ] && [ -x "$HERDR_REAL" ]; then
         printf '%s' "$HERDR_REAL"
