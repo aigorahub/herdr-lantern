@@ -251,7 +251,7 @@
 
     <div class="wrap">
       <h2>What it is</h2>
-      <p>A Herdr plugin from the team that brought you <a href="https://github.com/aigorahub/elves">Elves</a>. It opens a 90% popup and starts the CLI you already use — Cursor <code>agent</code>, Devin, Claude Code, Codex, or Grok. That CLI drives Herdr. It is not a new chat product, and it does not cobble or land PRs.</p>
+      <p>A Herdr plugin from the team that brought you <a href="https://github.com/aigorahub/elves">Elves</a>. It opens as a chat tab in its own Herdr workspace and starts the CLI you already use — Cursor <code>agent</code>, Devin, Claude Code, Codex, or Grok. That CLI drives Herdr. It is not a new chat product, and it does not cobble or land PRs.</p>
       <p class="note">The sidebar already marks working, blocked, done, or idle. Lantern adds goals and progress in words, then seats or focuses a pane when you ask.</p>
 
       <h2>Install</h2>
@@ -290,6 +290,30 @@
         </li>
       </ol>
       <p class="note">Close by quitting the helper CLI. Escape stays inside the CLI. Cursor <code>agent</code>: <kbd>ctrl+c</kbd> (twice if a turn is running), or <kbd>ctrl+d</kbd> on an empty prompt.</p>
+
+      <h2>Where it sits</h2>
+      <ol class="steps">
+        <li>
+          <div>
+            The first open creates a workspace labelled <code>lantern</code> at your home directory
+            and seats the chat there as a tab. Nothing is dropped into the workspace you are working
+            in, and the empty shell tab of the new workspace is closed, so the chat sits alone.
+          </div>
+        </li>
+        <li>
+          <div>
+            Every later open reuses that workspace: Herdr focuses it and the chat already in it.
+            You never get a second lantern workspace.
+          </div>
+        </li>
+        <li>
+          <div>
+            The new workspace lands last in the sidebar. There is no pin-to-top; drag it where you
+            want it.
+          </div>
+        </li>
+      </ol>
+      <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, the tab closes, and the lantern workspace closes with it if that chat was the only tab.</p>
     </div>
 
     <div class="wrap wide">
@@ -298,7 +322,7 @@
       <div class="shots">
         <figure class="shot">
           <div class="frame">
-            <div class="chrome"><span class="dot live"></span> Lantern · Cursor agent · 90%</div>
+            <div class="chrome"><span class="dot live"></span> Lantern · Cursor agent · lantern workspace</div>
             <pre class="term"><span class="dim">THE HERD IN THE FIELD</span>
 
 <span class="need">NEEDS YOU</span>
@@ -362,7 +386,7 @@ No Elves install required. If there are no
       </ul>
 
       <h2>Pick your helper CLI</h2>
-      <p>The popup is one CLI. That is yours. It is not a shared team model. <code>HELPER_SPAWN_KIND</code> is separate: the default <code>--kind</code> when Lantern starts an agent for your work (usually <code>claude</code>).</p>
+      <p>The lantern chat is one CLI. That is yours. It is not a shared team model. <code>HELPER_SPAWN_KIND</code> is separate: the default <code>--kind</code> when Lantern starts an agent for your work (usually <code>claude</code>).</p>
       <table>
         <thead>
           <tr><th>Helper</th><th>Install</th><th>Your helper.conf</th></tr>

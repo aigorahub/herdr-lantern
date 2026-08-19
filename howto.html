@@ -210,7 +210,7 @@
     <p class="note">Developers can <code>herdr plugin link /path/to/herdr-lantern</code> instead. Do not link and GitHub-install the same id at once.</p>
 
     <h2>Pick your helper CLI</h2>
-    <p>The popup is not a new chat UI. It launches one of the CLIs you already have. That choice is yours; it is not a shared team model.</p>
+    <p>The lantern is not a new chat UI. It launches one of the CLIs you already have. That choice is yours; it is not a shared team model.</p>
     <table>
       <thead>
         <tr><th>Helper</th><th>What to install</th><th>Your <code>helper.conf</code></th></tr>
@@ -243,7 +243,7 @@
         </tr>
       </tbody>
     </table>
-    <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the popup.</p>
+    <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the lantern chat.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
@@ -254,7 +254,7 @@ HELPER_CWD="~"
 HELPER_SPAWN_KIND="claude"
 HELPER_PERMISSION="smart"
 HELPER_EXTRA_ARGS=""</pre>
-    <p class="note">Empty <code>HELPER_AGENT</code> picks the first of <code>agent</code> / Devin / Claude / Codex / Grok on <code>PATH</code>. Cursor with an empty model defaults to Composer 2.5 Fast. Leave Devin’s model blank.</p>
+    <p class="note">Empty <code>HELPER_AGENT</code> picks the first of <code>agent</code> / Devin / Claude / Codex / Grok on <code>PATH</code>. Cursor with an empty model defaults to Grok 4.6 High Fast. Leave Devin’s model blank.</p>
 
     <h2>Open it</h2>
     <ol class="steps">
@@ -273,7 +273,31 @@ HELPER_EXTRA_ARGS=""</pre>
         </div>
       </li>
     </ol>
-    <p class="note">Close the popup by quitting the helper CLI. Escape stays inside the CLI. For Cursor <code>agent</code>: <kbd>ctrl+c</kbd> (twice if a turn is running), or <kbd>ctrl+d</kbd> on an empty prompt. Script and config edits do not need a Herdr restart — reopen the popup.</p>
+    <p class="note">Close the chat by quitting the helper CLI. Escape stays inside the CLI. For Cursor <code>agent</code>: <kbd>ctrl+c</kbd> (twice if a turn is running), or <kbd>ctrl+d</kbd> on an empty prompt. Script and config edits do not need a Herdr restart — reopen the lantern.</p>
+
+    <h2>Where it sits</h2>
+    <ol class="steps">
+      <li>
+        <div>
+          The first open creates a workspace labelled <code>lantern</code> at your home directory
+          and seats the chat there as a tab. It is not dropped into the workspace you happen to be
+          in, and the empty shell tab of the new workspace is closed, so the chat sits alone.
+        </div>
+      </li>
+      <li>
+        <div>
+          Every later open reuses that workspace. Herdr focuses it and the chat already in it.
+          You never get a second lantern workspace.
+        </div>
+      </li>
+      <li>
+        <div>
+          The new workspace lands last in the sidebar. There is no pin-to-top; drag it where you
+          want it.
+        </div>
+      </li>
+    </ol>
+    <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, the tab closes, and the lantern workspace closes with it if that chat was the only tab.</p>
 
     <h2>What to say</h2>
     <ul class="says">

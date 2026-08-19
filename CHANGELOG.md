@@ -2,6 +2,30 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Lantern is a normal chat in its own workspace, not a lightbox. The pane
+  placement is `tab`, and the 90% width and height are gone.
+- `open.sh` seats that chat. The first open creates a workspace labelled
+  `lantern` with `--cwd $HOME`, opens the chat as a tab in it, and closes
+  the empty shell tab the new workspace comes with. Later opens focus that
+  same workspace and the chat already in it, so there is never a second
+  lantern workspace. The workspace and pane ids are remembered under the
+  plugin state directory (`workspace.id`, `pane.id`); the `lantern` label
+  is the fallback.
+- The open path is unchanged: `hsh`, `prefix+H`, or
+  `herdr plugin action invoke aigora.lantern.open`.
+- A new workspace lands last in the sidebar. Lantern does not pin it to the
+  top; drag it where you want it.
+- The chat process still runs in the plugin state workdir. Home is only
+  where the workspace sits and the `HELPER_CWD` search root.
+- Prompt and docs: close the chat by quitting the helper CLI, as before.
+  The tab closes with it, and the lantern workspace closes when that chat
+  was the only tab. Escape still stays inside the CLI. The helper is told
+  not to close its own workspace or seat other agents in it.
+
 ## [0.2.1] - 2026-08-19
 
 ### Changed

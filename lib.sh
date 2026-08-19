@@ -182,6 +182,49 @@ helper_relay_agent_prompt() {
     "$_helper_real" agent wait "$_helper_target" --timeout 120000
 }
 
+helper_json_value() {
+    # Print the first string value for a JSON key read from stdin.
+    # Splits on JSON punctuation first so the match cannot run past the
+    # field it belongs to. Only for flat string fields.
+    _helper_json_key=$1
+    tr '{},' '\n\n\n' |
+        sed -n "s/.*\"$_helper_json_key\":\"\([^\"]*\)\".*/\1/p" |
+        sed -n '1p'
+}
+
+helper_workspace_id_by_label() {
+    # $1 real herdr, $2 label. Prints the first workspace id with that label.
+    # Objects in `workspace list` are flat, so one '{' fragment is one
+    # workspace and key order does not matter.
+    "$1" workspace list 2>/dev/null |
+        tr '{' '\n' |
+        grep -F "\"label\":\"$2\"," |
+        sed -n 's/.*"workspace_id":"\([^"]*\)".*/\1/p' |
+        sed -n '1p'
+}
+
+helper_workspace_exists() {
+    # $1 real herdr, $2 workspace id.
+    [ -n "${2:-}" ] || return 1
+    "$1" workspace get "$2" >/dev/null 2>&1
+}
+
+helper_pane_is_lantern() {
+    # $1 real herdr, $2 pane id, $3 workspace id, $4 pane title.
+    # Ids are reused after a Herdr restart, so check the title and the
+    # workspace as well as existence.
+    [ -n "${2:-}" ] || return 1
+    _helper_pane_json=$("$1" pane get "$2" 2>/dev/null) || return 1
+    case $_helper_pane_json in
+    *"\"workspace_id\":\"$3\""*) ;;
+    *) return 1 ;;
+    esac
+    case $_helper_pane_json in
+    *"\"label\":\"$4\""*) return 0 ;;
+    esac
+    return 1
+}
+
 helper_resolve_real_herdr() {
     if [ -n "${HERDR_REAL:-}" ] && [ -x "$HERDR_REAL" ]; then
         printf '%s' "$HERDR_REAL"

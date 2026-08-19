@@ -44,6 +44,57 @@ fi
 [ "$(helper_normalize_root "$HOME/")" = "$HOME" ] || fail "normalize HOME/"
 grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 
+grep -q '^placement = "tab"$' "$root/herdr-plugin.toml" || fail "pane placement is tab"
+if grep -qE '^(width|height) =' "$root/herdr-plugin.toml"; then
+    fail "pane still sizes a popup"
+fi
+
+ws=$(printf '%s' '{"result":{"root_pane":{"pane_id":"w9:p1","tab_id":"w9:t1"},"workspace":{"label":"lantern","workspace_id":"w9"}}}' |
+    helper_json_value workspace_id)
+[ "$ws" = w9 ] || fail "json workspace_id ($ws)"
+pane=$(printf '%s' '{"result":{"root_pane":{"pane_id":"w9:p1"},"tab":{"tab_id":"w9:t1"}}}' |
+    helper_json_value pane_id)
+[ "$pane" = "w9:p1" ] || fail "json pane_id ($pane)"
+missing=$(printf '%s' '{"result":{}}' | helper_json_value pane_id)
+[ -z "$missing" ] || fail "json missing key should be empty"
+
+fake_ws=$(mktemp -d)
+cat >"$fake_ws/herdr" <<'EOF'
+#!/bin/sh
+if [ "$1" = workspace ] && [ "$2" = list ]; then
+    printf '%s\n' '{"result":{"workspaces":[{"label":"love-spark","workspace_id":"w1"},{"label":"lantern","workspace_id":"w7"}]}}'
+    exit 0
+fi
+if [ "$1" = workspace ] && [ "$2" = get ]; then
+    [ "$3" = w7 ] && exit 0
+    exit 1
+fi
+if [ "$1" = pane ] && [ "$2" = get ]; then
+    [ "$3" = "w7:p2" ] || exit 1
+    printf '%s\n' '{"result":{"pane":{"label":"Lantern","pane_id":"w7:p2","workspace_id":"w7"}}}'
+    exit 0
+fi
+exit 1
+EOF
+chmod +x "$fake_ws/herdr"
+found=$(helper_workspace_id_by_label "$fake_ws/herdr" lantern)
+[ "$found" = w7 ] || fail "workspace by label ($found)"
+[ -z "$(helper_workspace_id_by_label "$fake_ws/herdr" nope)" ] || fail "unknown label"
+helper_workspace_exists "$fake_ws/herdr" w7 || fail "workspace exists"
+if helper_workspace_exists "$fake_ws/herdr" w8; then fail "stale workspace id"; fi
+if helper_workspace_exists "$fake_ws/herdr" ""; then fail "empty workspace id"; fi
+helper_pane_is_lantern "$fake_ws/herdr" w7:p2 w7 Lantern || fail "lantern pane"
+if helper_pane_is_lantern "$fake_ws/herdr" w7:p2 w9 Lantern; then
+    fail "pane in another workspace"
+fi
+if helper_pane_is_lantern "$fake_ws/herdr" w7:p2 w7 Probe; then
+    fail "pane with another title"
+fi
+if helper_pane_is_lantern "$fake_ws/herdr" w7:p9 w7 Lantern; then
+    fail "missing pane"
+fi
+rm -rf "$fake_ws"
+
 detected=$(helper_detect_agent) || fail "no helper agent on PATH"
 case $detected in
 devin | agent | claude | codex | grok) ;;
