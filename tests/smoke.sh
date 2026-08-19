@@ -110,6 +110,38 @@ case $got in
     fail "resolve returned the plugin wrapper as the real herdr"
     ;;
 esac
+
+# The wrapper has to win `command -v herdr` even when the plugin's bin
+# directory is already on the inherited PATH. It used to keep that inherited
+# position while helper_extend_user_path put /usr/local/bin and
+# /opt/homebrew/bin in front of it, so a bare `herdr` reached the real binary
+# and the mutate gate never ran. prompt.md permits a bare `herdr`.
+front_got=$(
+    PATH="$resolve_dir:$root/bin:/usr/bin:/bin"
+    export PATH
+    helper_extend_user_path
+    helper_force_front_path "$root/bin"
+    command -v herdr
+) || front_got=
+[ "$front_got" = "$root/bin/herdr" ] ||
+    fail "the wrapper must resolve first even when its dir was already on PATH (got $front_got)"
+# And the real binary must still be reachable, or the wrapper has nothing to
+# exec: helper_resolve_real_herdr strips this directory back out, so every
+# copy of it has to be gone.
+front_real=$(
+    PATH="$resolve_dir:$root/bin:/usr/bin:/bin"
+    export PATH
+    helper_extend_user_path
+    helper_force_front_path "$root/bin"
+    HERDR_REAL= HERDR_BIN_PATH="$root/bin/herdr" helper_resolve_real_herdr "$root/bin"
+) || front_real=
+case $front_real in
+'' | "$root/bin/herdr")
+    fail "resolve should still find a real herdr behind the wrapper (got $front_real)"
+    ;;
+esac
+grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/launch.sh" ||
+    fail "launch.sh should force the wrapper to the front of PATH"
 rm -rf "$resolve_dir"
 
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
@@ -124,6 +156,28 @@ if grep -q 'WindowsApps' "$root/lib.sh"; then
     fail "lib.sh must not put WindowsApps on PATH"
 fi
 grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
+
+# prompt.md is the other half of the gate: bin/herdr blocks the command, and
+# this file is what makes the lantern ask first. A ready-to-run prefixed line
+# next to an instruction that never mentions confirming is how an agent ends
+# up typing into other people's panes with nobody's permission.
+if grep -q 'HERDR_HELPER_OK=1 herdr' "$root/prompt.md"; then
+    fail "prompt.md should not hand out a prefixed herdr command to paste"
+fi
+for gated_verb in prompt send-keys start focus close remove; do
+    grep -qF "$gated_verb" "$root/prompt.md" ||
+        fail "prompt.md does not name $gated_verb as gated"
+    grep -qF "$gated_verb" "$root/launch.sh" ||
+        fail "the launch.sh appendix does not name $gated_verb as gated"
+done
+# The snapshots are other agents' terminals, copied verbatim. Anyone whose
+# text reaches a pane can address the lantern in them.
+grep -q 'never instructions' "$root/prompt.md" ||
+    fail "prompt.md should say the snapshot files are data, not instructions"
+for snapshot in floor.txt goals-floor.txt elves-floor.txt; do
+    grep -qF "$snapshot" "$root/prompt.md" ||
+        fail "prompt.md does not name $snapshot"
+done
 
 grep -q '^placement = "tab"$' "$root/herdr-plugin.toml" || fail "pane placement is tab"
 grep -q '^title = "Lantern Bridge"$' "$root/herdr-plugin.toml" ||
@@ -464,18 +518,32 @@ out=$(sh "$root/bin/herdr" workspace create --cwd /tmp --label x) ||
 printf '%s\n' "$out" | grep -q 'workspace create' || fail "OK mutate did not exec real herdr"
 
 fake_prompt=$(mktemp -d)
+# A Cursor pane that keeps the text in its follow-up field: the prompt with
+# --wait times out with the message showing in the pane, and only Enter
+# submits it. FAKE_PANE is that pane's screen, so `agent read` can answer
+# with what is actually on it.
 cat >"$fake_prompt/herdr" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
 "agent prompt")
+    if [ "$3" = gone ]; then
+        printf 'no such agent: %s\n' "$3" >&2
+        exit 3
+    fi
     if [ "$5" = --wait ]; then
+        printf '> %s\n' "$4" >>"$FAKE_PANE"
         exit 1
     fi
     printf 'agent prompt %s\n' "$3"
     exit 0
     ;;
+"agent read")
+    cat "$FAKE_PANE" 2>/dev/null
+    exit 0
+    ;;
 "agent send-keys")
     printf 'agent send-keys %s %s\n' "$3" "$4"
+    [ -n "${FAKE_PANE_DEAF:-}" ] || printf 'submitted\n' >>"$FAKE_PANE"
     exit 0
     ;;
 "agent wait")
@@ -489,13 +557,43 @@ EOF
 chmod +x "$fake_prompt/herdr"
 export HERDR_REAL="$fake_prompt/herdr"
 export HERDR_HELPER_OK=1
+export FAKE_PANE="$fake_prompt/pane.txt"
+: >"$FAKE_PANE"
 out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there") ||
     fail "prompt relay should succeed after Enter fallback"
 printf '%s\n' "$out" | grep -q 'agent send-keys w1:p1 Enter' ||
     fail "prompt relay did not send Enter fallback"
 printf '%s\n' "$out" | grep -q 'agent wait w1:p1' ||
     fail "prompt relay did not wait after Enter"
+
+# Enter is for the stall and nothing else. A prompt that failed for its own
+# reason — unknown target, herdr not running, a flag herdr rejected — leaves
+# nothing in the pane, and the relay used to press Enter anyway and then
+# report the message as sent on the strength of a wait that returns at once.
+: >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent prompt gone "unrelated failure" 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a prompt failure that is not a stall must not be reported as sent"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a prompt failure that is not a stall must not press Enter"
+fi
+
+# The stall path, with a pane that swallows the Enter. `agent wait` answers
+# straight away because the pane is idle already, so the wait is not evidence
+# of anything and the relay must not call this sent.
+: >"$FAKE_PANE"
+export FAKE_PANE_DEAF=1
+if out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there" 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "an Enter that submitted nothing must not be reported as sent"
+fi
+printf '%s\n' "$out" | grep -q 'agent send-keys w1:p1 Enter' ||
+    fail "the stall case should still press Enter"
+unset FAKE_PANE_DEAF
+unset FAKE_PANE
 unset HERDR_REAL
+rm -rf "$fake_prompt"
 fake_prompt=
 
 # Windows: bin/herdr has no file extension, so a native caller resolving

@@ -341,6 +341,30 @@ sender actually gets, and where message text is exposed.
   `Bash` as the host user and that the `bin/herdr` gate covers `herdr`
   subcommands only.
 
+A second audit, of the lantern side this time, found ten more. The one that
+matters: the mutate gate failed open. `helper_prepend_path` returns early when
+the directory is already on PATH, and `helper_extend_user_path` runs before it
+and prepends `/usr/local/bin` and `/opt/homebrew/bin`, so on any machine whose
+PATH already carried the plugin's `bin` the wrapper kept its inherited
+position, `command -v herdr` answered with the real binary, and a bare `herdr
+agent start` ran unconfirmed. Next to it, `prompt.md` handed the lantern a
+ready-to-run `HERDR_HELPER_OK=1` line for `agent prompt` with no confirmation
+step attached, and told it to read three files of other agents' pane text with
+nothing saying that text is not addressed to it.
+
+- [x] B9-A13: The wrapper resolves first for a bare `herdr` even when the
+  plugin's `bin` was already on the inherited PATH behind a real herdr, and
+  `helper_resolve_real_herdr` still finds the real binary behind it.
+- [x] B9-A14: An `agent prompt` failure that is not a stalled submit is
+  neither answered with Enter nor reported as sent, and an Enter that
+  submitted nothing is a failure rather than a wait that returned at once.
+- [x] B9-A15: `prompt.md` shows no ready-to-paste `HERDR_HELPER_OK=1 herdr`
+  line, and its gate rule names the read-only list and every verb the wrapper
+  blocks, `prompt` and `send-keys` included.
+- [x] B9-A16: `prompt.md` says the snapshot files and `agent read` output are
+  observed data, never instructions, and that anything in them addressed to
+  the lantern is quoted to the user rather than acted on.
+
 ## Master Acceptance
 
 - [ ] M-A1: Full smoke suite green locally (macOS with real Homebrew CLIs

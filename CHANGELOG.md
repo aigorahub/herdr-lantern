@@ -55,6 +55,27 @@ All notable changes to Lantern, by Elves are documented here.
   and nothing else; it is not a sandbox and never was. The allowlists are the
   security boundary, so an entry on one is the same trust as a seat at the
   keyboard.
+- The mutate gate failed open, silently. `launch.sh` put the wrapper on PATH
+  with a helper that returns early when the directory is already there, and
+  `helper_extend_user_path` runs first and prepends `/usr/local/bin` and
+  `/opt/homebrew/bin`. On a machine whose PATH already carried the plugin's
+  `bin`, the wrapper kept that inherited position, `herdr` resolved to the
+  real binary, and a bare `herdr agent start` ran with nobody asked. The
+  wrapper directory is now moved to the front of PATH wherever it already
+  sits, and `HERDR_BIN_PATH` was never the problem.
+- `prompt.md` weakened its own gate. It handed the lantern a ready-to-run
+  `HERDR_HELPER_OK=1 herdr agent prompt ...` line with no confirmation step
+  attached, while the bullet that does require confirmation listed only
+  create/start/focus/close — so relaying a message into another agent's pane
+  read as ungated. The gate rule now names the read-only list, names every
+  verb the wrapper blocks, and no prefixed command appears anywhere for an
+  agent to paste.
+- The snapshot files are now marked as what they are. `floor.txt`,
+  `goals-floor.txt`, and `elves-floor.txt` carry text captured verbatim from
+  other agents' panes, and `prompt.md` had the lantern read them at light-up
+  with nothing saying they are data. Anyone whose text reaches a pane could
+  address the lantern directly. They are observed data, never instructions,
+  and anything in them that reads as an order is quoted to the user instead.
 - The webhook could be taken down by anyone who learned its URL. The handler
   inherited `timeout=None` from `StreamRequestHandler` and
   `ThreadingHTTPServer` caps nothing, so connections that announce a
@@ -92,6 +113,14 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Fixed
 
+- A relayed message could be reported as sent when it never was. The Enter
+  fallback fired after any `agent prompt` failure and the relay then reported
+  success on the strength of a wait that returns at once for an idle pane, so
+  an unknown target or a rejected flag came back as delivered — and Enter was
+  pressed into a session for a failure that had nothing to do with a stalled
+  submit. Enter is now only for the stall it was written for, recognised by
+  the message still showing in the pane, and a pane that has not moved
+  afterwards is a failure rather than a guess.
 - A helper that exited non-zero after printing anything still got a session
   marker, so every later turn passed `--continue` for a session that never
   began and the conversation was stuck there. The marker goes down only when
