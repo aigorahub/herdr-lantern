@@ -740,6 +740,24 @@ $smoke_python "$root/bin/elves-floor" --root "$elves_tmp" |
     grep -q 'elves_detected 0' ||
     fail "elves-floor --root should scan only the roots it was given"
 
+# One session file with one byte that is not UTF-8 used to end the whole
+# scan: load_session caught OSError and JSONDecodeError, and read_text raises
+# UnicodeDecodeError before either of those can happen. A file nobody can read
+# is skipped, and every other run on the floor still gets reported.
+mkdir -p "$elves_tmp/broken" "$elves_tmp/live"
+printf '{"status":"exec\377uting","batches":[]}' \
+    >"$elves_tmp/broken/.elves-session.json"
+printf '%s' '{"status":"executing","batches":[{"id":"B1","status":"open"}]}' \
+    >"$elves_tmp/live/.elves-session.json"
+# shellcheck disable=SC2086
+$smoke_python "$root/bin/elves-floor" --root "$elves_tmp" >"$tmp" 2>&1 ||
+    fail "one unreadable session file should not end the elves scan"
+grep -q 'elves_detected 1' "$tmp" ||
+    fail "the readable session should still be reported"
+grep -q -- '- live —' "$tmp" ||
+    fail "elves-floor should still list the run it could read"
+rm -rf "$elves_tmp/broken" "$elves_tmp/live"
+
 # A session file sitting exactly at the depth limit counts. Only the descent
 # past that directory stops.
 mkdir -p "$elves_tmp/a/b"
@@ -917,9 +935,52 @@ HELPER_MODEL=""
 HELPER_EXTRA_ARGS="--verbose --foo"
 HELPER_CWD="~"' ' [--verbose] [--foo]'
 
+printf 'ok: launch.sh argv for every helper CLI\n'
+
+# A snapshot that cannot be refreshed must not be left behind. prompt.md has
+# the lantern read these files at light-up and lead with who needs the user,
+# so last run's field would be reported as this one.
+#
+# The stubs go in $HOME/.grok/bin because helper_extend_user_path prepends
+# that last, which puts it ahead of the real /opt/homebrew/bin. Handing them
+# in through PATH would not work: this machine has a genuine python3 in one of
+# the directories that function puts in front. Non-zero on purpose — that is
+# the one answer that is neither a Microsoft Store alias nor a working python.
+nopy_dir=$argv_home/.grok/bin
+mkdir -p "$nopy_dir"
+for stub_bin in python3 python py; do
+    printf '%s\n' '#!/bin/sh' 'exit 1' >"$nopy_dir/$stub_bin"
+    chmod +x "$nopy_dir/$stub_bin"
+done
+rm -rf "$argv_dir/state"
+mkdir -p "$argv_dir/state/workdir"
+stale_workdir=$argv_dir/state/workdir
+printf '%s\n' 'NEEDS YOU' '- stale-agent — waiting on you since the last run' \
+    >"$stale_workdir/goals-floor.txt"
+printf '%s\n' 'elves_detected 1' 'IN PROGRESS' '- stale-run — 2/5 open B3' \
+    >"$stale_workdir/elves-floor.txt"
+printf '%s\n' 'HELPER_AGENT="claude"' 'HELPER_CWD="~"' \
+    >"$argv_dir/config/helper.conf"
+env -i \
+    HOME="$argv_home" \
+    PATH="/usr/bin:/bin" \
+    HERDR_PLUGIN_ROOT="$root" \
+    HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
+    HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
+    HERDR_BIN_PATH="$argv_bin/herdr" \
+    sh "$root/launch.sh" </dev/null >/dev/null 2>&1 ||
+    fail "launch.sh should still start with no interpreter on PATH"
+for stale_file in goals-floor elves-floor; do
+    if grep -q 'stale-' "$stale_workdir/$stale_file.txt"; then
+        fail "launch.sh left last run's $stale_file.txt in place"
+    fi
+    grep -q 'snapshot unavailable' "$stale_workdir/$stale_file.txt" ||
+        fail "$stale_file.txt should say why it could not be refreshed"
+done
+printf 'ok: launch.sh replaces a snapshot it cannot refresh\n'
+
 rm -rf "$argv_dir"
 argv_dir=
-printf 'ok: launch.sh argv for every helper CLI\n'
 
 # bridge.sh end to end. Same stub-home trick as above: the bridge helper is
 # claude or codex, and both exist on plenty of machines, so the config names

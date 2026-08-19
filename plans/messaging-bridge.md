@@ -364,6 +364,12 @@ nothing saying that text is not addressed to it.
 - [x] B9-A16: `prompt.md` says the snapshot files and `agent read` output are
   observed data, never instructions, and that anything in them addressed to
   the lantern is quoted to the user rather than acted on.
+- [x] B9-A17: `launch.sh` run with no interpreter reachable leaves no stale
+  `goals-floor.txt` or `elves-floor.txt`; each says the snapshot could not be
+  refreshed and why.
+- [x] B9-A18: A `.elves-session.json` holding a byte that is not UTF-8 is
+  skipped, and a readable session elsewhere under the same root is still
+  reported.
 
 ## Master Acceptance
 

@@ -67,7 +67,10 @@ def find_sessions(roots: list[Path], max_depth: int) -> list[Path]:
 def load_session(path: Path) -> dict | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        # One non-UTF-8 byte in one session file used to end the whole scan.
+        # An unreadable file is skipped like any other; the rest of the floor
+        # is what the user asked for.
         return None
     return data if isinstance(data, dict) else None
 

@@ -13,6 +13,15 @@ die() {
     exit 1
 }
 
+snapshot_unavailable() {
+    # $1 snapshot file, $2 why. The workdir survives between runs and
+    # prompt.md has the lantern read these files at light-up, so a snapshot
+    # left unrefreshed is last run's field reported as this one: who needs
+    # you, who is blocked, all of it hours old and stated as fact. An honest
+    # line is the only thing worth leaving here.
+    printf 'snapshot unavailable: %s\n' "$2" >"$1" 2>/dev/null || true
+}
+
 plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
 # shellcheck disable=SC1091
 . "$plugin_root/lib.sh"
@@ -143,7 +152,8 @@ fi
 if [ -n "$real_herdr" ]; then
     "$real_herdr" agent list >"$workdir/floor.txt" 2>/dev/null || true
 else
-    : >"$workdir/floor.txt"
+    snapshot_unavailable "$workdir/floor.txt" \
+        "the real herdr binary was not found from this pane"
 fi
 helper_python=$(helper_detect_python) || helper_python=
 if [ -n "$helper_python" ]; then
@@ -152,6 +162,9 @@ if [ -n "$helper_python" ]; then
         # shellcheck disable=SC2086
         $helper_python "$plugin_root/bin/goals-floor" --herdr "$real_herdr" \
             >"$workdir/goals-floor.txt" 2>/dev/null || true
+    else
+        snapshot_unavailable "$workdir/goals-floor.txt" \
+            "the real herdr binary was not found from this pane"
     fi
     if [ "$search_root" = "$HOME" ]; then
         # shellcheck disable=SC2086
@@ -162,6 +175,11 @@ if [ -n "$helper_python" ]; then
         $helper_python "$plugin_root/bin/elves-floor" --root "$search_root" \
             >"$workdir/elves-floor.txt" 2>/dev/null || true
     fi
+else
+    snapshot_unavailable "$workdir/goals-floor.txt" \
+        "no working python 3 interpreter was found on PATH"
+    snapshot_unavailable "$workdir/elves-floor.txt" \
+        "no working python 3 interpreter was found on PATH"
 fi
 
 printf '%s\n' "$full_prompt" >"$workdir/AGENTS.md" ||

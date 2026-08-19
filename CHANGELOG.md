@@ -113,6 +113,17 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Fixed
 
+- A snapshot the lantern could not refresh was left showing the last run's
+  field. With no Python 3 on PATH `launch.sh` skipped the refresh entirely,
+  and the workdir survives between runs, so `goals-floor.txt` and
+  `elves-floor.txt` still said who needed the user and which agents were
+  blocked — hours old, and read at light-up as the field right now. A file
+  that cannot be refreshed now holds one line saying so and why, and the same
+  goes for `floor.txt` when the real herdr cannot be found.
+- One non-UTF-8 byte in one `.elves-session.json` ended the whole Elves scan.
+  `load_session` caught `OSError` and `JSONDecodeError`, and `read_text`
+  raises `UnicodeDecodeError` before either can happen. An unreadable file is
+  skipped like any other and the rest of the floor is still reported.
 - A relayed message could be reported as sent when it never was. The Enter
   fallback fired after any `agent prompt` failure and the relay then reported
   success on the strength of a wait that returns at once for an idle pane, so
