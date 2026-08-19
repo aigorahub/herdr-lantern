@@ -87,6 +87,8 @@ HELPER_TIMEOUT = 900
 # Telegram's long poll holds the connection for TELEGRAM_POLL seconds, so the
 # socket timeout has to be longer than that or every poll looks like a failure.
 TELEGRAM_POLL = 50
+# Slack has no long poll on this endpoint, so it is a plain interval.
+SLACK_POLL = 3.0
 HTTP_TIMEOUT = 30
 LONG_POLL_TIMEOUT = TELEGRAM_POLL + 15
 
@@ -576,8 +578,112 @@ class TelegramAdapter(Adapter):
             http_json(url, payload)
 
 
+class SlackAdapter(Adapter):
+    """Web API polling. Socket Mode needs websockets, which the stdlib lacks,
+    and the Events API needs a public server; conversations.history needs
+    neither and one channel is all this watches."""
+
+    name = "slack"
+    limit = SLACK_LIMIT
+
+    def __init__(self, cfg: dict, inbox, now=None):
+        super().__init__(cfg, inbox)
+        self.token = cfg["SLACK_BOT_TOKEN"]
+        self.channel = cfg["SLACK_CHANNEL"]
+        self.allowed = set(split_list(cfg["SLACK_ALLOWED_USERS"]))
+        # History starts at startup. Whatever the channel said before the
+        # bridge existed is somebody else's conversation, not a backlog.
+        self.oldest = "%.6f" % (time.time() if now is None else now)
+        # `oldest` is a boundary, not an acknowledgement: the message that sets
+        # the cursor can come back on the next poll. Remembering the ts is what
+        # stops a double answer.
+        self.seen = set()
+
+    def headers(self) -> dict:
+        return {"Authorization": "Bearer %s" % self.token}
+
+    def history_url(self) -> str:
+        query = urllib.parse.urlencode(
+            {
+                "channel": self.channel,
+                "oldest": self.oldest,
+                "limit": 100,
+                "inclusive": "false",
+            }
+        )
+        return "https://slack.com/api/conversations.history?%s" % query
+
+    def remember(self, ts: str) -> None:
+        self.seen.add(ts)
+        if len(self.seen) > 512:
+            # Bounded on purpose: this runs for weeks. Anything this old is
+            # far behind the cursor and can never come back.
+            for old in sorted(self.seen)[:256]:
+                self.seen.discard(old)
+
+    def parse_history(self, payload: dict):
+        """Returns (accepted, next_oldest). history comes back newest first."""
+        accepted = []
+        oldest = self.oldest
+        messages = payload.get("messages") or []
+        for message in reversed(messages):
+            if not isinstance(message, dict):
+                continue
+            ts = message.get("ts")
+            if not isinstance(ts, str):
+                continue
+            try:
+                if float(ts) > float(oldest):
+                    oldest = ts
+            except ValueError:
+                continue
+            if ts in self.seen:
+                continue
+            self.remember(ts)
+            # The bridge's own replies come back through history. So do joins,
+            # topic changes, and every other subtype.
+            if message.get("bot_id") or message.get("subtype"):
+                continue
+            user = message.get("user")
+            if not isinstance(user, str) or user not in self.allowed:
+                if isinstance(user, str):
+                    log("slack: dropped a message from %s" % user)
+                continue
+            text = message.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            accepted.append((self.channel, text.strip()))
+        return accepted, oldest
+
+    def poll_once(self) -> None:
+        payload = http_json(self.history_url(), headers=self.headers())
+        if not payload.get("ok", False):
+            # Slack reports failure in the body with HTTP 200. The error slug
+            # is a fixed vocabulary, never a token.
+            raise RuntimeError("slack api error: %s" % payload.get("error", "unknown"))
+        accepted, oldest = self.parse_history(payload)
+        self.oldest = oldest
+        for chat_id, text in accepted:
+            self.offer(chat_id, text)
+        time.sleep(SLACK_POLL)
+
+    def send_payloads(self, chat_id, text: str):
+        return [
+            (
+                "https://slack.com/api/chat.postMessage",
+                {"channel": self.channel, "text": chunk},
+            )
+            for chunk in split_message(text, self.limit)
+        ]
+
+    def send(self, chat_id, text: str) -> None:
+        for url, payload in self.send_payloads(chat_id, text):
+            http_json(url, payload, headers=self.headers())
+
+
 ADAPTERS = {
     "telegram": TelegramAdapter,
+    "slack": SlackAdapter,
 }
 
 

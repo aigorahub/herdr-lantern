@@ -432,6 +432,115 @@ class TelegramSendTest(unittest.TestCase):
         self.assertEqual(inbox.get_nowait(), ("telegram", "42", "hi"))
 
 
+def slack_message(ts, user="U1", text="hello", **extra):
+    message = {"type": "message", "ts": ts, "user": user, "text": text}
+    message.update(extra)
+    return message
+
+
+class SlackParseTest(unittest.TestCase):
+    def setUp(self):
+        cfg = base_config(
+            SLACK_BOT_TOKEN="xoxb-secret",
+            SLACK_CHANNEL="C123",
+            SLACK_ALLOWED_USERS="U1,U2",
+        )
+        self.inbox = queue.Queue()
+        self.adapter = lb.SlackAdapter(cfg, self.inbox, now=1000.0)
+
+    def parse(self, messages):
+        # Slack returns history newest first.
+        return self.adapter.parse_history({"ok": True, "messages": list(reversed(messages))})
+
+    def test_allowed_user_is_accepted(self):
+        accepted, oldest = self.parse([slack_message("1001.000100", "U1", " hi ")])
+        self.assertEqual(accepted, [("C123", "hi")])
+        self.assertEqual(oldest, "1001.000100")
+
+    def test_own_bot_message_is_skipped(self):
+        accepted, oldest = self.parse(
+            [slack_message("1001.000100", "U1", "my own reply", bot_id="B9")]
+        )
+        self.assertEqual(accepted, [])
+        self.assertEqual(oldest, "1001.000100")
+
+    def test_subtype_is_skipped(self):
+        accepted, _ = self.parse(
+            [slack_message("1001.000100", "U1", "joined", subtype="channel_join")]
+        )
+        self.assertEqual(accepted, [])
+
+    def test_disallowed_user_is_skipped(self):
+        accepted, oldest = self.parse([slack_message("1002.000100", "U9", "let me in")])
+        self.assertEqual(accepted, [])
+        self.assertEqual(oldest, "1002.000100")
+
+    def test_cursor_advances_to_the_newest_ts(self):
+        accepted, oldest = self.parse(
+            [
+                slack_message("1001.000100", "U1", "one"),
+                slack_message("1002.000100", "U9", "dropped"),
+                slack_message("1003.000100", "U2", "two"),
+            ]
+        )
+        # Oldest first, whichever order Slack listed them in, and the cursor
+        # clears the dropped message too.
+        self.assertEqual([t for _c, t in accepted], ["one", "two"])
+        self.assertEqual(oldest, "1003.000100")
+
+    def test_a_replayed_message_is_not_answered_twice(self):
+        message = slack_message("1001.000100", "U1", "hi")
+        self.assertEqual(len(self.parse([message])[0]), 1)
+        self.adapter.oldest = "1000.000000"
+        self.assertEqual(self.parse([message])[0], [])
+
+    def test_messages_before_startup_never_arrive(self):
+        # The cursor is sent to Slack, so old history is not returned at all;
+        # this pins the cursor's initial value, which is what does that.
+        self.assertEqual(self.adapter.oldest, "%.6f" % 1000.0)
+        self.assertIn("oldest=1000.000000", self.adapter.history_url())
+        self.assertIn("channel=C123", self.adapter.history_url())
+
+    def test_seen_set_stays_bounded(self):
+        for i in range(700):
+            self.adapter.remember("2000.%06d" % i)
+        self.assertLessEqual(len(self.adapter.seen), 512)
+
+    def test_garbage_payload_does_not_raise(self):
+        self.assertEqual(self.adapter.parse_history({}), ([], self.adapter.oldest))
+        self.assertEqual(
+            self.adapter.parse_history({"messages": [None, {"ts": "nope"}]}),
+            ([], self.adapter.oldest),
+        )
+
+
+class SlackSendTest(unittest.TestCase):
+    def setUp(self):
+        cfg = base_config(
+            SLACK_BOT_TOKEN="xoxb-secret",
+            SLACK_CHANNEL="C123",
+            SLACK_ALLOWED_USERS="U1",
+        )
+        self.adapter = lb.SlackAdapter(cfg, queue.Queue(), now=1000.0)
+
+    def test_payload_shape(self):
+        sends = self.adapter.send_payloads("C123", "hi")
+        self.assertEqual(
+            sends, [("https://slack.com/api/chat.postMessage", {"channel": "C123", "text": "hi"})]
+        )
+
+    def test_token_travels_in_the_header_not_the_url(self):
+        self.assertEqual(self.adapter.headers(), {"Authorization": "Bearer xoxb-secret"})
+        self.assertNotIn("xoxb-secret", self.adapter.history_url())
+
+    def test_long_reply_is_split_at_the_slack_limit(self):
+        text = "\n".join(["y" * 200] * 60)
+        sends = self.adapter.send_payloads("C123", text)
+        self.assertGreater(len(sends), 1)
+        for _url, payload in sends:
+            self.assertLessEqual(len(payload["text"]), lb.SLACK_LIMIT)
+
+
 class AdapterLoopTest(unittest.TestCase):
     def test_a_network_error_backs_off_and_continues(self):
         calls = []
