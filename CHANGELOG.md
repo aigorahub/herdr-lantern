@@ -4,11 +4,17 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [0.2.1] - 2026-08-19
 
+### Changed
+
+- Cursor `agent` default model is `cursor-grok-4.6-high-fast` (Grok 4.6
+  High Fast) when `HELPER_MODEL` is empty.
+
 ### Fixed
 
-- `bin/herdr` now relays `agent prompt` with `--wait`, and when Herdr
-  reports a stalled submit (text typed but Enter ignored — common on idle
-  Cursor panes), sends Enter and waits again before returning.
+- `bin/herdr` now relays `agent prompt` with `--wait`. If Herdr reports a
+  stalled submit (text typed but Enter ignored — common on idle Cursor
+  panes), it sends Enter and waits again. Prompt rules tell the helper to
+  read the pane before saying the message was sent.
 
 ## [0.2.0] - 2026-08-18
 

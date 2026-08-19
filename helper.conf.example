@@ -7,7 +7,7 @@
 HELPER_AGENT=""
 
 # Optional --model. For devin, leave empty (uses ~/.config/devin/config.json).
-# For Cursor `agent`, empty defaults to composer-2.5-fast.
+# For Cursor `agent`, empty defaults to cursor-grok-4.6-high-fast.
 HELPER_MODEL=""
 
 # Optional reasoning effort. Mapped per agent:

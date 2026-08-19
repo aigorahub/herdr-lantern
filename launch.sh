@@ -155,7 +155,7 @@ mkdir -p "$workdir/.cursor/rules" || die "could not create cursor rules dir"
     die "could not write cursor rule file"
 
 if [ "$helper_bin" = "agent" ] && [ -z "$HELPER_MODEL" ]; then
-    HELPER_MODEL=composer-2.5-fast
+    HELPER_MODEL=cursor-grok-4.6-high-fast
 fi
 
 set -- "$helper_bin"
