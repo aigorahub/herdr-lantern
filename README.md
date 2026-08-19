@@ -103,6 +103,9 @@ hsh
 
 That runs `herdr plugin action invoke aigora.lantern.open`. Put `hsh`
 from this repo on your `PATH` (for example `ln -s "$PWD/hsh" ~/bin/hsh`).
+Run it from your own terminal. Inside the lantern's pane `herdr` is the
+mutate-gated wrapper, and opening a second lantern is a change like any
+other, so there it asks first rather than doing it.
 
 On Windows there is no symlink step. Either run the action directly:
 

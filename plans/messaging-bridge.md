@@ -377,6 +377,9 @@ nothing saying that text is not addressed to it.
 - [x] B9-A21: The version case covers every file that prints the version —
   `README.md`, `CHANGELOG.md`, `howto.html`, `docs/index.html` — and refuses
   an older version string left next to the current one.
+- [x] B9-A22: `hsh` no longer carries a `HERDR_REAL` bypass. It was dead —
+  `launch.sh` unsets `HERDR_REAL` before exec — and reviving it would have put
+  a hole in the gate, since opening a second lantern is a mutation.
 
 ## Master Acceptance
 

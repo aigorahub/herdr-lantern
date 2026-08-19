@@ -111,6 +111,15 @@ All notable changes to Lantern, by Elves are documented here.
   is exactly a flag was parsed as one. An end-of-options `--` guards it.
   `claude` was already safe: the text is the value of `-p`.
 
+### Changed
+
+- `hsh` no longer prefers `$HERDR_REAL`. That branch existed to dodge the
+  mutate gate from inside the lantern pane, and `launch.sh` unsets
+  `HERDR_REAL` before it execs the agent, so it never ran there. Reviving it
+  would be a hole in the gate rather than a fix: opening a second lantern is a
+  change like any other. Outside the pane `hsh` reaches the real herdr as
+  before; inside it, the wrapper asks first.
+
 ### Fixed
 
 - A snapshot the lantern could not refresh was left showing the last run's

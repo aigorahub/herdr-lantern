@@ -170,6 +170,14 @@ for gated_verb in prompt send-keys start focus close remove; do
     grep -qF "$gated_verb" "$root/launch.sh" ||
         fail "the launch.sh appendix does not name $gated_verb as gated"
 done
+# hsh carried a HERDR_REAL branch to dodge the wrapper, and launch.sh unsets
+# HERDR_REAL before it execs the agent, so inside the pane that branch never
+# ran. Nothing should put a bypass back: opening a second lantern is a
+# mutation, and the gate is what makes the lantern ask first.
+if grep -vE '^[[:space:]]*#' "$root/hsh" | grep -q 'HERDR_REAL'; then
+    fail "hsh should not carry a path around the mutate gate"
+fi
+
 # The snapshots are other agents' terminals, copied verbatim. Anyone whose
 # text reaches a pane can address the lantern in them.
 grep -q 'never instructions' "$root/prompt.md" ||
