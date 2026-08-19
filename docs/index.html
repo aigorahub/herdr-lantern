@@ -388,6 +388,9 @@ No Elves install required. If there are no
         <li>“How’s the night shift?”<span>If Elves session files are around, it reads that floor. It does not cobble or land.</span></li>
       </ul>
 
+      <h2>Use it from your phone</h2>
+      <p>The Lantern Bridge is a second pane that answers Telegram, WhatsApp, and Slack messages with the same lantern. Open it with <code>herdr plugin action invoke aigora.lantern.bridge</code> and leave it running. It does not read the lantern chat: every conversation gets its own workdir seeded with the same prompt, and a headless <code>claude</code> or <code>codex</code> answers there. A channel turns on when its credential is set and refuses to start until its allowlist names who may talk to it, mutating <code>herdr</code> still waits for your confirmation as a chat message, and the WhatsApp webhook verifies every request signature before it parses anything. Setup per channel is in the <a href="https://github.com/aigorahub/herdr-lantern#use-the-lantern-from-telegram-whatsapp-or-slack">README</a>.</p>
+
       <h2>Pick your helper CLI</h2>
       <p>The lantern chat is one CLI. That is yours. It is not a shared team model. <code>HELPER_SPAWN_KIND</code> is separate: the default <code>--kind</code> when Lantern starts an agent for your work (usually <code>claude</code>).</p>
       <table>

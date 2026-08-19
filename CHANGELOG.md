@@ -2,6 +2,58 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.5.0] - 2026-08-19
+
+### Added
+
+- The Lantern Bridge: use the lantern from Telegram, WhatsApp, or Slack. A new
+  `bridge` pane and a `bridge` action run `bridge.sh`, which sets up the same
+  environment the lantern pane gets and starts `bin/lantern-bridge`. Each
+  conversation gets its own workdir seeded with `prompt.md` plus a remote
+  appendix, and a headless `claude` or `codex` answers there. Nothing scrapes
+  the lantern pane.
+- The mutate gate reaches the chat apps. The bridge exports the same
+  `HERDR_BIN_PATH` wrapper, so create, start, focus, close, and prompt stay
+  blocked until you confirm — and the confirmation is a message in the
+  channel, because there is no terminal at the other end.
+- `bridge.conf`, seeded from `bridge.conf.example` on first start and parsed
+  the same way `helper.conf` is: `KEY=value` lines only, never sourced,
+  unknown keys and shell metacharacters refused. Every key falls back to an
+  environment variable of the same name, so tokens can stay out of the file.
+- `sh bridge.sh --check` validates a config and prints a summary with every
+  token redacted, plus the helper command line it would run. No network, no
+  helper process.
+- A sender allowlist per channel, and it is mandatory. A channel with
+  credentials and an empty allowlist refuses to start and names the key to
+  fill in. With no channels configured at all the bridge exits and points at
+  the example file.
+- `tests/bridge_test.py`, run by `tests/smoke.sh` wherever a working Python 3
+  exists. It covers config parsing, allowlists, argv for both helpers, reply
+  splitting, workdir seeding, the Telegram and Slack message filters, and the
+  WhatsApp webhook driven against a real socket on an ephemeral port.
+
+### Security
+
+- Every WhatsApp webhook POST is verified as HMAC-SHA256 of the raw request
+  body against `WHATSAPP_APP_SECRET`, with `hmac.compare_digest`, before
+  anything parses it. A mismatch or a missing header is a 401 and nothing
+  reaches the queue. The app secret is required, not optional. The webhook
+  binds localhost; a tunnel is what gives Meta a public URL.
+- The webhook's default request logger is off. The line it writes carries
+  `hub.verify_token`.
+- No token, secret, or message body is logged or echoed. Log lines carry a
+  channel, a chat id, and byte counts.
+
+### Fixed
+
+- `tests/smoke.sh` failed its `launch.sh` argv cases on any machine with a
+  real `grok` or `agent` in `/opt/homebrew/bin`. The harness handed its stub
+  directory in through `PATH`, but `helper_prepend_path` skips a directory
+  that is already on `PATH`, so the stubs kept their inherited position and
+  the Homebrew directories landed in front of them. The stubs now sit in
+  `$HOME/.local/bin` under the test's throwaway home and let
+  `helper_extend_user_path` place the directory itself.
+
 ## [0.4.0] - 2026-08-19
 
 ### Added

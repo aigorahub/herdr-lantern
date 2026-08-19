@@ -1,6 +1,6 @@
 id = "aigora.lantern"
 name = "Lantern, by Elves"
-version = "0.4.0"
+version = "0.5.0"
 min_herdr_version = "0.7.5"
 description = "From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field."
 platforms = ["linux", "macos", "windows"]
@@ -11,8 +11,20 @@ title = "Lantern"
 placement = "tab"
 command = ["sh", "launch.sh"]
 
+[[panes]]
+id = "bridge"
+title = "Lantern Bridge"
+placement = "tab"
+command = ["sh", "bridge.sh"]
+
 [[actions]]
 id = "open"
 title = "Open lantern"
 description = "Open the lantern chat in its own workspace"
 command = ["sh", "open.sh"]
+
+[[actions]]
+id = "bridge"
+title = "Open lantern bridge"
+description = "Relay Telegram, WhatsApp, and Slack messages to the lantern"
+command = ["sh", "bridge.sh", "--open"]

@@ -26,6 +26,27 @@ plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")" && pwd)}
 # path is appended. Same normalisation launch.sh does, same reason.
 plugin_root=$(helper_posix_path "$plugin_root")
 
+# Before anything looks for herdr or a helper CLI: an action started from the
+# Herdr UI inherits a thin PATH.
+helper_extend_user_path
+
+# The `bridge` action seats the `bridge` pane. An action runs in a process of
+# its own, so it cannot become the daemon; it asks Herdr to open the pane, and
+# the pane runs this file again without --open. The real herdr is called
+# directly here, the way open.sh does: the wrapper's gate is for the helper
+# CLI, not for the plugin's own entrypoints.
+if [ "${1:-}" = "--open" ]; then
+    real_herdr=${HERDR_BIN_PATH:-}
+    case $real_herdr in
+    '' | "$plugin_root"/bin/herdr)
+        real_herdr=$(helper_resolve_real_herdr "$plugin_root/bin") ||
+            die "could not find the real herdr binary"
+        ;;
+    esac
+    exec "$real_herdr" plugin pane open \
+        --plugin aigora.lantern --entrypoint bridge --placement tab
+fi
+
 config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
 if [ -z "$config_dir" ]; then
     # Ask before the plugin's own bin goes on PATH, so this reaches the real
@@ -36,7 +57,6 @@ fi
     die "could not find the plugin config dir; run this through Herdr, or install the plugin"
 mkdir -p "$config_dir" || die "could not create $config_dir"
 
-helper_extend_user_path
 helper_prepend_path "$plugin_root/bin"
 
 if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "$HERDR_BIN_PATH" ]; then

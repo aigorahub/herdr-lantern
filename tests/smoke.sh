@@ -125,6 +125,26 @@ fi
 grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 
 grep -q '^placement = "tab"$' "$root/herdr-plugin.toml" || fail "pane placement is tab"
+grep -q '^title = "Lantern Bridge"$' "$root/herdr-plugin.toml" ||
+    fail "manifest should declare the bridge pane"
+grep -q '^command = \["sh", "bridge.sh"\]$' "$root/herdr-plugin.toml" ||
+    fail "the bridge pane should run bridge.sh"
+grep -q '^command = \["sh", "bridge.sh", "--open"\]$' "$root/herdr-plugin.toml" ||
+    fail "the bridge action should open the bridge pane"
+
+# One version, three files. A manifest bump nobody echoed is how a marketplace
+# listing and a README start disagreeing.
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/herdr-plugin.toml")
+[ -n "$version" ] || fail "no version in herdr-plugin.toml"
+grep -qF "**v$version**" "$root/README.md" || fail "README does not say v$version"
+grep -qF "## [$version]" "$root/CHANGELOG.md" || fail "CHANGELOG has no $version entry"
+
+# Every key the example file offers has to be documented, or people fill in a
+# key the README never explains.
+for bridge_key in $(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$root/bridge.conf.example"); do
+    grep -qF "$bridge_key" "$root/README.md" ||
+        fail "README does not document $bridge_key"
+done
 if grep -qE '^(width|height) =' "$root/herdr-plugin.toml"; then
     fail "pane still sizes a popup"
 fi
@@ -852,6 +872,16 @@ printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_BOT_TOKEN *(set,' ||
 # The example file and the parser have to agree, or a fresh install refuses to
 # start on its own seeded config.
 grep -q 'bridge.conf.example' "$root/bridge.sh" || fail "bridge.sh should seed from the example"
+
+# The action cannot become the daemon itself, so it asks Herdr to seat the
+# pane. Check the call it makes against a stub herdr.
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*"' >"$bridge_dir/herdr"
+chmod +x "$bridge_dir/herdr"
+bridge_out=$(HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    sh "$root/bridge.sh" --open </dev/null) || fail "bridge --open should succeed"
+[ "$bridge_out" = "plugin pane open --plugin aigora.lantern --entrypoint bridge --placement tab" ] ||
+    fail "bridge --open should seat the bridge pane (got $bridge_out)"
+
 rm -rf "$bridge_dir"
 bridge_dir=
 printf 'ok: bridge.sh config gate and redacted --check\n'

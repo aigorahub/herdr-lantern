@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.4.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.5.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -172,6 +172,88 @@ until then; Escape stays inside the CLI.
 For Cursor `agent`: **Ctrl+C** (twice if a turn is running), or **Ctrl+D** on an
 empty prompt.
 
+
+## Use the lantern from Telegram, WhatsApp, or Slack
+
+The **Lantern Bridge** is a second pane that answers chat messages with the
+same lantern. Open it with `herdr plugin action invoke aigora.lantern.bridge`,
+or run `sh bridge.sh` from a checkout. Leave it running; it is a daemon.
+
+It does not read the lantern chat. Every conversation gets its own workdir
+under the plugin state directory, seeded with the same `prompt.md` plus a
+remote appendix, and a headless helper runs there. Mutating `herdr` is still
+blocked until you confirm, and the confirmation is a chat message.
+
+The bridge helper is `claude` or `codex` only. Those are the two with a
+headless mode that also resumes a conversation.
+
+```bash
+$EDITOR "$(herdr plugin config-dir aigora.lantern)/bridge.conf"
+```
+
+Every key falls back to an environment variable of the same name when the line
+is empty, so tokens can stay out of the file.
+
+| Key | What it is |
+| --- | --- |
+| `BRIDGE_HELPER` | `claude` or `codex`; empty = first of those on `PATH` |
+| `BRIDGE_MODEL` | optional `--model` |
+| `BRIDGE_EFFORT` | `claude --effort`, `codex model_reasoning_effort` |
+| `BRIDGE_CWD` | search root mentioned to the helper (default `~`) |
+| `BRIDGE_SPAWN_KIND` | default `--kind` for `herdr agent start` |
+| `BRIDGE_EXTRA_ARGS` | extra unquoted helper CLI tokens |
+| `TELEGRAM_BOT_TOKEN` | token from @BotFather |
+| `TELEGRAM_ALLOWED_CHATS` | comma-separated numeric chat ids |
+| `SLACK_BOT_TOKEN` | `xoxb-` token |
+| `SLACK_CHANNEL` | the one channel id the bridge watches |
+| `SLACK_ALLOWED_USERS` | comma-separated member ids (`U…`) |
+| `WHATSAPP_ACCESS_TOKEN` | Cloud API access token |
+| `WHATSAPP_PHONE_NUMBER_ID` | Cloud API phone number id |
+| `WHATSAPP_VERIFY_TOKEN` | string you also type into Meta's webhook form |
+| `WHATSAPP_APP_SECRET` | app secret; required, it signs every webhook |
+| `WHATSAPP_ALLOWED_NUMBERS` | comma-separated E.164 senders |
+| `WHATSAPP_WEBHOOK_HOST` | bind host, default `127.0.0.1` |
+| `WHATSAPP_WEBHOOK_PORT` | bind port, default `8787` |
+
+**A channel turns on when its credential is set, and refuses to start until
+its allowlist names who may talk to it.** With no channels configured at all
+the bridge exits and points at `bridge.conf.example`. Check a config without
+touching the network:
+
+```bash
+sh bridge.sh --check
+```
+
+**Telegram.** Talk to [@BotFather](https://t.me/BotFather), `/newbot`, keep the
+token. Message your bot once, then read your chat id out of
+`https://api.telegram.org/bot<TOKEN>/getUpdates`. Put that id in
+`TELEGRAM_ALLOWED_CHATS`. The bridge long-polls, so nothing has to be
+reachable from outside.
+
+**Slack.** Create an app at api.slack.com, add the bot scopes
+`channels:history` and `chat:write`, install it to the workspace, and invite
+the bot to the channel (`/invite @yourbot`). `SLACK_CHANNEL` is that channel's
+id (`C…`), and `SLACK_ALLOWED_USERS` holds your member id (`U…`). The bridge
+polls that one channel and ignores everything it did not hear from an
+allowlisted human.
+
+**WhatsApp.** Meta Cloud API only. Create a Meta app with the WhatsApp
+product, note the phone number id, the access token, and the app secret. The
+bridge binds localhost, and Meta needs a public HTTPS URL, so put a tunnel in
+front of it:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8787
+```
+
+Give Meta that URL as the callback, with `WHATSAPP_VERIFY_TOKEN` as the verify
+token, and subscribe to `messages`. Every POST is checked against
+`X-Hub-Signature-256` before it is parsed; a body that does not verify gets a
+401 and is never read as a message. That is why `WHATSAPP_APP_SECRET` is
+required rather than optional: without it the tunnel is an open door.
+
+Text messages only, both directions. Replies are split at each provider's
+limit. Tokens and message bodies never reach a log line.
 
 ## Windows
 
