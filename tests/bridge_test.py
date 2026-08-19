@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import importlib.util
 import json
+import os
 import queue
 import tempfile
 import threading
@@ -302,6 +303,21 @@ class WorkdirTest(unittest.TestCase):
         self.assertTrue(str(wd).startswith(str(self.state / "bridge" / "telegram")))
         self.assertNotIn("..", wd.parts)
 
+    def test_dot_ids_cannot_name_a_relative_directory(self):
+        # The allowlists gate every id that reaches this, but they are typed
+        # by hand, and "." or ".." would resolve out of the conversation dir.
+        base = self.state / "bridge" / "telegram"
+        for chat_id in ("..", ".", "", "..."):
+            wd = lb.workdir_for(self.state, "telegram", chat_id)
+            self.assertNotIn("..", wd.parts)
+            self.assertNotIn(".", wd.parts)
+            resolved = Path(str(wd))
+            self.assertTrue(
+                str(resolved).startswith(str(base)),
+                "%r escaped to %s" % (chat_id, resolved),
+            )
+            self.assertEqual(wd.parent.name, "unknown")
+
     def test_each_conversation_gets_its_own_dir(self):
         a = lb.workdir_for(self.state, "telegram", 1)
         b = lb.workdir_for(self.state, "telegram", 2)
@@ -590,6 +606,14 @@ class WhatsAppConfigTest(unittest.TestCase):
             lb.WhatsAppAdapter(cfg, queue.Queue())
         self.assertIn("WHATSAPP_ALLOWED_NUMBERS", str(caught.exception))
 
+    def test_missing_verify_token_refuses(self):
+        # compare_digest("", "") is True, so an empty verify token would let
+        # any GET pass the webhook challenge.
+        cfg = whatsapp_config(WHATSAPP_VERIFY_TOKEN="")
+        with self.assertRaises(lb.ConfigError) as caught:
+            lb.WhatsAppAdapter(cfg, queue.Queue())
+        self.assertIn("WHATSAPP_VERIFY_TOKEN", str(caught.exception))
+
     def test_allowlist_ignores_formatting(self):
         adapter = lb.WhatsAppAdapter(whatsapp_config(), queue.Queue())
         self.assertEqual(adapter.allowed, {"15551234567", "447700900000"})
@@ -806,6 +830,121 @@ class AdapterLoopTest(unittest.TestCase):
             lb.time.sleep = real_sleep
         self.assertEqual(len(calls), 2)
         self.assertEqual(slept, [lb.BACKOFF])
+
+
+class DaemonLockTest(unittest.TestCase):
+    """Two daemons on one config break every channel, so only one may start."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.state = Path(self.dir.name)
+
+    def take(self):
+        fd = lb.acquire_daemon_lock(self.state)
+        if fd is None:
+            self.skipTest("no advisory file locking on this platform")
+        self.addCleanup(self.release, fd)
+        return fd
+
+    def release(self, fd):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+    def test_a_second_daemon_is_refused_and_named_the_lock(self):
+        self.take()
+        with self.assertRaises(lb.ConfigError) as caught:
+            lb.acquire_daemon_lock(self.state)
+        message = str(caught.exception)
+        self.assertIn(str(lb.daemon_lock_path(self.state)), message)
+        self.assertIn("already running", message)
+
+    def test_a_lock_file_left_behind_does_not_block_the_next_start(self):
+        # What a killed daemon leaves: the file is still there, the lock is
+        # not. Bare O_EXCL would refuse to start ever again.
+        fd = self.take()
+        self.release(fd)
+        self.assertTrue(lb.daemon_lock_path(self.state).is_file())
+        second = lb.acquire_daemon_lock(self.state)
+        self.assertIsNotNone(second)
+        self.release(second)
+
+    def test_the_file_carries_the_pid_for_a_human(self):
+        self.take()
+        body = lb.daemon_lock_path(self.state).read_text(encoding="utf-8")
+        self.assertEqual(body.strip(), str(os.getpid()))
+
+
+class DispatchLoopTest(unittest.TestCase):
+    """The adapters are daemon threads. An exception on the dispatch thread
+    would end the process and take every channel with it."""
+
+    def test_a_failed_turn_is_reported_and_the_loop_continues(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        state = Path(tmp.name)
+        sent = []
+        started = threading.Event()
+        answered = threading.Event()
+        captured = []
+
+        class Fake(lb.Adapter):
+            name = "telegram"
+            limit = 100
+
+            def __init__(self, cfg, inbox):
+                super().__init__(cfg, inbox)
+                captured.append(self)
+
+            def run(self):
+                started.set()
+                threading.Event().wait()
+
+            def send(self, chat_id, text):
+                sent.append((chat_id, text))
+                if len(sent) >= 2:
+                    answered.set()
+
+        seeds = []
+
+        def flaky_seed(*args, **kwargs):
+            seeds.append(1)
+            if len(seeds) == 1:
+                raise OSError("no space left on device")
+            return True
+
+        original = (lb.ADAPTERS.get("telegram"), lb.seed_workdir, lb.run_helper, lb.log)
+
+        def restore():
+            lb.ADAPTERS["telegram"] = original[0]
+            lb.seed_workdir, lb.run_helper, lb.log = original[1], original[2], original[3]
+
+        self.addCleanup(restore)
+        lb.ADAPTERS["telegram"] = Fake
+        lb.seed_workdir = flaky_seed
+        lb.run_helper = lambda *args, **kwargs: "the answer"
+        lb.log = lambda message: None
+
+        cfg = base_config(
+            BRIDGE_HELPER="claude",
+            TELEGRAM_BOT_TOKEN="token-value",
+            TELEGRAM_ALLOWED_CHATS="1",
+        )
+        worker = threading.Thread(
+            target=lb.serve, args=(cfg, "claude", "PROMPT", str(state)), daemon=True
+        )
+        worker.start()
+        self.assertTrue(started.wait(10), "the adapter thread never started")
+        inbox = captured[0].inbox
+        inbox.put(("telegram", "1", "first"))
+        inbox.put(("telegram", "1", "second"))
+        self.assertTrue(answered.wait(10), "the loop died on the first message")
+        self.assertTrue(worker.is_alive())
+        # The first turn failed before its reply, so the user hears about it.
+        self.assertIn("error", sent[0][1].lower())
+        self.assertEqual(sent[1], ("1", "the answer"))
 
 
 class ExpandRootTest(unittest.TestCase):

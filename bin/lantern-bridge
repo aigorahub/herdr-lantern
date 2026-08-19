@@ -345,7 +345,12 @@ def split_message(text: str, limit: int) -> list:
 
 def conversation_dir(state_dir, channel: str, chat_id) -> Path:
     """State path for one conversation. Chat ids come from the network."""
-    slug = UNSAFE_ID.sub("_", str(chat_id))[:64] or "unknown"
+    slug = UNSAFE_ID.sub("_", str(chat_id))[:64]
+    # The allowlists gate every id that reaches this, but they are typed by
+    # hand. A slug of "." or ".." is still a directory name that resolves
+    # somewhere else, so it never gets to be one.
+    if not slug or not slug.strip("."):
+        slug = "unknown"
     return Path(state_dir) / "bridge" / channel / slug
 
 
@@ -776,8 +781,14 @@ class WhatsAppAdapter(Adapter):
         self.host = cfg["WHATSAPP_WEBHOOK_HOST"] or "127.0.0.1"
         self.port = int(cfg["WHATSAPP_WEBHOOK_PORT"] or 8787)
         self.server = None
-        # These two are re-checked here, not only in validate(), because this
+        # These three are re-checked here, not only in validate(), because this
         # object is the thing that opens a socket to the internet.
+        if not self.verify_token:
+            raise ConfigError(
+                "WHATSAPP_VERIFY_TOKEN is required: compare_digest of two empty "
+                "strings is a match, so an empty one lets any GET pass the "
+                "webhook verification"
+            )
         if not self.app_secret:
             raise ConfigError(
                 "WHATSAPP_APP_SECRET is required: without it the "
@@ -906,6 +917,78 @@ ADAPTERS = {
 }
 
 
+def daemon_lock_path(state_dir) -> Path:
+    return Path(state_dir) / "bridge" / "daemon.lock"
+
+
+def _take_lock(fd):
+    """True taken, False held by another process, None no locking here."""
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    if fcntl is not None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return False
+        return True
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+    try:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    except OSError:
+        return False
+    return True
+
+
+def acquire_daemon_lock(state_dir):
+    """One bridge per state directory. Returns the fd to hold, or None.
+
+    Two daemons on one config is not a duplicate window. Two Telegram long
+    polls on the same bot token make getUpdates answer 409 and fight over the
+    offset, two Slack pollers both reply to every message, and the second
+    WhatsApp webhook cannot bind its port and retries in a loop forever.
+
+    The lock is advisory, not a file that must not exist: a daemon killed with
+    -9 leaves the file behind either way, and the kernel drops the lock when
+    the process goes. An exclusive-create marker would refuse to start until
+    somebody deleted it by hand.
+    """
+    path = daemon_lock_path(state_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+    taken = _take_lock(fd)
+    if taken is None:
+        os.close(fd)
+        log(
+            "single-instance guard unavailable on this Python (no fcntl, no "
+            "msvcrt); starting without it"
+        )
+        return None
+    if not taken:
+        os.close(fd)
+        raise ConfigError(
+            "a lantern bridge is already running: %s is locked. Stop that one "
+            "before starting another, or two pollers will answer every message "
+            "twice." % path
+        )
+    # For a human reading the file; the lock itself is what the kernel holds.
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, ("%d\n" % os.getpid()).encode("ascii"))
+    except OSError:
+        pass
+    return fd
+
+
+# The lock lives as long as the process does. Closing the fd releases it, so
+# the daemon keeps a reference where nothing can collect it.
+_DAEMON_LOCKS = []
+
+
 def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
     """One thread per channel in, one helper turn at a time out.
 
@@ -913,6 +996,16 @@ def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
     turns in the same repository at the same time is a worse problem than a
     queued message.
     """
+    # Before a single adapter thread exists: a second daemon would poll the
+    # same tokens as this one.
+    try:
+        lock_fd = acquire_daemon_lock(state_dir)
+    except (ConfigError, OSError) as exc:
+        die(str(exc))
+        return 2
+    if lock_fd is not None:
+        _DAEMON_LOCKS.append(lock_fd)
+
     inbox = queue.Queue()
     adapters = {}
     for channel in enabled_channels(cfg):
@@ -930,16 +1023,39 @@ def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
     search_root = expand_root(cfg["BRIDGE_CWD"])
     while True:
         channel, chat_id, text = inbox.get()
-        adapter = adapters[channel]
-        workdir = workdir_for(state_dir, channel, chat_id)
-        seed_workdir(workdir, prompt_text, remote_appendix(cfg, channel, search_root))
-        log("%s %s: %d bytes in" % (channel, chat_id, len(text.encode("utf-8"))))
-        reply = run_helper(cfg, helper, workdir, text)
-        log("%s %s: %d bytes out" % (channel, chat_id, len(reply.encode("utf-8"))))
+        # The adapters are daemon threads, so an exception that escapes here
+        # ends the process and takes them with it, silently. A full disk in
+        # seed_workdir is not a reason to stop answering the other channels.
         try:
-            adapter.send(chat_id, reply)
-        except Exception as exc:  # noqa: BLE001 - a failed send is not fatal
-            log("%s %s: send failed (%s)" % (channel, chat_id, exc.__class__.__name__))
+            adapter = adapters[channel]
+            workdir = workdir_for(state_dir, channel, chat_id)
+            seed_workdir(workdir, prompt_text, remote_appendix(cfg, channel, search_root))
+            log("%s %s: %d bytes in" % (channel, chat_id, len(text.encode("utf-8"))))
+            reply = run_helper(cfg, helper, workdir, text)
+            log("%s %s: %d bytes out" % (channel, chat_id, len(reply.encode("utf-8"))))
+            try:
+                adapter.send(chat_id, reply)
+            except Exception as exc:  # noqa: BLE001 - a failed send is not fatal
+                log(
+                    "%s %s: send failed (%s)"
+                    % (channel, chat_id, exc.__class__.__name__)
+                )
+        except Exception as exc:  # noqa: BLE001 - one bad turn must not end the daemon
+            log(
+                "%s %s: turn failed (%s); continuing"
+                % (channel, chat_id, exc.__class__.__name__)
+            )
+            # The person is waiting on a reply that is never coming. Telling
+            # them is best effort: whatever broke the turn may break this too.
+            try:
+                adapters[channel].send(
+                    chat_id, "The lantern hit an error on that one. Try again."
+                )
+            except Exception as exc2:  # noqa: BLE001 - never fatal
+                log(
+                    "%s %s: could not report the failure (%s)"
+                    % (channel, chat_id, exc2.__class__.__name__)
+                )
 
 
 def expand_root(value: str) -> str:

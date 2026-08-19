@@ -46,6 +46,26 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Fixed
 
+- Nothing stopped a second Lantern Bridge, and a second one breaks every
+  channel: two `getUpdates` long polls on one bot token answer 409 and fight
+  over the offset cursor, two Slack pollers both reply to every message, and
+  the second WhatsApp adapter cannot bind its webhook port and retries in a
+  loop. The daemon now takes an advisory lock on
+  `<state dir>/bridge/daemon.lock` before any adapter starts and refuses to run
+  while another holds it, and the `bridge` action focuses the bridge pane it
+  already opened instead of seating a second one. The lock is advisory, so a
+  daemon killed with `-9` leaves nothing to clean up by hand.
+- One unexpected error while answering a message ended the whole bridge. The
+  adapters run as daemon threads, so an exception reaching the dispatch loop
+  took every channel down with it, silently. A failed turn is now one log line
+  and a note in the channel, and the next message is answered.
+- A chat id made only of dots would have named a directory beside the
+  conversation state rather than one inside it. The allowlists never let one
+  through, but the slug refuses it now as well.
+- An empty `WHATSAPP_VERIFY_TOKEN` would have let any webhook GET pass
+  verification, because `hmac.compare_digest` of two empty strings is a match.
+  The adapter refuses to be constructed without one, the way it already did for
+  the app secret and the allowlist.
 - `tests/smoke.sh` failed its `launch.sh` argv cases on any machine with a
   real `grok` or `agent` in `/opt/homebrew/bin`. The harness handed its stub
   directory in through `PATH`, but `helper_prepend_path` skips a directory

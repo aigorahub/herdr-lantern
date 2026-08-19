@@ -258,6 +258,33 @@ the existing `elves-floor` call.
 - [x] B7-A4: `howto.html` and `docs/index.html` read v0.5.0 and describe the
   platforms as macOS, Linux, or Windows, with the Git for Windows note.
 
+### Batch 8: Bridge hardening
+
+Four findings from a line-by-line review of the bridge. The one that matters:
+nothing stopped a second bridge daemon, and two daemons on one config break
+every channel — two `getUpdates` long polls on one bot token give 409 and fight
+over the offset cursor, two Slack pollers both answer, and the second WhatsApp
+adapter cannot bind its port and retries forever. The daemon now takes an
+advisory lock (`flock`, `msvcrt.locking` on Windows, a logged line and no guard
+where neither exists) at `<state_dir>/bridge/daemon.lock` before any adapter
+thread starts, and `bridge.sh --open` remembers its pane id and focuses a live
+bridge instead of seating a second one. Also: the dispatch loop catches, so a
+disk-full in `seed_workdir` cannot kill the daemon threads with it; a chat id
+that is only dots becomes `unknown`; and an empty `WHATSAPP_VERIFY_TOKEN` is
+refused in the constructor, because `compare_digest("", "")` is a match.
+
+**Acceptance criteria**
+- [x] B8-A1: A second daemon on one state dir is refused with the lock path in
+  the message, a lock file left by a killed daemon does not block the next
+  start, and a second `bridge.sh --open` focuses the running pane instead of
+  opening another.
+- [x] B8-A2: An exception from `seed_workdir` or `run_helper` is logged with
+  the channel, the chat id, and the exception class, the user is told in
+  channel, and the loop answers the next message.
+- [x] B8-A3: Chat ids `..`, `.`, and `""` all resolve inside the state
+  directory.
+- [x] B8-A4: `WhatsAppAdapter` refuses an empty `WHATSAPP_VERIFY_TOKEN`.
+
 ## Master Acceptance
 
 - [ ] M-A1: Full smoke suite green locally (macOS with real Homebrew CLIs

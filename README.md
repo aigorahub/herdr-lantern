@@ -179,6 +179,11 @@ The **Lantern Bridge** is a second pane that answers chat messages with the
 same lantern. Open it with `herdr plugin action invoke aigora.lantern.bridge`,
 or run `sh bridge.sh` from a checkout. Leave it running; it is a daemon.
 
+One bridge runs at a time. Invoking the action again focuses the pane that is
+already open, and a second daemon on the same state directory refuses to start
+and names the lock file — two pollers on one token would answer every message
+twice.
+
 It does not read the lantern chat. Every conversation gets its own workdir
 under the plugin state directory, seeded with the same `prompt.md` plus a
 remote appendix, and a headless helper runs there. Mutating `herdr` is still

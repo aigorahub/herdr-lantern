@@ -30,6 +30,10 @@ plugin_root=$(helper_posix_path "$plugin_root")
 # Herdr UI inherits a thin PATH.
 helper_extend_user_path
 
+# Must match [[panes]].title for the bridge pane in herdr-plugin.toml: --open
+# uses it to recognise a bridge that is already running.
+bridge_pane_title='Lantern Bridge'
+
 # The `bridge` action seats the `bridge` pane. An action runs in a process of
 # its own, so it cannot become the daemon; it asks Herdr to open the pane, and
 # the pane runs this file again without --open. The real herdr is called
@@ -43,8 +47,41 @@ if [ "${1:-}" = "--open" ]; then
             die "could not find the real herdr binary"
         ;;
     esac
-    exec "$real_herdr" plugin pane open \
-        --plugin aigora.lantern --entrypoint bridge --placement tab
+
+    # Herdr does not deduplicate plugin panes, and a second bridge is not a
+    # cosmetic duplicate: two long polls on one bot token fight over the same
+    # cursor, two Slack pollers answer every message twice, and the second
+    # webhook cannot bind its port. The daemon holds a lock of its own; this is
+    # the cheap half, so a second press focuses instead of racing for it.
+    open_state_dir=${HERDR_PLUGIN_STATE_DIR:-${HERDR_PLUGIN_CONFIG_DIR:-$plugin_root}/state}
+    bridge_pane_file=$open_state_dir/bridge/pane.id
+    if [ -f "$bridge_pane_file" ]; then
+        bridge_pane=$(cat "$bridge_pane_file") || bridge_pane=
+        if [ -n "$bridge_pane" ]; then
+            # The title check is what makes a remembered id safe: Herdr reuses
+            # pane ids after a restart, and focusing a stale one would pull up
+            # somebody else's pane.
+            bridge_ws=$(helper_lantern_pane_workspace \
+                "$real_herdr" "$bridge_pane" "$bridge_pane_title") || bridge_ws=
+            if [ -n "$bridge_ws" ]; then
+                "$real_herdr" workspace focus "$bridge_ws" >/dev/null 2>&1 || true
+                if "$real_herdr" plugin pane focus "$bridge_pane"; then
+                    exit 0
+                fi
+                # It quit between the check and the focus. Seat a new one.
+            fi
+        fi
+    fi
+
+    opened=$("$real_herdr" plugin pane open \
+        --plugin aigora.lantern --entrypoint bridge --placement tab) ||
+        die "could not open the bridge pane"
+    bridge_pane=$(printf '%s' "$opened" | helper_json_value pane_id)
+    if [ -n "$bridge_pane" ] && mkdir -p "$open_state_dir/bridge" 2>/dev/null; then
+        printf '%s\n' "$bridge_pane" >"$bridge_pane_file" || true
+    fi
+    printf '%s\n' "$opened"
+    exit 0
 fi
 
 config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}

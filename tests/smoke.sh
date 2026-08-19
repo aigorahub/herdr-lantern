@@ -901,9 +901,79 @@ grep -q 'bridge.conf.example' "$root/bridge.sh" || fail "bridge.sh should seed f
 printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*"' >"$bridge_dir/herdr"
 chmod +x "$bridge_dir/herdr"
 bridge_out=$(HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
     sh "$root/bridge.sh" --open </dev/null) || fail "bridge --open should succeed"
 [ "$bridge_out" = "plugin pane open --plugin aigora.lantern --entrypoint bridge --placement tab" ] ||
     fail "bridge --open should seat the bridge pane (got $bridge_out)"
+
+# Two bridges on one config is not a duplicate window: two pollers on one
+# token answer every message twice. A second --open must focus the pane that
+# is already there, not open another. This stub answers like Herdr does.
+cat >"$bridge_dir/herdr" <<'BRIDGE_STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$BRIDGE_STUB_LOG"
+case "$1 $2" in
+"plugin pane")
+    case "$3" in
+    open) printf '{"pane_id":"p42","tab_id":"t1","workspace_id":"w1"}\n' ;;
+    focus) printf 'focused\n' ;;
+    esac
+    ;;
+"pane get")
+    printf '{"pane_id":"p42","label":"Lantern Bridge","workspace_id":"w1"}\n'
+    ;;
+esac
+exit 0
+BRIDGE_STUB
+chmod +x "$bridge_dir/herdr"
+rm -rf "$bridge_dir/state/bridge"
+BRIDGE_STUB_LOG="$bridge_dir/open.log"
+: >"$BRIDGE_STUB_LOG"
+export BRIDGE_STUB_LOG
+HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
+    fail "bridge --open should succeed"
+[ "$(cat "$bridge_dir/state/bridge/pane.id" 2>/dev/null)" = "p42" ] ||
+    fail "bridge --open should remember the pane it opened"
+HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
+    fail "a second bridge --open should succeed"
+[ "$(grep -c 'plugin pane open' "$BRIDGE_STUB_LOG")" = "1" ] ||
+    fail "a second bridge --open opened a second bridge pane"
+grep -q 'plugin pane focus p42' "$BRIDGE_STUB_LOG" ||
+    fail "a second bridge --open should focus the pane already running"
+
+# A remembered id that no longer carries the bridge label is stale: Herdr
+# reuses pane ids, so it must be reopened rather than focused.
+printf 'p42\n' >"$bridge_dir/state/bridge/pane.id"
+: >"$BRIDGE_STUB_LOG"
+cat >"$bridge_dir/herdr" <<'BRIDGE_STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$BRIDGE_STUB_LOG"
+case "$1 $2" in
+"plugin pane")
+    case "$3" in
+    open) printf '{"pane_id":"p77","tab_id":"t2","workspace_id":"w2"}\n' ;;
+    esac
+    ;;
+"pane get")
+    printf '{"pane_id":"p42","label":"Somebody Else","workspace_id":"w1"}\n'
+    ;;
+esac
+exit 0
+BRIDGE_STUB
+chmod +x "$bridge_dir/herdr"
+HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
+    fail "bridge --open should reopen after a stale pane id"
+grep -q 'plugin pane open' "$BRIDGE_STUB_LOG" ||
+    fail "a stale pane id should be reopened, not focused"
+[ "$(cat "$bridge_dir/state/bridge/pane.id" 2>/dev/null)" = "p77" ] ||
+    fail "bridge --open should remember the pane it reopened"
+unset BRIDGE_STUB_LOG
 
 rm -rf "$bridge_dir"
 bridge_dir=
