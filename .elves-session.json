@@ -65,26 +65,28 @@
     },
     {
       "id": "B4",
-      "status": "pending",
+      "status": "complete",
       "acceptance": [
-        {"id": "B4-A1", "criterion": "`lib.sh` has `helper_native_path`, which converts with `cygpath -w` when cygpath exists and is identity otherwise.", "met": false, "evidence": ""},
-        {"id": "B4-A2", "criterion": "`open.sh` passes the native form to `herdr workspace create --cwd`.", "met": false, "evidence": ""},
-        {"id": "B4-A3", "criterion": "`helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.", "met": false, "evidence": ""}
+        {"id": "B4-A1", "criterion": "`lib.sh` has `helper_native_path`, which converts with `cygpath -w` when cygpath exists and is identity otherwise.", "met": true, "evidence": "lib.sh helper_native_path uses cygpath -w when present and falls back to printing the input. tests/smoke.sh asserts a drive-letter result where cygpath exists and identity where it does not."},
+        {"id": "B4-A2", "criterion": "`open.sh` passes the native form to `herdr workspace create --cwd`.", "met": true, "evidence": "open.sh calls `--cwd \"$(helper_native_path \"$HOME\")\"`. tests/smoke.sh greps for it, and the existing stub test still sees `workspace create --cwd`."},
+        {"id": "B4-A3", "criterion": "`helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.", "met": true, "evidence": "helper_normalize_root is unchanged. tests/smoke.sh asserts helper_normalize_root \"$HOME\" equals $HOME, which is the POSIX form under Git Bash."}
       ]
     },
     {
       "id": "B5",
-      "status": "pending",
+      "status": "complete",
+      "note": "No code change was needed. Measured, then covered by tests.",
       "acceptance": [
-        {"id": "B5-A1", "criterion": "`helper_resolve_real_herdr` accepts a Windows-style `HERDR_BIN_PATH` and returns a path that runs.", "met": false, "evidence": ""},
-        {"id": "B5-A2", "criterion": "It never returns the plugin's own wrapper.", "met": false, "evidence": ""}
+        {"id": "B5-A1", "criterion": "`helper_resolve_real_herdr` accepts a Windows-style `HERDR_BIN_PATH` and returns a path that runs.", "met": true, "evidence": "Probe on the target machine: Git Bash `[ -x ]` returns true for both C:\\...\\herdr.exe and C:/.../herdr.exe, and executing the backslash form works. tests/smoke.sh sets HERDR_BIN_PATH to a cygpath -w path and asserts the result is executable."},
+        {"id": "B5-A2", "criterion": "It never returns the plugin's own wrapper.", "met": true, "evidence": "tests/smoke.sh sets HERDR_BIN_PATH to $root/bin/herdr and fails if the resolver returns that path."}
       ]
     },
     {
       "id": "B6",
-      "status": "pending",
+      "status": "complete",
+      "note": "No code change was needed. helper_prepend_path already skips missing directories, so the macOS and Linux entries are harmless on Windows, and $HOME/.local/bin is where claude.exe lives there.",
       "acceptance": [
-        {"id": "B6-A1", "criterion": "`helper_extend_user_path` leaves macOS and Linux behaviour unchanged and adds no entry that could resolve bare `bash` to the WSL stub.", "met": false, "evidence": ""}
+        {"id": "B6-A1", "criterion": "`helper_extend_user_path` leaves macOS and Linux behaviour unchanged and adds no entry that could resolve bare `bash` to the WSL stub.", "met": true, "evidence": "lib.sh helper_extend_user_path is untouched by this branch (git diff main...HEAD shows no change to it). tests/smoke.sh fails if any non-comment line of launch.sh, open.sh, lib.sh, or bin/herdr invokes bare bash, and fails if lib.sh mentions WindowsApps."}
       ]
     },
     {

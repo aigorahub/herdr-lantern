@@ -538,9 +538,19 @@ $smoke_python -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 els
 # Windows ships a zero-byte Microsoft Store alias named python3. It satisfies
 # `command -v` and then opens the Store. Detection must refuse it, either by
 # choosing another interpreter or by failing outright.
+#
+# The stub needs the .exe suffix on Windows. MSYS decides that a file is
+# executable from its extension or its first bytes, so an extensionless empty
+# file is not executable there and would never shadow anything. The real Store
+# alias is python3.exe, which is exactly why it fools `command -v`.
 fake_py=$(mktemp -d)
-: >"$fake_py/python3"
-chmod +x "$fake_py/python3"
+if command -v cygpath >/dev/null 2>&1; then
+    stub_python=$fake_py/python3.exe
+else
+    stub_python=$fake_py/python3
+fi
+: >"$stub_python"
+chmod +x "$stub_python"
 stub_pick=$(PATH="$fake_py:$PATH"; export PATH; helper_detect_python) || stub_pick=
 if [ "$stub_pick" = python3 ]; then
     fail "helper_detect_python accepted a zero-byte python3 stub"
