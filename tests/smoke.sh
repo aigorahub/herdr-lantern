@@ -24,8 +24,9 @@ fake_ws=
 fake_cmd=
 fake_py=
 fake_agents=
+argv_dir=
 open_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -516,6 +517,16 @@ EOF
     grep -q 'real herdr agent list' "$tmp" ||
         fail "herdr.cmd inspect did not reach the real herdr"
 
+    # What survives cmd.exe, measured rather than assumed. A lone percent and
+    # an ampersand inside a quoted argument both arrive intact. A %NAME% that
+    # names a defined variable does not, and no shim can stop that: cmd.exe
+    # expands it while parsing its own command line, before the batch file
+    # runs. Agents under Lantern call the POSIX wrapper through Git Bash,
+    # which is unaffected.
+    cmd.exe //c "$win_cmd" agent list "50% off & more" >"$tmp" 2>/dev/null || true
+    grep -q '50% off & more' "$tmp" ||
+        fail "herdr.cmd mangled a percent or ampersand in a quoted argument"
+
     # With no sh.exe anywhere, it refuses. It must never fall through to the
     # real herdr, because that is the gate-free path this file exists to close.
     # The scrubbed environment goes in its own batch file. Passing it as one
@@ -583,6 +594,19 @@ fi
 rm -rf "$fake_py"
 fake_py=
 
+# The Windows launcher branch. `py` is not a plain file on PATH the way an
+# interpreter is, so it gets its own check, and it is the only fallback left
+# when a Store alias shadows python3 and no python exists.
+if command -v py >/dev/null 2>&1; then
+    launcher_dir=$(dirname "$(command -v py)")
+    picked=$(PATH="$launcher_dir"; export PATH; helper_detect_python) || picked=
+    [ "$picked" = "py -3" ] ||
+        fail "detection should fall back to the py launcher (got $picked)"
+    # shellcheck disable=SC2086
+    $picked -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' ||
+        fail "the py launcher fallback returned something that is not python 3"
+fi
+
 # shellcheck disable=SC2086
 $smoke_python "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
 # shellcheck disable=SC2086
@@ -645,5 +669,92 @@ goals=$($smoke_python "$root/bin/goals-floor" --herdr "$fake_herdr_arg") || fail
 printf '%s\n' "$goals" | grep -q 'herd_detected 1' || fail "goals-floor herd_detected"
 printf '%s\n' "$goals" | grep -q 'NEEDS YOU' || fail "goals-floor needs you"
 printf '%s\n' "$goals" | grep -q '/goal 2h' || fail "goals-floor goal age"
+
+# launch.sh builds a different command line for each helper CLI, and until now
+# nothing checked any of them. Only `claude` exists on the machine this was
+# ported on, so Cursor agent, Devin, Codex, and Grok had no coverage at all.
+#
+# This runs launch.sh for real against stub binaries. HOME points at an empty
+# directory so helper_extend_user_path cannot find a genuine CLI, and
+# HERDR_BIN_PATH points at a stub so no live herdr is touched.
+argv_dir=$(mktemp -d)
+argv_home=$argv_dir/home
+mkdir -p "$argv_home" "$argv_dir/bin" "$argv_dir/config" "$argv_dir/state"
+for stub_bin in agent devin claude codex grok herdr; do
+    printf '%s\n' '#!/bin/sh' 'printf "ARGV:"' 'for a in "$@"; do printf " [%s]" "$a"; done' \
+        'printf "\n"' 'exit 0' >"$argv_dir/bin/$stub_bin"
+    chmod +x "$argv_dir/bin/$stub_bin"
+done
+
+run_launch() {
+    # $1 is the helper.conf body. Prints the stub's ARGV line.
+    printf '%s\n' "$1" >"$argv_dir/config/helper.conf"
+    rm -rf "$argv_dir/state"
+    mkdir -p "$argv_dir/state"
+    env -i \
+        HOME="$argv_home" \
+        PATH="$argv_dir/bin:/usr/bin:/bin" \
+        HERDR_PLUGIN_ROOT="$root" \
+        HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
+        HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
+        HERDR_BIN_PATH="$argv_dir/bin/herdr" \
+        sh "$root/launch.sh" </dev/null 2>/dev/null |
+        grep '^ARGV:' | tail -1
+}
+
+argv_is() {
+    # $1 label, $2 conf body, $3 expected leading arguments
+    _argv_got=$(run_launch "$2")
+    case $_argv_got in
+    "ARGV:$3"*) ;;
+    *)
+        printf 'want prefix: ARGV:%s\n' "$3" >&2
+        printf 'got:         %s\n' "$_argv_got" >&2
+        fail "launch.sh argv for $1"
+        ;;
+    esac
+}
+
+argv_is "claude" 'HELPER_AGENT="claude"
+HELPER_MODEL="opus"
+HELPER_EFFORT="high"
+HELPER_CWD="~"' ' [--model] [opus] [--effort] [high]'
+
+argv_is "codex" 'HELPER_AGENT="codex"
+HELPER_MODEL="gpt-x"
+HELPER_EFFORT="high"
+HELPER_CWD="~"' ' [--model] [gpt-x] [--config] [model_reasoning_effort="high"]'
+
+argv_is "grok" 'HELPER_AGENT="grok"
+HELPER_MODEL="grok-x"
+HELPER_EFFORT="high"
+HELPER_CWD="~"' ' [--model] [grok-x] [--reasoning-effort] [high] [--no-subagents]'
+
+# Devin rejects --model on the free tier, so launch.sh drops it on purpose.
+argv_is "devin" 'HELPER_AGENT="devin"
+HELPER_MODEL="ignored"
+HELPER_PERMISSION="smart"
+HELPER_CWD="~"' ' [--permission-mode] [smart]'
+
+# Cursor agent: an empty model means the documented default, and smart maps to
+# --auto-review. The binary is called agent, whichever name the config used.
+argv_is "cursor agent" 'HELPER_AGENT="agent"
+HELPER_MODEL=""
+HELPER_PERMISSION="smart"
+HELPER_CWD="~"' ' [--model] [cursor-grok-4.6-high-fast] [--trust] [--sandbox] [disabled] [--auto-review]'
+
+argv_is "cursor alias" 'HELPER_AGENT="cursor"
+HELPER_MODEL="m"
+HELPER_PERMISSION="dangerous"
+HELPER_CWD="~"' ' [--model] [m] [--trust] [--sandbox] [disabled] [--force]'
+
+argv_is "extra args" 'HELPER_AGENT="claude"
+HELPER_MODEL=""
+HELPER_EXTRA_ARGS="--verbose --foo"
+HELPER_CWD="~"' ' [--verbose] [--foo]'
+
+rm -rf "$argv_dir"
+argv_dir=
+printf 'ok: launch.sh argv for every helper CLI\n'
 
 printf 'ok\n'

@@ -45,6 +45,11 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Changed
 
+- `tests/smoke.sh` covers ground it never did. It runs `launch.sh` against stub
+  binaries and checks the command line built for every helper CLI, so Cursor
+  agent, Devin, Codex, and Grok are no longer untested; it exercises the `py`
+  launcher fallback; and it pins what survives `cmd.exe` when a native caller
+  goes through `bin/herdr.cmd`.
 - `tests/smoke.sh` runs on Windows. The case for an unlockable state directory
   detects a platform that ignores directory permission bits and skips there
   instead of failing. The suite finds a working interpreter rather than

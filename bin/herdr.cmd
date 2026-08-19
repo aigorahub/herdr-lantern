@@ -11,9 +11,12 @@ rem Git Bash still picks the extensionless bin/herdr, because a POSIX shell
 rem matches the exact name first. The two wrappers share one gate: this one
 rem only forwards.
 rem
-rem Known limit: cmd.exe expands %VAR% inside the arguments it forwards. Text
-rem containing a percent-delimited word survives the POSIX wrapper but not
-rem this one. Long or unusual prompt text should go through Git Bash.
+rem Known limit, measured: cmd.exe expands the arguments it forwards while it
+rem parses its own command line, before this file runs, so nothing here can
+rem prevent it. A lone percent survives, and so does an ampersand inside a
+rem quoted argument. A %NAME% that matches a defined environment variable is
+rem replaced by its value. Agents running under Lantern reach the POSIX
+rem wrapper through Git Bash, which does not have this behaviour.
 
 setlocal
 
