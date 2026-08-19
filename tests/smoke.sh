@@ -188,7 +188,7 @@ logged 'workspace create --cwd' || fail "first open should create a workspace"
 logged '--label 🔥 lantern' || fail "first open should use the lantern label"
 logged 'plugin pane open --plugin aigora.lantern --entrypoint helper --placement tab --workspace w9' ||
     fail "first open should seat a tab in the new workspace"
-logged 'tab rename w9:t2 field' || fail "first open should name the tab"
+logged 'tab rename w9:t2 home' || fail "first open should name the tab"
 logged 'pane close w9:p1' || fail "first open should close the empty shell"
 [ "$(cat "$open_state/workspace.id")" = w9 ] || fail "first open workspace state"
 [ "$(cat "$open_state/pane.id")" = w9:p2 ] || fail "first open pane state"

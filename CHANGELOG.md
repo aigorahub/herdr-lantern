@@ -10,7 +10,7 @@ All notable changes to Lantern, by Elves are documented here.
   placement is `tab`, and the 90% width and height are gone.
 - `open.sh` seats that chat. The first open creates a workspace labelled
   `🔥 lantern` with `--cwd $HOME`, opens the chat there as a tab named
-  `field`, and closes the empty shell tab the new workspace comes with.
+  `home`, and closes the empty shell tab the new workspace comes with.
 - Later opens focus a chat that is still running, wherever the tab was
   moved, or seat a new one in the same workspace. Lantern does not open a
   second lantern workspace, and a lock stops two fast opens racing into

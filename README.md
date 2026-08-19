@@ -126,7 +126,7 @@ Close the leftover tab with `herdr pane close <pane_id>` if that happens.
 ## Where it sits
 
 The first open creates a workspace labelled **🔥 lantern** at your home
-directory and seats the chat there as a tab named **field**. It does not
+directory and seats the chat there as a tab named **home**. It does not
 drop a tab into whatever workspace you are in, and it closes the empty
 shell tab the new workspace comes with, so the workspace holds the chat
 alone. The lantern in the sidebar is how you find it at a glance.
