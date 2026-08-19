@@ -353,6 +353,19 @@ class SplitMessageTest(unittest.TestCase):
         text = "x" * 25
         self.assertEqual(lb.split_message(text, 10), ["x" * 10, "x" * 10, "x" * 5])
 
+    def test_no_chunk_is_ever_empty(self):
+        # A window that is all whitespace up to the line break used to leave
+        # one. Every provider rejects an empty message, and the send that
+        # raises takes the whole reply with it.
+        text = "     \n" + "x" * 20
+        chunks = lb.split_message(text, 10)
+        self.assertTrue(all(chunks), chunks)
+        self.assertEqual("".join(chunks), "x" * 20)
+        for pad in range(1, 12):
+            for body in ("y" * 30, "y\n" * 15):
+                chunks = lb.split_message(" " * pad + "\n" + body, 10)
+                self.assertTrue(all(chunks), (pad, chunks))
+
     def test_channel_limits_are_the_documented_ones(self):
         self.assertEqual(lb.TELEGRAM_LIMIT, 4096)
         self.assertEqual(lb.SLACK_LIMIT, 4000)
@@ -438,6 +451,55 @@ class WorkdirTest(unittest.TestCase):
         text = lb.remote_appendix(base_config(), "whatsapp", "/root")
         self.assertIn("HERDR_HELPER_OK=1", text)
         self.assertIn("chat", text)
+
+
+class RunHelperTest(unittest.TestCase):
+    """The session marker decides whether the next turn passes --continue."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.workdir = lb.workdir_for(Path(self.dir.name), "telegram", "42")
+        self.workdir.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(setattr, lb, "log", lb.log)
+        lb.log = lambda message: None
+
+    def stub_helper(self, returncode, stdout=b"", stderr=b""):
+        """A helper CLI that exits how the case says, without running one."""
+
+        class Completed:
+            pass
+
+        done = Completed()
+        done.returncode = returncode
+        done.stdout = stdout
+        done.stderr = stderr
+        original = lb.subprocess.run
+        self.addCleanup(setattr, lb.subprocess, "run", original)
+        lb.subprocess.run = lambda *args, **kwargs: done
+
+    def test_a_failed_run_that_printed_something_does_not_open_a_session(self):
+        # The early return only fired when stdout was empty, so a helper that
+        # exited non-zero after printing anything still got a marker. The next
+        # turn then passed --continue for a session that never began, and the
+        # conversation was stuck there.
+        self.stub_helper(1, b"partial answer before it died\n", b"boom")
+        cfg = base_config(BRIDGE_HELPER="claude")
+        reply = lb.run_helper(cfg, "claude", self.workdir, "hi")
+        self.assertEqual(reply, "partial answer before it died")
+        self.assertFalse(lb.has_session(self.workdir))
+
+    def test_a_failed_run_with_no_output_says_so_and_opens_no_session(self):
+        self.stub_helper(2, b"", b"boom")
+        reply = lb.run_helper(base_config(BRIDGE_HELPER="claude"), "claude", self.workdir, "hi")
+        self.assertIn("exit 2", reply)
+        self.assertFalse(lb.has_session(self.workdir))
+
+    def test_a_clean_run_opens_the_session(self):
+        self.stub_helper(0, b"the answer\n")
+        reply = lb.run_helper(base_config(BRIDGE_HELPER="claude"), "claude", self.workdir, "hi")
+        self.assertEqual(reply, "the answer")
+        self.assertTrue(lb.has_session(self.workdir))
 
 
 def telegram_update(

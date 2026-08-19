@@ -426,8 +426,14 @@ def split_message(text: str, limit: int) -> list:
             chunks.append(rest[:cut])
             rest = rest[cut:]
             continue
-        chunks.append(rest[:cut].rstrip())
+        chunk = rest[:cut].rstrip()
         rest = rest[cut:].lstrip("\n ")
+        # A window that held nothing but whitespace up to the break leaves an
+        # empty chunk, and every provider rejects an empty message -- so the
+        # send raises, the dispatch loop logs one "send failed" line, and the
+        # whole reply is lost rather than one blank line of it.
+        if chunk:
+            chunks.append(chunk)
     if rest:
         chunks.append(rest)
     return chunks or [""]
@@ -544,10 +550,16 @@ def run_helper(cfg: dict, helper: str, workdir: Path, text: str, timeout=HELPER_
             "helper exited %d (stdout %d bytes, stderr %d bytes)"
             % (proc.returncode, len(proc.stdout), len(proc.stderr))
         )
+        # No marker on a run that failed, whatever it printed on the way out.
+        # The marker is what makes the next turn pass --continue, and a
+        # --continue for a session the helper never opened wedges the
+        # conversation: every turn after it resumes something that is not
+        # there.
         if not out:
             return "The lantern helper failed (exit %d). Check the bridge pane." % (
                 proc.returncode,
             )
+        return out
     mark_session(workdir)
     return out or "(the lantern had nothing to say)"
 
