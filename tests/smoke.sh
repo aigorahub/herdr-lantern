@@ -677,13 +677,24 @@ printf '%s\n' "$goals" | grep -q '/goal 2h' || fail "goals-floor goal age"
 # This runs launch.sh for real against stub binaries. HOME points at an empty
 # directory so helper_extend_user_path cannot find a genuine CLI, and
 # HERDR_BIN_PATH points at a stub so no live herdr is touched.
+#
+# The stubs live in $HOME/.local/bin and that directory is deliberately left
+# out of the PATH handed to launch.sh. helper_extend_user_path is what puts it
+# there, and it prepends /usr/local/bin and /opt/homebrew/bin first. Handing
+# the stub dir in through PATH is worse than useless: helper_prepend_path skips
+# a directory that is already on PATH, so the stub dir keeps its inherited
+# position and the Homebrew dirs land in front of it. A machine with a real
+# grok or agent then runs that instead of the stub, and the ARGV line never
+# appears. Let the function place the dir, and only $HOME/.grok/bin outranks
+# it — absent under this throwaway home.
 argv_dir=$(mktemp -d)
 argv_home=$argv_dir/home
-mkdir -p "$argv_home" "$argv_dir/bin" "$argv_dir/config" "$argv_dir/state"
+argv_bin=$argv_home/.local/bin
+mkdir -p "$argv_bin" "$argv_dir/config" "$argv_dir/state"
 for stub_bin in agent devin claude codex grok herdr; do
     printf '%s\n' '#!/bin/sh' 'printf "ARGV:"' 'for a in "$@"; do printf " [%s]" "$a"; done' \
-        'printf "\n"' 'exit 0' >"$argv_dir/bin/$stub_bin"
-    chmod +x "$argv_dir/bin/$stub_bin"
+        'printf "\n"' 'exit 0' >"$argv_bin/$stub_bin"
+    chmod +x "$argv_bin/$stub_bin"
 done
 
 run_launch() {
@@ -693,11 +704,11 @@ run_launch() {
     mkdir -p "$argv_dir/state"
     env -i \
         HOME="$argv_home" \
-        PATH="$argv_dir/bin:/usr/bin:/bin" \
+        PATH="/usr/bin:/bin" \
         HERDR_PLUGIN_ROOT="$root" \
         HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
         HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
-        HERDR_BIN_PATH="$argv_dir/bin/herdr" \
+        HERDR_BIN_PATH="$argv_bin/herdr" \
         sh "$root/launch.sh" </dev/null 2>/dev/null |
         grep '^ARGV:' | tail -1
 }
