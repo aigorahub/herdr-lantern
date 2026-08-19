@@ -32,6 +32,10 @@ All notable changes to Lantern, by Elves are documented here.
   The tab closes with it, and the lantern workspace closes when that chat
   was the only tab. Escape still stays inside the CLI. The helper is told
   not to close its own workspace or seat other agents in it.
+- Docs: quit the chat before upgrading, relinking, or reinstalling the
+  plugin. Herdr drops its record of a running lantern pane on install and
+  link, so that tab stops answering to `herdr plugin pane focus` and the
+  next open seats a fresh chat beside it.
 
 ## [0.2.1] - 2026-08-19
 

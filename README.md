@@ -117,6 +117,12 @@ description = "Open lantern"
 Then `herdr server reload-config`. No Herdr restart is needed for plugin
 script or config edits; reopen the lantern.
 
+Quit the chat before you upgrade, relink, or reinstall the plugin.
+`herdr plugin install` and `herdr plugin link` drop Herdr's record of a
+running lantern pane, so that tab stops answering to
+`herdr plugin pane focus` and the next open seats a fresh chat beside it.
+Close the leftover tab with `herdr pane close <pane_id>` if that happens.
+
 ## Where it sits
 
 The first open creates a workspace labelled **🔥 lantern** at your home
