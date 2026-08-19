@@ -2,6 +2,14 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.2.1] - 2026-08-19
+
+### Fixed
+
+- `bin/herdr` now relays `agent prompt` with `--wait`, and when Herdr
+  reports a stalled submit (text typed but Enter ignored — common on idle
+  Cursor panes), sends Enter and waits again before returning.
+
 ## [0.2.0] - 2026-08-18
 
 First named release. Plugin id is `aigora.lantern`. GitHub repo is

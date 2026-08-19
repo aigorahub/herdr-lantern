@@ -105,6 +105,9 @@ Runtime (injected by launch.sh; do not ignore):
   are blocked until the user confirms the exact path or target. Then rerun:
     HERDR_HELPER_OK=1 herdr <same command>
   Never call /opt/homebrew/bin/herdr or another absolute herdr path.
+- \`herdr agent prompt\` through the wrapper adds \`--wait\` and retries
+  with Enter when the target pane stalls (Cursor often types into the
+  follow-up field without submitting). Read the pane before saying sent.
 - Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
 - After workspace create, if agent start fails, wait two seconds and retry once
   (the new pane may still be coming up to a shell prompt).

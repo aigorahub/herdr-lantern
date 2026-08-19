@@ -146,6 +146,42 @@ helper_is_inspect() {
     return 1
 }
 
+helper_argv_has_flag() {
+    _helper_flag=$1
+    shift
+    while [ $# -gt 0 ]; do
+        [ "$1" = "$_helper_flag" ] && return 0
+        shift
+    done
+    return 1
+}
+
+helper_is_agent_prompt() {
+    [ "${1:-}" = agent ] && [ "${2:-}" = prompt ] && [ -n "${3:-}" ] && [ -n "${4:-}" ]
+}
+
+helper_relay_agent_prompt() {
+    # Submit through Herdr with --wait, then Enter + wait if the pane never
+    # leaves idle (common when Cursor keeps text in the follow-up field).
+    _helper_real=$1
+    shift
+    _helper_target=$3
+    _helper_text=$4
+    shift 4
+    _helper_extra=
+    if ! helper_argv_has_flag --wait "$@"; then
+        _helper_extra="--wait --timeout 120000"
+    elif ! helper_argv_has_flag --timeout "$@"; then
+        _helper_extra="--timeout 120000"
+    fi
+    # shellcheck disable=SC2086
+    if "$_helper_real" agent prompt "$_helper_target" "$_helper_text" "$@" $_helper_extra; then
+        return 0
+    fi
+    "$_helper_real" agent send-keys "$_helper_target" Enter || return $?
+    "$_helper_real" agent wait "$_helper_target" --timeout 120000
+}
+
 helper_resolve_real_herdr() {
     if [ -n "${HERDR_REAL:-}" ] && [ -x "$HERDR_REAL" ]; then
         printf '%s' "$HERDR_REAL"
