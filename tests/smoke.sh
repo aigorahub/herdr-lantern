@@ -23,8 +23,9 @@ fake_prompt=
 fake_ws=
 fake_cmd=
 fake_py=
+fake_agents=
 open_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -46,6 +47,57 @@ fi
 [ "$(helper_expand_tilde '~')" = "$HOME" ] || fail "expand ~"
 [ "$(helper_normalize_root '~/')" = "$HOME" ] || fail "normalize ~/"
 [ "$(helper_normalize_root "$HOME/")" = "$HOME" ] || fail "normalize HOME/"
+
+# helper_native_path is what herdr gets. Identity without cygpath, a
+# drive-letter path with it.
+native_home=$(helper_native_path "$HOME")
+if command -v cygpath >/dev/null 2>&1; then
+    case $native_home in
+    [A-Za-z]:\\*) ;;
+    *) fail "helper_native_path should produce a Windows path (got $native_home)" ;;
+    esac
+else
+    [ "$native_home" = "$HOME" ] ||
+        fail "helper_native_path should be identity here (got $native_home)"
+fi
+# launch.sh tests the search root with [ -d ], so that one must stay POSIX.
+[ "$(helper_normalize_root "$HOME")" = "$HOME" ] ||
+    fail "helper_normalize_root must not convert the path form"
+grep -q 'helper_native_path "$HOME"' "$root/open.sh" ||
+    fail "open.sh should hand herdr the native path form"
+
+# helper_resolve_real_herdr has to cope with the Windows form of
+# HERDR_BIN_PATH, which arrives with backslashes and a drive letter.
+resolve_dir=$(mktemp -d)
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$resolve_dir/herdr"
+chmod +x "$resolve_dir/herdr"
+if command -v cygpath >/dev/null 2>&1; then
+    win_herdr=$(cygpath -w "$resolve_dir/herdr")
+    got=$(HERDR_REAL= HERDR_BIN_PATH="$win_herdr" \
+        helper_resolve_real_herdr "$root/bin") ||
+        fail "resolve should accept a Windows HERDR_BIN_PATH"
+    [ -x "$got" ] || fail "resolved herdr is not runnable (got $got)"
+fi
+# The plugin's own wrapper must never be returned as the real binary.
+got=$(HERDR_REAL= HERDR_BIN_PATH="$root/bin/herdr" \
+    helper_resolve_real_herdr "$root/bin") || got=
+case $got in
+"$root/bin/herdr")
+    fail "resolve returned the plugin wrapper as the real herdr"
+    ;;
+esac
+rm -rf "$resolve_dir"
+
+# The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
+# WSL launcher in WindowsApps, so that call would start Linux. Herdr runs these
+# files with `sh`, and nothing here needs more than that.
+if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" "$root/lib.sh" "$root/bin/herdr" |
+    grep -qE '(^|[^A-Za-z_/-])bash([^A-Za-z_]|$)'; then
+    fail "plugin shell code must not invoke bare bash"
+fi
+if grep -q 'WindowsApps' "$root/lib.sh"; then
+    fail "lib.sh must not put WindowsApps on PATH"
+fi
 grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 
 grep -q '^placement = "tab"$' "$root/herdr-plugin.toml" || fail "pane placement is tab"
@@ -311,11 +363,41 @@ if [ -s "$STUB_LOG" ]; then
 fi
 rmdir "$open_state/open.lock"
 
-detected=$(helper_detect_agent) || fail "no helper agent on PATH"
-case $detected in
-devin | agent | claude | codex | grok) ;;
-*) fail "detect returned $detected" ;;
-esac
+# helper_detect_agent picks the first of agent, devin, claude, codex, grok on
+# PATH. This used to assert that one of them was installed on the machine
+# running the suite, which is a fact about the machine and not about the code:
+# it can never hold on a CI runner or in a bare container. Test the order
+# against a PATH the test controls, which also covers preference, something the
+# old assertion never did.
+fake_agents=$(mktemp -d)
+for stub_agent in claude codex; do
+    printf '%s\n' '#!/bin/sh' 'exit 0' >"$fake_agents/$stub_agent"
+    chmod +x "$fake_agents/$stub_agent"
+done
+picked=$(PATH="$fake_agents"; export PATH; helper_detect_agent) ||
+    fail "detect should find a stub on a controlled PATH"
+[ "$picked" = claude ] || fail "detect should prefer claude over codex (got $picked)"
+
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$fake_agents/agent"
+chmod +x "$fake_agents/agent"
+picked=$(PATH="$fake_agents"; export PATH; helper_detect_agent) ||
+    fail "detect should still find a stub"
+[ "$picked" = agent ] || fail "detect should prefer agent first (got $picked)"
+
+empty_agents=$(mktemp -d)
+if picked=$(PATH="$empty_agents"; export PATH; helper_detect_agent); then
+    fail "detect should fail when nothing is on PATH (got $picked)"
+fi
+rm -rf "$fake_agents" "$empty_agents"
+fake_agents=
+
+# The real machine is reported, never asserted. launch.sh is where a missing
+# CLI becomes an error the user can read.
+if detected=$(helper_detect_agent); then
+    printf 'note: helper CLI on this machine: %s\n' "$detected"
+else
+    printf 'note: no helper CLI on PATH here\n'
+fi
 
 export HERDR_REAL=/bin/echo
 export HERDR_HELPER_OK=

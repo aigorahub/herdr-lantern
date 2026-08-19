@@ -97,7 +97,9 @@ fi
 # 4. Still nothing: make the lantern its own workspace, at home.
 root_pane=
 if [ -z "$workspace" ]; then
-    created=$("$herdr" workspace create --cwd "$HOME" \
+    # herdr is a native binary. On Windows it wants C:\Users\name, not the
+    # /c/Users/name that Git Bash hands out as $HOME.
+    created=$("$herdr" workspace create --cwd "$(helper_native_path "$HOME")" \
         --label "$workspace_label" --no-focus) ||
         die "could not create the lantern workspace"
     workspace=$(printf '%s' "$created" | helper_json_value workspace_id)

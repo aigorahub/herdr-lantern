@@ -135,6 +135,25 @@ helper_detect_python() {
     return 1
 }
 
+helper_native_path() {
+    # Prints a path in the form the native herdr binary expects.
+    #
+    # Under Git Bash $HOME is /c/Users/name and herdr.exe wants C:\Users\name.
+    # MSYS converts most arguments on its way to a native program, but that is
+    # a heuristic on the argument text, and --cwd decides where a workspace is
+    # created. Convert it here instead of hoping.
+    #
+    # Identity wherever cygpath does not exist, which is everywhere but
+    # Windows, so macOS and Linux are untouched.
+    if command -v cygpath >/dev/null 2>&1; then
+        if _helper_native=$(cygpath -w "$1" 2>/dev/null) && [ -n "$_helper_native" ]; then
+            printf '%s' "$_helper_native"
+            return 0
+        fi
+    fi
+    printf '%s' "$1"
+}
+
 helper_expand_tilde() {
     _helper_path=$1
     case $_helper_path in
