@@ -184,9 +184,11 @@ You need:
 - [Git for Windows](https://git-scm.com/download/win).
 - `C:\Program Files\Git\bin` on your user `PATH`. That directory holds
   `sh.exe`, and Herdr starts the plugin with `sh open.sh` and `sh launch.sh`.
-  Add that one directory. Do not add `C:\Program Files\Git\usr\bin`: it would
-  shadow Windows tools such as `find.exe` and `sort.exe`, and the plugin does
-  not need it.
+  The Git installer does not put it there: its default option adds
+  `C:\Program Files\Git\cmd`, which holds `git.exe` and no shell. So this step
+  is needed even when Git already works in your terminal. Add that one
+  directory. Do not add `C:\Program Files\Git\usr\bin`: it would shadow Windows
+  tools such as `find.exe` and `sort.exe`, and the plugin does not need it.
 - One helper CLI on `PATH`, the same as anywhere else.
 
 After you add that PATH entry, **stop the Herdr server**, not just the window:
@@ -199,8 +201,19 @@ Herdr keeps a persistent server, and your panes live inside it. Closing and
 reopening the app leaves that server running with the environment it started
 with, so it still cannot find `sh` and the action fails with
 `program not found`. Stopping the server ends every pane in it, so finish what
-is running first. Then start Herdr from a newly opened terminal, or sign out
-and back in, so the new server inherits the PATH you just set.
+is running first.
+
+A new PATH entry also has to reach whatever launches Herdr. The Start menu and
+the taskbar are Explorer, and Explorer keeps the environment it started with
+too. Sign out and back in, or restart Explorer, before you start Herdr again.
+Confirm it took in a new terminal before launching:
+
+```powershell
+where sh
+```
+
+If that prints `C:\Program Files\Git\bin\sh.exe`, Herdr started from there will
+find it. If it prints nothing, the new server will fail the same way.
 
 Check the setup:
 
