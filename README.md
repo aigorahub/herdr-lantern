@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.3.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.4.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -15,7 +15,8 @@ It opens as a chat tab in its own Herdr workspace and starts the helper CLI
 you already use (Cursor `agent`, Devin, Claude Code, Codex, or Grok). That
 CLI drives `herdr`.
 
-Requires Herdr **0.7.5+** on macOS or Linux.
+Requires Herdr **0.7.5+** on macOS, Linux, or Windows. Windows needs Git for
+Windows as well; see [Windows](#windows).
 
 ## Install the plugin
 
@@ -103,6 +104,19 @@ hsh
 That runs `herdr plugin action invoke aigora.lantern.open`. Put `hsh`
 from this repo on your `PATH` (for example `ln -s "$PWD/hsh" ~/bin/hsh`).
 
+On Windows there is no symlink step. Either run the action directly:
+
+```powershell
+herdr plugin action invoke aigora.lantern.open
+```
+
+or put a one-line `hsh.cmd` somewhere on your `PATH`:
+
+```bat
+@echo off
+herdr plugin action invoke aigora.lantern.open
+```
+
 Once it is installed, open it in Herdr with **Ctrl+B, then capital H**.
 `prefix+h` is already “focus pane left”, so the binding has to be capital H:
 
@@ -159,11 +173,57 @@ For Cursor `agent`: **Ctrl+C** (twice if a turn is running), or **Ctrl+D** on an
 empty prompt.
 
 
+## Windows
+
+Herdr ships for Windows, and so does this plugin. It runs the same POSIX shell
+files there, through Git Bash. There is no separate Windows code path.
+
+You need:
+
+- Herdr for Windows.
+- [Git for Windows](https://git-scm.com/download/win).
+- `C:\Program Files\Git\bin` on your user `PATH`. That directory holds
+  `sh.exe`, and Herdr starts the plugin with `sh open.sh` and `sh launch.sh`.
+  Add that one directory. Do not add `C:\Program Files\Git\usr\bin`: it would
+  shadow Windows tools such as `find.exe` and `sort.exe`, and the plugin does
+  not need it.
+- One helper CLI on `PATH`, the same as anywhere else.
+
+Check the setup:
+
+```powershell
+sh --version
+herdr plugin action list
+```
+
+The action should report `"platforms":["linux","macos","windows"]`.
+
+Two Windows details worth knowing:
+
+- The `bash` on your `PATH` is probably not Git Bash. Windows ships a
+  `bash.exe` stub in `WindowsApps` that launches WSL. This plugin never calls
+  `bash`, and neither should anything you add to it.
+- The `python3` on your `PATH` is probably the zero-byte Microsoft Store
+  alias, which opens the Store instead of running Python. Lantern checks an
+  interpreter by running it, so the field snapshot works with `python`, `py`,
+  or a real `python3`. If none exists you lose the snapshot and nothing else.
+
+Run Herdr for Windows natively. WSL is not the supported path.
+
 ## Tests
 
 ```bash
 sh tests/smoke.sh
 ```
+
+On Windows, run it through Git Bash:
+
+```powershell
+& 'C:\Program Files\Git\bin\sh.exe' tests/smoke.sh
+```
+
+GitHub Actions runs the same suite on Linux, macOS, and Windows for every pull
+request.
 
 ## Trust
 

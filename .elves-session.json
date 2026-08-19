@@ -91,23 +91,23 @@
     },
     {
       "id": "B7",
-      "status": "in_progress",
-      "note": "B7-A2 needs a Linux and macOS run. .github/workflows/tests.yml adds an ubuntu, macos, windows matrix so the PR proves it instead of arguing it. Close this batch when that run is green.",
+      "status": "complete",
+      "note": "B7-A2 was closed by execution, not by argument. .github/workflows/tests.yml runs the suite on ubuntu, macos, and windows for every pull request.",
       "acceptance": [
         {"id": "B7-A1", "criterion": "The unwritable-state-dir case detects a platform that ignores the permission bits and prints a SKIP line instead of failing.", "met": true, "evidence": "After `chmod 500`, the test probes with `mkdir \"$open_state/probe\"`. On this machine it succeeds, so the suite prints `SKIP: platform ignores directory permission bits (unlockable state dir)` and continues."},
-        {"id": "B7-A2", "criterion": "That case still runs and passes on Linux and macOS.", "met": false, "evidence": "NOT VERIFIED BY EXECUTION. No Linux or macOS host was available in this session. By construction the probe mkdir fails inside a 0500 directory on those platforms, so the elif branch runs run_open and the original assertion is unchanged. This is reasoning, not a run, and it is called out in the PR."},
+        {"id": "B7-A2", "criterion": "That case still runs and passes on Linux and macOS.", "met": true, "evidence": "CI run 32289173878 is green on ubuntu-latest, macos-latest, and windows-latest. Neither the ubuntu nor the macos job printed the SKIP line, which proves the chmod 500 precondition held there and the original assertion ran and passed. Only the Windows job prints SKIP."},
         {"id": "B7-A3", "criterion": "The suite uses the detected Python instead of a bare `python3`.", "met": true, "evidence": "tests/smoke.sh resolves $smoke_python from helper_detect_python and uses it for elves-floor, py_compile, and goals-floor. No bare python3 call remains in the suite."},
         {"id": "B7-A4", "criterion": "The full suite passes under Git Bash on Windows with the plain Windows PATH.", "met": true, "evidence": "`& 'C:\\Program Files\\Git\\bin\\sh.exe' tests/smoke.sh` from PowerShell prints the SKIP line, `ok: windows herdr.cmd gate`, and `ok`, then exits 0."}
       ]
     },
     {
       "id": "B8",
-      "status": "pending",
+      "status": "complete",
       "acceptance": [
-        {"id": "B8-A1", "criterion": "`README.md` documents the Windows requirements: Herdr on Windows, Git for Windows, `C:\\Program Files\\Git\\bin` on PATH, one helper CLI on PATH.", "met": false, "evidence": ""},
-        {"id": "B8-A2", "criterion": "`README.md` gives a Windows equivalent for the `hsh` symlink step.", "met": false, "evidence": ""},
-        {"id": "B8-A3", "criterion": "`CHANGELOG.md` has a 0.4.0 entry covering Windows support and the gate fix.", "met": false, "evidence": ""},
-        {"id": "B8-A4", "criterion": "`herdr-plugin.toml` and the README version line both read 0.4.0.", "met": false, "evidence": ""}
+        {"id": "B8-A1", "criterion": "`README.md` documents the Windows requirements: Herdr on Windows, Git for Windows, `C:\\Program Files\\Git\\bin` on PATH, one helper CLI on PATH.", "met": true, "evidence": "README has a Windows section listing all four, with the reason for naming only Git\\bin and not Git\\usr\\bin, plus the bash and python3 traps and a setup check."},
+        {"id": "B8-A2", "criterion": "`README.md` gives a Windows equivalent for the `hsh` symlink step.", "met": true, "evidence": "The Open it section adds the direct `herdr plugin action invoke` call and a two-line hsh.cmd for PATH."},
+        {"id": "B8-A3", "criterion": "`CHANGELOG.md` has a 0.4.0 entry covering Windows support and the gate fix.", "met": true, "evidence": "CHANGELOG 0.4.0 has Added, Fixed, and Changed sections. Fixed leads with the silent gate bypass on Windows."},
+        {"id": "B8-A4", "criterion": "`herdr-plugin.toml` and the README version line both read 0.4.0.", "met": true, "evidence": "herdr-plugin.toml version = \"0.4.0\"; README line 5 reads **v0.4.0**."}
       ]
     },
     {

@@ -2,6 +2,52 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.4.0] - 2026-08-19
+
+### Added
+
+- Windows support. The manifest declares `windows`, and the plugin runs the
+  same POSIX shell files there through Git Bash. It needs Git for Windows with
+  `C:\Program Files\Git\bin` on `PATH`, because Herdr starts the plugin with
+  `sh open.sh` and `sh launch.sh`. There is no separate Windows code path and
+  no behaviour change on macOS or Linux.
+- `bin/herdr.cmd`, the Windows half of the mutate gate. See Fixed below.
+- `.gitattributes`. The interpreted files are pinned to LF and batch files to
+  CRLF, so a Windows checkout cannot turn `#!/bin/sh` into a shebang carrying
+  a carriage return.
+- A GitHub Actions job that runs `tests/smoke.sh` on Linux, macOS, and Windows
+  for every pull request.
+
+### Fixed
+
+- The herdr mutate gate could be bypassed on Windows, and silently.
+  `bin/herdr` has no file extension, so a native Windows process resolving
+  `herdr` on `PATH` skipped it under `PATHEXT` and reached the real
+  `herdr.exe`. Create, start, focus, close, and prompt then needed no
+  confirmation. `bin/herdr.cmd` is what that process finds now. It forwards to
+  the same wrapper, returns its exit code, and refuses rather than falling
+  through when it can find no `sh.exe`.
+- The field snapshot no longer trusts `python3` on `PATH`. Windows ships a
+  zero-byte Microsoft Store alias by that name which satisfies a lookup and
+  then opens the Store. Lantern now runs a candidate before using it, and
+  falls back to `python` and `py -3`.
+- `bin/goals-floor` decoded `herdr` output with the locale encoding, which is
+  a code page on Windows. Pane text carries box drawing, arrows, and emoji, so
+  one byte outside that page ended the snapshot. It now decodes UTF-8 with
+  replacement.
+- `open.sh` converts the workspace directory to the native form before handing
+  it to `herdr`. Git Bash reports `$HOME` as `/c/Users/name`, and the Windows
+  binary wants `C:\Users\name`.
+
+### Changed
+
+- `tests/smoke.sh` runs on Windows. The case for an unlockable state directory
+  detects a platform that ignores directory permission bits and skips there
+  instead of failing. The suite finds a working interpreter rather than
+  calling `python3`. Helper CLI detection is now tested against a controlled
+  `PATH`, preference order included, rather than asserting that the machine
+  running the suite has one installed.
+
 ## [0.3.0] - 2026-08-19
 
 ### Changed
