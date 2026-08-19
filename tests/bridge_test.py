@@ -1097,7 +1097,17 @@ class WebhookHardeningTest(unittest.TestCase):
         return server, server.server_address[1]
 
     def connect(self, port, request: bytes):
-        sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+        # The listen backlog is small and this opens more connections than it
+        # holds, so a refusal here is the accept loop being a beat behind
+        # rather than the thing under test.
+        for attempt in range(20):
+            try:
+                sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+                break
+            except ConnectionRefusedError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
         self.addCleanup(sock.close)
         sock.sendall(request)
         return sock
