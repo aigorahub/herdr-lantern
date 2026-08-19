@@ -203,26 +203,25 @@ helper_workspace_id_by_label() {
         sed -n '1p'
 }
 
-helper_workspace_exists() {
-    # $1 real herdr, $2 workspace id.
+helper_workspace_label() {
+    # $1 real herdr, $2 workspace id. Prints the label of that workspace.
+    # Fails when the id is empty or gone.
     [ -n "${2:-}" ] || return 1
-    "$1" workspace get "$2" >/dev/null 2>&1
+    _helper_ws_json=$("$1" workspace get "$2" 2>/dev/null) || return 1
+    printf '%s' "$_helper_ws_json" | helper_json_value label
 }
 
-helper_pane_is_lantern() {
-    # $1 real herdr, $2 pane id, $3 workspace id, $4 pane title.
-    # Ids are reused after a Herdr restart, so check the title and the
-    # workspace as well as existence.
+helper_lantern_pane_workspace() {
+    # $1 real herdr, $2 pane id, $3 pane title. Prints the workspace that
+    # pane sits in, but only while it is still a live lantern chat. Herdr
+    # reuses pane ids after a restart, so the title is checked as well.
     [ -n "${2:-}" ] || return 1
     _helper_pane_json=$("$1" pane get "$2" 2>/dev/null) || return 1
     case $_helper_pane_json in
-    *"\"workspace_id\":\"$3\""*) ;;
+    *"\"label\":\"$3\""*) ;;
     *) return 1 ;;
     esac
-    case $_helper_pane_json in
-    *"\"label\":\"$4\""*) return 0 ;;
-    esac
-    return 1
+    printf '%s' "$_helper_pane_json" | helper_json_value workspace_id
 }
 
 helper_resolve_real_herdr() {

@@ -279,7 +279,7 @@ HELPER_EXTRA_ARGS=""</pre>
     <ol class="steps">
       <li>
         <div>
-          The first open creates a workspace labelled <code>🏮 lantern</code> at your home directory
+          The first open creates a workspace labelled <code>🪔 lantern</code> at your home directory
           and seats the chat there as a tab named <code>field</code>. It is not dropped into the
           workspace you happen to be in, and the empty shell tab of the new workspace is closed, so
           the chat sits alone. The lantern in the sidebar is how you spot it.
@@ -287,9 +287,9 @@ HELPER_EXTRA_ARGS=""</pre>
       </li>
       <li>
         <div>
-          Every later open reuses that workspace. Herdr focuses it and the chat already in it.
-          You never get a second lantern workspace. Rename the workspace or the tab if you want to;
-          the remembered ids keep working.
+          Every later open reuses it. A chat that is still running is focused wherever it sits, so
+          moving or renaming that tab is safe. If it has exited, a new chat is seated in the same
+          workspace. Lantern does not open a second lantern workspace.
         </div>
       </li>
       <li>
@@ -299,7 +299,7 @@ HELPER_EXTRA_ARGS=""</pre>
         </div>
       </li>
     </ol>
-    <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, the tab closes, and the lantern workspace closes with it if that chat was the only tab.</p>
+    <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, the tab closes, and the lantern workspace closes with it if that chat was the only tab. Herdr reuses workspace and pane ids after a restart, so Lantern checks the remembered ids before it trusts them: keep the <code>🪔 lantern</code> label if you want that workspace reused after the chat closes.</p>
 
     <h2>What to say</h2>
     <ul class="says">

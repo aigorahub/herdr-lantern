@@ -9,13 +9,19 @@ All notable changes to Lantern, by Elves are documented here.
 - Lantern is a normal chat in its own workspace, not a lightbox. The pane
   placement is `tab`, and the 90% width and height are gone.
 - `open.sh` seats that chat. The first open creates a workspace labelled
-  `🏮 lantern` with `--cwd $HOME`, opens the chat there as a tab named
+  `🪔 lantern` with `--cwd $HOME`, opens the chat there as a tab named
   `field`, and closes the empty shell tab the new workspace comes with.
-  Later opens focus that same workspace and the chat already in it, so
-  there is never a second lantern workspace. The workspace and pane ids
-  are remembered under the plugin state directory (`workspace.id`,
-  `pane.id`); the `🏮 lantern` label, then a plain `lantern` label, are
-  the fallbacks. Rename the workspace or the tab and the ids still work.
+- Later opens focus a chat that is still running, wherever the tab was
+  moved, or seat a new one in the same workspace. Lantern does not open a
+  second lantern workspace, and a lock stops two fast opens racing into
+  two.
+- The workspace and pane ids are remembered under the plugin state
+  directory (`workspace.id`, `pane.id`) and checked before use. Herdr
+  reuses ids after a restart, so a remembered workspace counts only while
+  it still carries the `🪔 lantern` label, and a remembered pane only
+  while it is still a lantern chat. Otherwise Lantern looks up the label,
+  then creates the workspace.
+- A chat that fails to start no longer leaves an empty workspace behind.
 - The open path is unchanged: `hsh`, `prefix+H`, or
   `herdr plugin action invoke aigora.lantern.open`.
 - A new workspace lands last in the sidebar. Lantern does not pin it to the
