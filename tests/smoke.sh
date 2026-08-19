@@ -846,8 +846,14 @@ run_bridge() {
 
 # No credentials at all: refuse, and say which file and which example.
 bridge_out=$(run_bridge --check) && fail "bridge with no channels should fail"
-printf '%s\n' "$bridge_out" | grep -q "$bridge_dir/config/bridge.conf" ||
-    fail "bridge should name the config file it wants filled in"
+# The message names the path Python resolved, and Python here is a native
+# Windows program: MSYS rewrites the argument on the way to it, and Path()
+# prints it back with backslashes. So the form this shell holds is not the
+# form that comes out. Same conversion the open.sh cases use, and identity
+# everywhere but Windows. -F because a Windows path is full of regex escapes.
+bridge_conf_want=$(helper_native_path "$bridge_dir/config/bridge.conf")
+printf '%s\n' "$bridge_out" | grep -qF "$bridge_conf_want" ||
+    fail "bridge should name the config file it wants filled in (wanted $bridge_conf_want)"
 printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
     fail "bridge should name the example file"
 [ -f "$bridge_dir/config/bridge.conf" ] || fail "bridge should seed bridge.conf"
