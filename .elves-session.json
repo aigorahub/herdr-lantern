@@ -1,0 +1,121 @@
+{
+  "run_id": "lantern-windows-2026-08-19",
+  "branch": "feat/windows-support",
+  "start_head": "99e34fa17a2204a2227d21aafc9eb9ef548973ec",
+  "plan_path": "plans/windows-support.md",
+  "run_mode": "finite",
+  "work_driver": "host-native",
+  "implementation_lane": "fast",
+  "delegation_scope": "none",
+  "git_mode": "host_only",
+  "driver_monitor_mode": "interactive",
+  "risk_posture": "standard",
+  "trust_mode": "trusted",
+  "landing_outcome": "landable_pr",
+  "driver_authorized": false,
+  "worker_merge_authority": false,
+  "cobbler": {
+    "default_for_session": true
+  },
+  "continuation_guard": {
+    "stop_allowed": false,
+    "next_required_action": "Start B1: declare windows in herdr-plugin.toml."
+  },
+  "test_baseline": {
+    "command": "sh tests/smoke.sh",
+    "linux_macos": "not run on this machine",
+    "windows_git_bash": "1 failure at tests/smoke.sh:245 (chmod 500 cannot make a directory unwritable on Windows); all other cases pass"
+  },
+  "batches": [
+    {
+      "id": "B1",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B1-A1", "criterion": "`herdr-plugin.toml` declares platforms linux, macos, and windows.", "met": false, "evidence": ""},
+        {"id": "B1-A2", "criterion": "The action id stays `open`, the pane id stays `helper`, the pane title stays `Lantern`, and the placement stays `tab`.", "met": false, "evidence": ""},
+        {"id": "B1-A3", "criterion": "`herdr plugin action list` reports windows in the action platforms after relink.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B2",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B2-A1", "criterion": "`bin/herdr.cmd` forwards its arguments to the POSIX wrapper through `sh.exe` and exits with the wrapper's exit code.", "met": false, "evidence": ""},
+        {"id": "B2-A2", "criterion": "A mutating command through `bin/herdr.cmd` without `HERDR_HELPER_OK` exits non-zero and prints the `HERDR_HELPER_OK` hint.", "met": false, "evidence": ""},
+        {"id": "B2-A3", "criterion": "An inspect command through `bin/herdr.cmd` reaches the real herdr.", "met": false, "evidence": ""},
+        {"id": "B2-A4", "criterion": "With both files present, Git Bash `command -v herdr` still selects the extensionless wrapper.", "met": false, "evidence": ""},
+        {"id": "B2-A5", "criterion": "`bin/herdr.cmd` never falls through to the real herdr when `sh.exe` is missing.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B3",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B3-A1", "criterion": "`lib.sh` has `helper_detect_python`, which rejects a zero-byte candidate and validates each candidate by running it.", "met": false, "evidence": ""},
+        {"id": "B3-A2", "criterion": "`launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.", "met": false, "evidence": ""},
+        {"id": "B3-A3", "criterion": "A missing interpreter skips the snapshot and never kills the pane.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B4",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B4-A1", "criterion": "`lib.sh` has `helper_native_path`, which converts with `cygpath -w` when cygpath exists and is identity otherwise.", "met": false, "evidence": ""},
+        {"id": "B4-A2", "criterion": "`open.sh` passes the native form to `herdr workspace create --cwd`.", "met": false, "evidence": ""},
+        {"id": "B4-A3", "criterion": "`helper_normalize_root` keeps POSIX form, because `launch.sh:95` tests it with `[ -d ]`.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B5",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B5-A1", "criterion": "`helper_resolve_real_herdr` accepts a Windows-style `HERDR_BIN_PATH` and returns a path that runs.", "met": false, "evidence": ""},
+        {"id": "B5-A2", "criterion": "It never returns the plugin's own wrapper.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B6",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B6-A1", "criterion": "`helper_extend_user_path` leaves macOS and Linux behaviour unchanged and adds no entry that could resolve bare `bash` to the WSL stub.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B7",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B7-A1", "criterion": "The unwritable-state-dir case detects a platform that ignores the permission bits and prints a SKIP line instead of failing.", "met": false, "evidence": ""},
+        {"id": "B7-A2", "criterion": "That case still runs and passes on Linux and macOS.", "met": false, "evidence": ""},
+        {"id": "B7-A3", "criterion": "The suite uses the detected Python instead of a bare `python3`.", "met": false, "evidence": ""},
+        {"id": "B7-A4", "criterion": "The full suite passes under Git Bash on Windows with the plain Windows PATH.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B8",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B8-A1", "criterion": "`README.md` documents the Windows requirements: Herdr on Windows, Git for Windows, `C:\\Program Files\\Git\\bin` on PATH, one helper CLI on PATH.", "met": false, "evidence": ""},
+        {"id": "B8-A2", "criterion": "`README.md` gives a Windows equivalent for the `hsh` symlink step.", "met": false, "evidence": ""},
+        {"id": "B8-A3", "criterion": "`CHANGELOG.md` has a 0.4.0 entry covering Windows support and the gate fix.", "met": false, "evidence": ""},
+        {"id": "B8-A4", "criterion": "`herdr-plugin.toml` and the README version line both read 0.4.0.", "met": false, "evidence": ""}
+      ]
+    },
+    {
+      "id": "B9",
+      "status": "pending",
+      "acceptance": [
+        {"id": "B9-A1", "criterion": "The linked plugin creates a workspace labelled `\ud83d\udd25 lantern` with cwd `C:\\Users\\Megan` and a tab named `home`.", "met": false, "evidence": ""},
+        {"id": "B9-A2", "criterion": "`claude.exe` starts in the plugin state workdir and the prompt files are written.", "met": false, "evidence": ""},
+        {"id": "B9-A3", "criterion": "A second open focuses the existing chat instead of seating a second one.", "met": false, "evidence": ""},
+        {"id": "B9-A4", "criterion": "The mutation gate blocks a mutating herdr command from Git Bash and from cmd.", "met": false, "evidence": ""}
+      ]
+    }
+  ],
+  "master_acceptance": [
+    {"id": "M-A1", "criterion": "Lantern opens and runs on Windows through Git Bash, with no change to macOS or Linux behaviour.", "met": false, "evidence": ""},
+    {"id": "M-A2", "criterion": "The herdr mutation gate cannot be bypassed on Windows by a native process resolving `herdr` on PATH.", "met": false, "evidence": ""},
+    {"id": "M-A3", "criterion": "`tests/smoke.sh` passes on Windows under Git Bash and stays valid for Linux and macOS.", "met": false, "evidence": ""},
+    {"id": "M-A4", "criterion": "`README.md` and `CHANGELOG.md` describe the Windows requirements and the release.", "met": false, "evidence": ""}
+  ],
+  "review_comments": []
+}
