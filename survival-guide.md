@@ -86,11 +86,11 @@ scope.
 
 ## Stop Gate
 
-- **Planned batches remaining:** 8 (Batches 2-9)
-- **Stop allowed right now:** no
-- **Why:** Batches 1 and 10 are closed; eight remain.
-- **Next required action:** Start Batch 2. Add `bin/herdr.cmd` so the mutation
-  gate holds for native Windows callers.
+- **Planned batches remaining:** 0
+- **Stop allowed right now:** yes
+- **Why:** all ten batches are closed with evidence, master acceptance is
+  reconciled, and CI is green on the final commit across all three platforms.
+- **Next required action:** hand PR #6 to the user. Do not merge.
 
 ---
 
@@ -128,15 +128,15 @@ scope.
 
 ## Current Phase
 
-**Status:** In progress
+**Status:** All batches complete
 
-**Active batch:** Batch 2: Mutation gate on Windows
+**Active batch:** none
 
-**What was just finished:** Batch 10. `.gitattributes` pins the interpreted
-files to LF, the working tree carries no CR bytes, and the change is endings
-only.
+**What was just finished:** Batch 9, the end-to-end run on Windows, which found
+and fixed the extended-length plugin root that was silently emptying the field
+snapshot.
 
-**Single next action:** Start Batch 2.
+**Single next action:** hand PR #6 to the user with the report. Do not merge.
 
 ---
 

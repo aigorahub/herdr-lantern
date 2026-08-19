@@ -18,8 +18,8 @@
     "default_for_session": true
   },
   "continuation_guard": {
-    "stop_allowed": false,
-    "next_required_action": "Start B10: pin line endings with .gitattributes and renormalize before the shell edits."
+    "stop_allowed": true,
+    "next_required_action": "All ten batches are closed and master acceptance is reconciled. Hand the PR to the user; do not merge."
   },
   "plugin_install_state": {
     "before_run": "github:aigorahub/herdr-lantern@99e34fa, enabled",
@@ -135,11 +135,11 @@
     }
   ],
   "master_acceptance": [
-    {"id": "M-A1", "criterion": "Lantern opens and runs on Windows through Git Bash, with no change to macOS or Linux behaviour.", "met": false, "evidence": ""},
-    {"id": "M-A2", "criterion": "The herdr mutation gate cannot be bypassed on Windows by a native process resolving `herdr` on PATH.", "met": false, "evidence": ""},
-    {"id": "M-A3", "criterion": "`tests/smoke.sh` passes on Windows under Git Bash and stays valid for Linux and macOS.", "met": false, "evidence": ""},
-    {"id": "M-A4", "criterion": "`README.md` and `CHANGELOG.md` describe the Windows requirements and the release.", "met": false, "evidence": ""},
-    {"id": "M-A5", "criterion": "The repository pins the line endings its shell code depends on, so a Windows checkout cannot silently produce CRLF scripts.", "met": false, "evidence": ""}
+    {"id": "M-A1", "criterion": "Lantern opens and runs on Windows through Git Bash, with no change to macOS or Linux behaviour.", "met": true, "evidence": "Batch 9 opened the plugin against a live Herdr on Windows: workspace labelled with the lantern, tab named home, empty shell tab closed, claude detected from PATH and started in the plugin state workdir, all four prompt files written, second open focuses rather than duplicating. No behaviour change elsewhere: every Windows branch is guarded by the presence of cygpath or by helper_prepend_path skipping absent directories, and CI run 32290682132 is green on ubuntu-latest and macos-latest at the final commit."},
+    {"id": "M-A2", "criterion": "The herdr mutation gate cannot be bypassed on Windows by a native process resolving `herdr` on PATH.", "met": true, "evidence": "bin/herdr.cmd closes the PATHEXT bypass and is covered by five assertions in tests/smoke.sh: blocked mutate, hint on stderr, inspect reaching the real binary, exit code preserved through cmd.exe, and refusal at 127 with no fall-through when no sh.exe exists. Batch 9 additionally fixed the extended-length plugin root, which had been putting an unusable directory on PATH and could have kept the POSIX wrapper out of the agent's reach entirely."},
+    {"id": "M-A3", "criterion": "`tests/smoke.sh` passes on Windows under Git Bash and stays valid for Linux and macOS.", "met": true, "evidence": "CI run 32290682132 at commit c91e563 is green on ubuntu-latest, macos-latest, and windows-latest. Only the Windows job prints the SKIP line, so the POSIX jobs ran the permission-bit assertion for real."},
+    {"id": "M-A4", "criterion": "`README.md` and `CHANGELOG.md` describe the Windows requirements and the release.", "met": true, "evidence": "README has a Windows section with the four requirements, the reason for naming Git\\bin and not Git\\usr\\bin, the WSL bash trap, the Store python3 trap, a setup check, and the Windows form of the hsh step. CHANGELOG 0.4.0 leads Fixed with the silent gate bypass."},
+    {"id": "M-A5", "criterion": "The repository pins the line endings its shell code depends on, so a Windows checkout cannot silently produce CRLF scripts.", "met": true, "evidence": ".gitattributes pins the interpreted files to eol=lf and batch files to eol=crlf. The working tree went from 208, 167, 286, 33, 9, 387, 262, and 262 CR bytes to zero, with git diff --stat empty."}
   ],
   "review_comments": []
 }
