@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr hsh tests/smoke.sh; do
+for f in launch.sh open.sh bridge.sh lib.sh bin/herdr hsh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -26,7 +26,8 @@ fake_py=
 fake_agents=
 argv_dir=
 open_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
+bridge_dir=
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -113,7 +114,8 @@ rm -rf "$resolve_dir"
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
 # WSL launcher in WindowsApps, so that call would start Linux. Herdr runs these
 # files with `sh`, and nothing here needs more than that.
-if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" "$root/lib.sh" "$root/bin/herdr" |
+if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" "$root/bridge.sh" \
+    "$root/lib.sh" "$root/bin/herdr" |
     grep -qE '(^|[^A-Za-z_/-])bash([^A-Za-z_]|$)'; then
     fail "plugin shell code must not invoke bare bash"
 fi
@@ -610,7 +612,12 @@ fi
 # shellcheck disable=SC2086
 $smoke_python "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
 # shellcheck disable=SC2086
-$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" || fail "py_compile"
+$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" \
+    "$root/bin/lantern-bridge" || fail "py_compile"
+
+# shellcheck disable=SC2086
+$smoke_python "$root/tests/bridge_test.py" >/dev/null 2>&1 ||
+    fail "tests/bridge_test.py (run it directly to see which case)"
 
 grep -q 'helper_detect_python' "$root/launch.sh" ||
     fail "launch.sh should use the detected interpreter"
@@ -767,5 +774,59 @@ HELPER_CWD="~"' ' [--verbose] [--foo]'
 rm -rf "$argv_dir"
 argv_dir=
 printf 'ok: launch.sh argv for every helper CLI\n'
+
+# bridge.sh end to end. Same stub-home trick as above: the bridge helper is
+# claude or codex, and both exist on plenty of machines, so the config names
+# one explicitly and nothing here ever runs it.
+bridge_dir=$(mktemp -d)
+mkdir -p "$bridge_dir/config" "$bridge_dir/state"
+run_bridge() {
+    # $@ goes to bridge.sh. Prints stdout and stderr together.
+    env -i \
+        HOME="$bridge_dir" \
+        PATH="/usr/bin:/bin" \
+        HERDR_PLUGIN_ROOT="$root" \
+        HERDR_PLUGIN_CONFIG_DIR="$bridge_dir/config" \
+        HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
+        BRIDGE_HELPER="$1" \
+        TELEGRAM_BOT_TOKEN="$2" \
+        TELEGRAM_ALLOWED_CHATS="$3" \
+        sh "$root/bridge.sh" "$4" </dev/null 2>&1
+}
+
+# No credentials at all: refuse, and say which file and which example.
+bridge_out=$(run_bridge "" "" "" --check) && fail "bridge with no channels should fail"
+printf '%s\n' "$bridge_out" | grep -q "$bridge_dir/config/bridge.conf" ||
+    fail "bridge should name the config file it wants filled in"
+printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
+    fail "bridge should name the example file"
+[ -f "$bridge_dir/config/bridge.conf" ] || fail "bridge should seed bridge.conf"
+[ -f "$bridge_dir/config/prompt.md" ] || fail "bridge should seed prompt.md"
+
+# Credentials without an allowlist: still a refusal, naming the key to set.
+bridge_out=$(run_bridge claude 'secret-token-value' "" --check) &&
+    fail "bridge with no allowlist should fail"
+printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_ALLOWED_CHATS' ||
+    fail "bridge should name the empty allowlist key"
+
+# Armed: a redacted summary and a real argv, no network, exit 0.
+bridge_out=$(run_bridge claude 'secret-token-value' '4242' --check) ||
+    fail "bridge --check with a full telegram config should pass"
+printf '%s\n' "$bridge_out" | grep -q 'channels: telegram' ||
+    fail "bridge --check should report the enabled channel"
+printf '%s\n' "$bridge_out" | grep -q -- '--output-format text' ||
+    fail "bridge --check should print the helper argv"
+if printf '%s\n' "$bridge_out" | grep -q 'secret-token-value'; then
+    fail "bridge --check leaked a token"
+fi
+printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_BOT_TOKEN *(set,' ||
+    fail "bridge --check should report the token as redacted"
+
+# The example file and the parser have to agree, or a fresh install refuses to
+# start on its own seeded config.
+grep -q 'bridge.conf.example' "$root/bridge.sh" || fail "bridge.sh should seed from the example"
+rm -rf "$bridge_dir"
+bridge_dir=
+printf 'ok: bridge.sh config gate and redacted --check\n'
 
 printf 'ok\n'
