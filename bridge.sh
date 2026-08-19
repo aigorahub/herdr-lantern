@@ -94,7 +94,12 @@ fi
     die "could not find the plugin config dir; run this through Herdr, or install the plugin"
 mkdir -p "$config_dir" || die "could not create $config_dir"
 
-helper_prepend_path "$plugin_root/bin"
+# Same control launch.sh uses, and for the same reason: prepend leaves a
+# directory that is already on PATH in its inherited position, and
+# helper_extend_user_path has already put Homebrew in front of that. The
+# headless helper the daemon starts inherits this PATH, so a bare `herdr`
+# from an allowlisted sender would skip the mutate gate.
+helper_force_front_path "$plugin_root/bin"
 
 if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "$HERDR_BIN_PATH" ]; then
     case $HERDR_BIN_PATH in

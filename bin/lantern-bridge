@@ -467,9 +467,10 @@ Runtime (injected by the Lantern Bridge; do not ignore):
   Inspect commands (list/read/get) run as usual. Mutating commands (create,
   start, focus, close, remove, prompt, send-*) are blocked until the user
   confirms the exact path or target. Ask for that confirmation as a chat
-  message, wait for their answer, then rerun:
-    HERDR_HELPER_OK=1 herdr <same command>
-  There is no approval UI here. The chat is the only place to ask.
+  message, wait for their answer, then rerun that same command with
+  HERDR_HELPER_OK=1 in front of it. Never write that prefix into a command
+  they have not confirmed. There is no approval UI here. The chat is the
+  only place to ask.
 - Never call /opt/homebrew/bin/herdr or another absolute herdr path.
 - Default --kind for agent start is %s unless the user names one.
 - Search from %s plus the usual project roots. You are the lantern, not an
@@ -521,6 +522,21 @@ def mark_session(workdir: Path) -> None:
     marker.write_text("", encoding="utf-8")
 
 
+def helper_env(source=None) -> dict:
+    """Environment the headless helper is allowed to see.
+
+    The README tells people to export tokens instead of writing them into
+    bridge.conf. Those names then sit in the daemon's environment, and a
+    subprocess.run with no env= hands them to a helper that has Bash. The
+    daemon still needs the tokens to talk to the APIs; the child does not.
+    File-sourced secrets remain readable to the same account.
+    """
+    env = dict(os.environ if source is None else source)
+    for key in SECRET_KEYS:
+        env.pop(key, None)
+    return env
+
+
 def run_helper(cfg: dict, helper: str, workdir: Path, text: str, timeout=HELPER_TIMEOUT):
     """Run one headless turn. Returns the reply text for the channel.
 
@@ -537,6 +553,7 @@ def run_helper(cfg: dict, helper: str, workdir: Path, text: str, timeout=HELPER_
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
+            env=helper_env(),
         )
     except subprocess.TimeoutExpired:
         log("helper timed out after %ds" % timeout)

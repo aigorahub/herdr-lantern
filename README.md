@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.5.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.5.1** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -275,10 +275,12 @@ limit.
 ### What a sender gets
 
 **An allowlisted sender gets a shell on this machine.** The headless helper
-runs as the user who started the bridge, with
-`--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox. `Bash` is an
-ordinary shell: it can read, write, and delete anything that account can, and
-reach the network. The `bin/herdr` wrapper gates mutating **`herdr`
+runs as the user who started the bridge. Claude is started with
+`--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox flag. Codex is
+started as `codex exec` with no extra permission flags, so it uses that
+CLI's own defaults. `Bash` (when the helper has it) is an ordinary shell:
+it can read, write, and delete anything that account can, and reach the
+network. The `bin/herdr` wrapper gates mutating **`herdr`
 subcommands** — create, start, focus, close, prompt, `send-*` — and nothing
 else. It is not a sandbox, and it does not stand between a message and the
 rest of your files.
