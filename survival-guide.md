@@ -86,11 +86,11 @@ scope.
 
 ## Stop Gate
 
-- **Planned batches remaining:** 9 (Batches 2-10)
+- **Planned batches remaining:** 8 (Batches 2-9)
 - **Stop allowed right now:** no
-- **Why:** only Batch 1 is closed.
-- **Next required action:** Start Batch 10. Write `.gitattributes`,
-  renormalize, and rewrite the working tree to LF before any shell edit.
+- **Why:** Batches 1 and 10 are closed; eight remain.
+- **Next required action:** Start Batch 2. Add `bin/herdr.cmd` so the mutation
+  gate holds for native Windows callers.
 
 ---
 
@@ -130,13 +130,13 @@ scope.
 
 **Status:** In progress
 
-**Active batch:** Batch 10: Line endings
+**Active batch:** Batch 2: Mutation gate on Windows
 
-**What was just finished:** Batch 1. The manifest declares windows, the GitHub
-install was replaced with a link to this checkout, and
-`herdr plugin action list` reports the three platforms.
+**What was just finished:** Batch 10. `.gitattributes` pins the interpreted
+files to LF, the working tree carries no CR bytes, and the change is endings
+only.
 
-**Single next action:** Start Batch 10.
+**Single next action:** Start Batch 2.
 
 ---
 
@@ -148,29 +148,29 @@ No active paid or long-running compute.
 
 ## Next Exact Batch
 
-**Batch:** B10: Line endings
+**Batch:** B2: Mutation gate on Windows
 
 **Scope:**
-- Write `.gitattributes` pinning the shell files, `hsh`, and `bin/herdr` to
-  `eol=lf`, and `*.cmd` to `eol=crlf`.
-- `git add --renormalize .`, commit, then `git checkout-index -f -a` to rewrite
-  the working tree. Do not use `git checkout .` or `git reset --hard`.
-- Verify no CR bytes remain in the shell files, then rerun the gate.
+- Add `bin/herdr.cmd`, forwarding argv to the POSIX wrapper through `sh.exe`
+  and exiting with the wrapper's exit code.
+- Resolve `sh.exe` from PATH first, then `C:\Program Files\Git\bin\sh.exe`.
+  When neither exists, fail loudly. Never fall through to the real herdr.
+- Add smoke coverage for the blocked path, the inspect path, and the
+  Git Bash resolution order. Skip the Windows-only cases elsewhere.
 
 **Acceptance criteria:**
-- [ ] B10-A1: `.gitattributes` pins the shell files, `hsh`, and `bin/herdr` to `eol=lf`, and `bin/herdr.cmd` to `eol=crlf`.
-- [ ] B10-A2: After renormalizing, the working tree copies of `launch.sh`, `open.sh`, `lib.sh`, `bin/herdr`, `hsh`, and `tests/smoke.sh` hold no CR bytes on this Windows checkout.
-- [ ] B10-A3: `tests/smoke.sh` passes under Git Bash after the renormalization.
-- [ ] B10-A4: The renormalization changes line endings only, with no content change in those files.
+- [ ] B2-A1: `bin/herdr.cmd` forwards its arguments to the POSIX wrapper through `sh.exe` and exits with the wrapper's exit code.
+- [ ] B2-A2: A mutating command through `bin/herdr.cmd` without `HERDR_HELPER_OK` exits non-zero and prints the `HERDR_HELPER_OK` hint.
+- [ ] B2-A3: An inspect command through `bin/herdr.cmd` reaches the real herdr.
+- [ ] B2-A4: With both files present, Git Bash `command -v herdr` still selects the extensionless wrapper.
+- [ ] B2-A5: `bin/herdr.cmd` never falls through to the real herdr when `sh.exe` is missing.
 
-**Risk:** A renormalization that also changes content would be invisible in a
-plain diff. Prove content equality separately from the ending change.
+**Risk:** Highest in the run. The gate is a security control and the Windows
+failure mode is silent. A `.cmd` that mangles arguments or swallows the exit
+code looks like success. Test the block, the pass, and the missing-shell path
+separately.
 
-**Note on B10-A3:** the gate still carries the known `tests/smoke.sh:245`
-Windows failure until Batch 7. B10-A3 means no new failure, and the same single
-known failure.
-
-**Rollback authority:** host-created `b10` rollback ref before the batch.
+**Rollback authority:** host-created `b2` rollback ref before the batch.
 
 ---
 

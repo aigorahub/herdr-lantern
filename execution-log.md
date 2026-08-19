@@ -132,3 +132,70 @@ Batch 9 anyway, no lantern pane was running, and leaving a criterion open
 across eight batches would have made the batch unclosable.
 
 **Next required action:** Batch 10, before the shell edits.
+
+---
+
+## 2026-08-19 — Batch 10: Line endings
+
+**Rollback ref**
+
+`refs/elves/rollback/lantern-windows-2026-08-/lantern-windows-/b10-7c45939ccf49`
+at `b9eced7`, pushed.
+
+**Measurement that started this batch**
+
+`core.autocrlf=true` on this machine, and every interpreted file in the working
+tree carried a CR before every LF:
+
+| File | CR before | CR after |
+| --- | --- | --- |
+| launch.sh | 208 | 0 |
+| open.sh | 167 | 0 |
+| lib.sh | 286 | 0 |
+| bin/herdr | 33 | 0 |
+| hsh | 9 | 0 |
+| tests/smoke.sh | 387 | 0 |
+| bin/goals-floor | 262 | 0 |
+| bin/elves-floor | 262 | 0 |
+
+**Change**
+
+New `.gitattributes`. `* text=auto eol=lf`, with the interpreted files named
+again so the intent survives a later edit, `*.cmd` and `*.bat` at `eol=crlf`
+for cmd.exe, and the image assets marked binary.
+
+**The renormalization was endings only**
+
+`git add --renormalize .` staged nothing but `.gitattributes`. The committed
+blobs were already LF, because `core.autocrlf=true` converts on the way into
+the index. Only the working-tree copies were CRLF.
+
+**Rewriting the working tree**
+
+`git checkout-index -f -a` did not rewrite the files. `git ls-files --eol`
+then read `i/lf w/crlf attr/text eol=lf`: Git had the right attributes, knew
+the working tree disagreed, and skipped the write because the stat information
+matched. `git checkout .` and `git reset --hard` are forbidden by the run's
+non-negotiables, so the files were rewritten byte by byte instead, dropping
+each CR that preceded an LF. 18 tracked text files changed.
+
+Afterwards `git ls-files --eol` reads `i/lf w/lf attr/text eol=lf`,
+`git diff --stat` is empty, and `git status --short` is clean.
+
+**Acceptance**
+
+| Id | Evidence |
+| --- | --- |
+| B10-A1 | `.gitattributes` written; `git check-attr -a launch.sh` returns `text: set`, `eol: lf`. |
+| B10-A2 | Byte scan reports CR=0 for all eight interpreted files. |
+| B10-A3 | Gate reports the same single known `tests/smoke.sh:245` failure. No new failure. |
+| B10-A4 | Renormalize staged only `.gitattributes`; `git diff --stat` empty and tree clean after the rewrite. |
+
+**Decisions made**
+
+Rewrote the working-tree bytes rather than using the documented
+`git rm --cached -r . && git reset --hard` renormalization recipe. That recipe
+is forbidden by this run's non-negotiables, and the byte rewrite is narrower:
+it touches only tracked text files and cannot discard uncommitted work.
+
+**Next required action:** Batch 2, the mutation gate.
