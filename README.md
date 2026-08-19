@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.2.1** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.3.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -119,7 +119,7 @@ script or config edits; reopen the lantern.
 
 ## Where it sits
 
-The first open creates a workspace labelled **🪔 lantern** at your home
+The first open creates a workspace labelled **💡 lantern** at your home
 directory and seats the chat there as a tab named **field**. It does not
 drop a tab into whatever workspace you are in, and it closes the empty
 shell tab the new workspace comes with, so the workspace holds the chat
@@ -134,7 +134,7 @@ presses cannot race into two.
 Lantern remembers both ids under the plugin state directory
 (`workspace.id`, `pane.id`) and checks them before it uses them: Herdr
 reuses ids after a restart, so a remembered workspace counts only while it
-still carries the `🪔 lantern` label, and a remembered pane only while it
+still carries the `💡 lantern` label, and a remembered pane only while it
 is still a lantern chat. Keep that label if you want the workspace reused
 after the chat closes. Rename it and the next open makes a fresh one.
 
