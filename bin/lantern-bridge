@@ -921,13 +921,28 @@ def daemon_lock_path(state_dir) -> Path:
     return Path(state_dir) / "bridge" / "daemon.lock"
 
 
+# Where the Windows lock byte sits. A Windows byte-range lock is mandatory,
+# not advisory the way flock is: whatever it covers stops answering reads from
+# every other handle, this process included. Locking byte 0 would therefore
+# take the pid down with it, and the pid is written to be read. Lock a byte
+# far past anything the file will ever hold instead. LockFile is happy beyond
+# the end of a file and does not extend it.
+LOCK_BYTE_OFFSET = 1 << 30
+
+
 def _take_lock(fd):
-    """True taken, False held by another process, None no locking here."""
+    """True taken, False held by another process, None no locking here.
+
+    Leaves the file position at 0 on success, because the caller writes the
+    pid next.
+    """
     try:
         import fcntl
     except ImportError:
         fcntl = None
     if fcntl is not None:
+        # flock covers the whole file and is advisory, so a reader is
+        # unaffected and the position never moves.
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
@@ -937,10 +952,16 @@ def _take_lock(fd):
         import msvcrt
     except ImportError:
         return None
+    # msvcrt.locking works from the current position, so seek out to the
+    # sentinel byte, and back to the start whatever the answer was.
     try:
-        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-    except OSError:
-        return False
+        os.lseek(fd, LOCK_BYTE_OFFSET, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+    finally:
+        os.lseek(fd, 0, os.SEEK_SET)
     return True
 
 
