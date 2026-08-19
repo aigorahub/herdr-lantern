@@ -1,0 +1,55 @@
+# Lantern Bridge configuration. bin/lantern-bridge parses KEY=value lines only;
+# it does not source this file as shell. Unknown keys and values holding
+# $ ` ; | & < > ( ) { } are refused.
+#
+# Every key falls back to an environment variable of the same name when the
+# line here is empty, so secrets can stay out of this file entirely.
+#
+# A channel turns on when its credential is set, and refuses to start until its
+# allowlist names who may talk to it.
+
+# Headless helper CLI. claude or codex only -- they are the two with a real
+# one-shot mode that also resumes. Empty: the first of them on PATH.
+BRIDGE_HELPER=""
+
+# Optional --model.
+BRIDGE_MODEL=""
+
+# Optional reasoning effort:
+#   claude -> --effort <value>
+#   codex  -> --config model_reasoning_effort="<value>"
+BRIDGE_EFFORT=""
+
+# Search root mentioned to the helper. Each conversation runs in its own
+# workdir under the plugin state directory.
+BRIDGE_CWD="~"
+
+# Default --kind for `herdr agent start` when the user does not name one.
+BRIDGE_SPAWN_KIND="claude"
+
+# Extra helper CLI tokens. Unquoted words only.
+BRIDGE_EXTRA_ARGS=""
+
+# --- Telegram -----------------------------------------------------------
+# Token from @BotFather. Talk to your bot, then read the chat id out of
+# https://api.telegram.org/bot<TOKEN>/getUpdates
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_ALLOWED_CHATS=""
+
+# --- Slack --------------------------------------------------------------
+# Bot token (xoxb-) with channels:history and chat:write. Invite the bot to
+# the channel; SLACK_CHANNEL is that channel's id (C...).
+SLACK_BOT_TOKEN=""
+SLACK_CHANNEL=""
+SLACK_ALLOWED_USERS=""
+
+# --- WhatsApp (Meta Cloud API) ------------------------------------------
+# The webhook binds localhost. Meta needs a public HTTPS URL, so put a tunnel
+# in front of it (see the README).
+WHATSAPP_ACCESS_TOKEN=""
+WHATSAPP_PHONE_NUMBER_ID=""
+WHATSAPP_VERIFY_TOKEN=""
+WHATSAPP_APP_SECRET=""
+WHATSAPP_ALLOWED_NUMBERS=""
+WHATSAPP_WEBHOOK_HOST="127.0.0.1"
+WHATSAPP_WEBHOOK_PORT="8787"

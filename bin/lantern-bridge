@@ -1,0 +1,521 @@
+#!/usr/bin/env python3
+"""Lantern Bridge: use the lantern from Telegram, WhatsApp, or Slack.
+
+Nothing here scrapes the lantern pane. Each conversation gets its own workdir
+under the plugin state directory, seeded with the lantern prompt plus a remote
+appendix, and the helper CLI runs headless in that workdir. Only `claude` and
+`codex` are supported: they are the two with a real one-shot mode that also
+resumes.
+
+bridge.sh puts the plugin's `bin` first on PATH and exports HERDR_BIN_PATH, so
+the headless helper hits the same inspect-by-default herdr wrapper the pane
+does. A confirmation for a mutating command is therefore a chat message.
+
+Standard library only, same rule as bin/goals-floor and bin/elves-floor.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# Order is the detection order when BRIDGE_HELPER is empty.
+SUPPORTED_HELPERS = ("claude", "codex")
+
+CONF_KEYS = (
+    "BRIDGE_HELPER",
+    "BRIDGE_MODEL",
+    "BRIDGE_EFFORT",
+    "BRIDGE_CWD",
+    "BRIDGE_SPAWN_KIND",
+    "BRIDGE_EXTRA_ARGS",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_ALLOWED_CHATS",
+    "SLACK_BOT_TOKEN",
+    "SLACK_CHANNEL",
+    "SLACK_ALLOWED_USERS",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_VERIFY_TOKEN",
+    "WHATSAPP_APP_SECRET",
+    "WHATSAPP_ALLOWED_NUMBERS",
+    "WHATSAPP_WEBHOOK_HOST",
+    "WHATSAPP_WEBHOOK_PORT",
+)
+
+# Values that must never reach a log line, a chat message, or --check output.
+SECRET_KEYS = frozenset(
+    {
+        "TELEGRAM_BOT_TOKEN",
+        "SLACK_BOT_TOKEN",
+        "WHATSAPP_ACCESS_TOKEN",
+        "WHATSAPP_VERIFY_TOKEN",
+        "WHATSAPP_APP_SECRET",
+    }
+)
+
+DEFAULTS = {
+    "BRIDGE_CWD": "~",
+    "BRIDGE_SPAWN_KIND": "claude",
+    "WHATSAPP_WEBHOOK_HOST": "127.0.0.1",
+    "WHATSAPP_WEBHOOK_PORT": "8787",
+}
+
+# The same reject set lib.sh applies to helper.conf. The parser never sources
+# the file, so this is belt and braces, but a value that looks like shell has
+# no business reaching a subprocess argument list either.
+UNSAFE_CHARS = "$`;|&<>(){}"
+
+# Per-channel outbound limits, from each provider's documented maximum.
+TELEGRAM_LIMIT = 4096
+SLACK_LIMIT = 4000
+WHATSAPP_LIMIT = 4096
+
+# A headless turn can legitimately run for minutes; it is still bounded.
+HELPER_TIMEOUT = 900
+
+CLAUDE_TOOLS = "Bash,Read,Glob,Grep,LS"
+
+# Anything outside this set is replaced in a chat id before it becomes a
+# directory name, so a hostile id cannot walk out of the state directory.
+UNSAFE_ID = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+class ConfigError(Exception):
+    """A config file or environment value the bridge refuses to use."""
+
+
+def log(message: str) -> None:
+    """One line to stderr. Callers pass counts and ids, never bodies."""
+    sys.stderr.write("%s lantern-bridge: %s\n" % (time.strftime("%H:%M:%S"), message))
+    sys.stderr.flush()
+
+
+def unquote(raw: str) -> str:
+    """Strip one layer of matching quotes, then reject shell metacharacters."""
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    for char in value:
+        if char in UNSAFE_CHARS:
+            raise ConfigError("unsafe character %r in value" % char)
+    return value
+
+
+def parse_conf(text: str) -> dict:
+    """Read KEY=value lines. Unknown keys and unsafe values fail."""
+    values: dict = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            raise ConfigError("line %d: not KEY=value: %s" % (lineno, stripped))
+        key, _, raw = stripped.partition("=")
+        key = key.strip()
+        if key not in CONF_KEYS:
+            raise ConfigError("line %d: unknown config key: %s" % (lineno, key))
+        try:
+            values[key] = unquote(raw)
+        except ConfigError as exc:
+            raise ConfigError("line %d: %s for %s" % (lineno, exc, key)) from None
+    return values
+
+
+def load_config(conf_path: Path | None, env: dict | None = None) -> dict:
+    """Config file first, environment second, documented default last.
+
+    An empty conf line is not a decision to leave the key empty; it falls
+    through to the environment the same way an absent line does. That is what
+    lets a Herdr pane inherit secrets from the user's shell without ever
+    writing them to a file.
+    """
+    env = os.environ if env is None else env
+    cfg = {key: "" for key in CONF_KEYS}
+    if conf_path is not None and Path(conf_path).is_file():
+        cfg.update(parse_conf(Path(conf_path).read_text(encoding="utf-8")))
+    for key in CONF_KEYS:
+        if not cfg[key]:
+            cfg[key] = str(env.get(key, "")).strip()
+        if not cfg[key]:
+            cfg[key] = DEFAULTS.get(key, "")
+    return cfg
+
+
+def split_list(value: str) -> list:
+    """Comma-separated allowlist to a list, blanks dropped."""
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def redact(key: str, value: str) -> str:
+    """What a secret is allowed to look like anywhere outside the process."""
+    if not value:
+        return "(unset)"
+    if key in SECRET_KEYS:
+        return "(set, %d bytes)" % len(value)
+    return value
+
+
+def enabled_channels(cfg: dict) -> list:
+    """A channel is enabled by its credential, never by a flag."""
+    channels = []
+    if cfg["TELEGRAM_BOT_TOKEN"]:
+        channels.append("telegram")
+    if cfg["SLACK_BOT_TOKEN"]:
+        channels.append("slack")
+    if cfg["WHATSAPP_ACCESS_TOKEN"]:
+        channels.append("whatsapp")
+    return channels
+
+
+def validate(cfg: dict, conf_path: Path | None, example_path: Path | None) -> list:
+    """Every reason this config cannot start, so the user fixes them at once."""
+    problems = []
+    channels = enabled_channels(cfg)
+    if not channels:
+        problems.append(
+            "no channels configured: set TELEGRAM_BOT_TOKEN, SLACK_BOT_TOKEN, or "
+            "WHATSAPP_ACCESS_TOKEN in %s (copy the keys from %s)"
+            % (conf_path or "bridge.conf", example_path or "bridge.conf.example")
+        )
+    helper = cfg["BRIDGE_HELPER"]
+    if helper and helper not in SUPPORTED_HELPERS:
+        problems.append(
+            "unsupported BRIDGE_HELPER %r: the bridge runs headless, so only "
+            "claude and codex work here" % helper
+        )
+    kind = cfg["BRIDGE_SPAWN_KIND"]
+    if not re.fullmatch(r"[a-z][a-z0-9_-]*", kind or ""):
+        problems.append(
+            "BRIDGE_SPAWN_KIND must match [a-z][a-z0-9_-]* (got %r)" % kind
+        )
+
+    # A channel with credentials and no allowlist would answer anyone who
+    # found the bot. That is a refusal, not a warning.
+    if "telegram" in channels and not split_list(cfg["TELEGRAM_ALLOWED_CHATS"]):
+        problems.append("TELEGRAM_ALLOWED_CHATS is empty; list the chat ids to answer")
+    if "slack" in channels:
+        if not cfg["SLACK_CHANNEL"]:
+            problems.append("SLACK_CHANNEL is empty; set the channel id to watch")
+        if not split_list(cfg["SLACK_ALLOWED_USERS"]):
+            problems.append("SLACK_ALLOWED_USERS is empty; list the member ids to answer")
+    if "whatsapp" in channels:
+        if not cfg["WHATSAPP_PHONE_NUMBER_ID"]:
+            problems.append("WHATSAPP_PHONE_NUMBER_ID is empty")
+        if not cfg["WHATSAPP_VERIFY_TOKEN"]:
+            problems.append("WHATSAPP_VERIFY_TOKEN is empty; the webhook GET needs it")
+        if not cfg["WHATSAPP_APP_SECRET"]:
+            problems.append(
+                "WHATSAPP_APP_SECRET is empty; the X-Hub-Signature-256 check is "
+                "mandatory and cannot run without it"
+            )
+        if not split_list(cfg["WHATSAPP_ALLOWED_NUMBERS"]):
+            problems.append(
+                "WHATSAPP_ALLOWED_NUMBERS is empty; list the sender numbers to answer"
+            )
+        if not str(cfg["WHATSAPP_WEBHOOK_PORT"]).isdigit():
+            problems.append(
+                "WHATSAPP_WEBHOOK_PORT must be a number (got %r)"
+                % cfg["WHATSAPP_WEBHOOK_PORT"]
+            )
+    return problems
+
+
+def resolve_helper(cfg: dict, which=None) -> str:
+    """The helper this config will run, or a ConfigError explaining why not."""
+    which = shutil.which if which is None else which
+    helper = cfg["BRIDGE_HELPER"]
+    if helper:
+        if helper not in SUPPORTED_HELPERS:
+            raise ConfigError(
+                "unsupported BRIDGE_HELPER %r (use claude or codex)" % helper
+            )
+        return helper
+    for candidate in SUPPORTED_HELPERS:
+        if which(candidate):
+            return candidate
+    raise ConfigError(
+        "no bridge helper on PATH: install claude or codex, or set BRIDGE_HELPER"
+    )
+
+
+def build_argv(cfg: dict, text: str, resume: bool, helper: str | None = None) -> list:
+    """One place per helper, because headless flags drift between releases.
+
+    BRIDGE_EXTRA_ARGS is the escape hatch when they do. It is split on
+    whitespace only; the conf parser already refused anything shell-shaped.
+    """
+    helper = helper or cfg["BRIDGE_HELPER"]
+    model = cfg["BRIDGE_MODEL"]
+    effort = cfg["BRIDGE_EFFORT"]
+    if helper == "claude":
+        argv = [
+            "claude",
+            "-p",
+            text,
+            "--output-format",
+            "text",
+            "--allowed-tools",
+            CLAUDE_TOOLS,
+        ]
+        if resume:
+            argv.append("--continue")
+        if model:
+            argv += ["--model", model]
+        if effort:
+            argv += ["--effort", effort]
+    elif helper == "codex":
+        if resume:
+            argv = ["codex", "exec", "resume", "--last", text, "--skip-git-repo-check"]
+        else:
+            argv = ["codex", "exec", text, "--skip-git-repo-check"]
+        if model:
+            argv += ["--model", model]
+        if effort:
+            argv += ["--config", 'model_reasoning_effort="%s"' % effort]
+    else:
+        raise ConfigError("unsupported bridge helper %r" % helper)
+    argv += cfg["BRIDGE_EXTRA_ARGS"].split()
+    return argv
+
+
+def split_message(text: str, limit: int) -> list:
+    """Chunks no longer than limit, cut on a line break where one is near.
+
+    A chat app truncates or rejects an over-long message rather than wrapping
+    it, so this has to happen before the send, not after.
+    """
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    if not text:
+        return [""]
+    chunks = []
+    rest = text
+    while len(rest) > limit:
+        window = rest[:limit]
+        cut = window.rfind("\n")
+        if cut <= 0:
+            cut = window.rfind(" ")
+        if cut <= 0:
+            cut = limit
+            chunks.append(rest[:cut])
+            rest = rest[cut:]
+            continue
+        chunks.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip("\n ")
+    if rest:
+        chunks.append(rest)
+    return chunks or [""]
+
+
+def conversation_dir(state_dir, channel: str, chat_id) -> Path:
+    """State path for one conversation. Chat ids come from the network."""
+    slug = UNSAFE_ID.sub("_", str(chat_id))[:64] or "unknown"
+    return Path(state_dir) / "bridge" / channel / slug
+
+
+def workdir_for(state_dir, channel: str, chat_id) -> Path:
+    return conversation_dir(state_dir, channel, chat_id) / "workdir"
+
+
+def remote_appendix(cfg: dict, channel: str, search_root: str) -> str:
+    """What the lantern prompt does not know: there is no pane and no terminal."""
+    return """
+
+Runtime (injected by the Lantern Bridge; do not ignore):
+
+- You are answering over a chat app (%s), not in a terminal pane. The person
+  is probably on a phone. Keep replies short and plain: no tables, no
+  headings, no code fences unless a command is the answer.
+- Prefer $HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.
+  Inspect commands (list/read/get) run as usual. Mutating commands (create,
+  start, focus, close, remove, prompt, send-*) are blocked until the user
+  confirms the exact path or target. Ask for that confirmation as a chat
+  message, wait for their answer, then rerun:
+    HERDR_HELPER_OK=1 herdr <same command>
+  There is no approval UI here. The chat is the only place to ask.
+- Never call /opt/homebrew/bin/herdr or another absolute herdr path.
+- Default --kind for agent start is %s unless the user names one.
+- Search from %s plus the usual project roots. You are the lantern, not an
+  elf; do not edit files in this workdir.
+- The floor.txt, goals-floor.txt, and elves-floor.txt snapshots the lantern
+  pane writes do not exist here. Run `herdr agent list` yourself, or
+  `python3 $HERDR_PLUGIN_ROOT/bin/goals-floor`, when you need the field.
+- One message in, one message out. At most one question per reply.
+- There is no lantern pane in this conversation. Never close a workspace, a
+  tab, or a pane unless the user names it.
+""" % (
+        channel,
+        cfg["BRIDGE_SPAWN_KIND"],
+        search_root,
+    )
+
+
+def seed_workdir(workdir: Path, prompt_text: str, appendix: str) -> bool:
+    """Write the helper's instruction files once, and only once.
+
+    Once is the point: the helper edits nothing here, but a rewrite on every
+    turn would churn the mtimes a resumed session watches, and it would undo a
+    user who tuned the file by hand.
+    """
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    full = prompt_text.rstrip("\n") + appendix
+    seeded = False
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        target = workdir / name
+        if not target.exists():
+            target.write_text(full, encoding="utf-8")
+            seeded = True
+    return seeded
+
+
+def has_session(workdir: Path) -> bool:
+    """True once a turn has completed here, so the next one resumes.
+
+    The marker sits beside the workdir rather than inside it: the helper reads
+    its own cwd, and a stray file there is one more thing to explain.
+    """
+    return (Path(workdir).parent / "session.marker").exists()
+
+
+def mark_session(workdir: Path) -> None:
+    marker = Path(workdir).parent / "session.marker"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+
+
+def run_helper(cfg: dict, helper: str, workdir: Path, text: str, timeout=HELPER_TIMEOUT):
+    """Run one headless turn. Returns the reply text for the channel.
+
+    Helper stderr never reaches the chat. It can carry file paths, argv, and
+    whatever the CLI decided to print about its own credentials.
+    """
+    resume = has_session(workdir)
+    argv = build_argv(cfg, text, resume, helper=helper)
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=str(workdir),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        log("helper timed out after %ds" % timeout)
+        return "The lantern took too long to answer. Try a smaller question."
+    except OSError as exc:
+        log("helper could not start: %s" % exc.__class__.__name__)
+        return "The lantern helper could not start. Check the bridge pane."
+    out = proc.stdout.decode("utf-8", "replace").strip()
+    if proc.returncode != 0:
+        log(
+            "helper exited %d (stdout %d bytes, stderr %d bytes)"
+            % (proc.returncode, len(proc.stdout), len(proc.stderr))
+        )
+        if not out:
+            return "The lantern helper failed (exit %d). Check the bridge pane." % (
+                proc.returncode,
+            )
+    mark_session(workdir)
+    return out or "(the lantern had nothing to say)"
+
+
+def expand_root(value: str) -> str:
+    """~ the way lib.sh expands it, so both entrypoints agree."""
+    value = (value or "~").strip()
+    if value == "~":
+        return str(Path.home())
+    if value.startswith("~/"):
+        return str(Path.home() / value[2:])
+    return value.rstrip("/") or "/"
+
+
+def check(cfg: dict, args, conf_path, example_path) -> int:
+    """Validate the config and show the argv, without touching the network."""
+    problems = validate(cfg, conf_path, example_path)
+    for problem in problems:
+        sys.stderr.write("lantern-bridge: %s\n" % problem)
+    print("config: %s" % (conf_path or "(none)"))
+    for key in CONF_KEYS:
+        print("  %-26s %s" % (key, redact(key, cfg[key])))
+    print("channels: %s" % (", ".join(enabled_channels(cfg)) or "(none)"))
+    try:
+        helper = resolve_helper(cfg)
+    except ConfigError as exc:
+        sys.stderr.write("lantern-bridge: %s\n" % exc)
+        return 2
+    print("helper: %s%s" % (helper, "" if shutil.which(helper) else " (not on PATH)"))
+    search_root = expand_root(cfg["BRIDGE_CWD"])
+    print("search root: %s" % search_root)
+    print("workdir: %s" % workdir_for(args.state, "telegram", "<chat-id>"))
+    print("first turn:  %s" % " ".join(build_argv(cfg, "hello", False, helper)))
+    print("later turn:  %s" % " ".join(build_argv(cfg, "hello", True, helper)))
+    return 2 if problems else 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="lantern-bridge",
+        description="Relay Telegram, WhatsApp, and Slack messages to the lantern helper.",
+    )
+    parser.add_argument("--conf", default="", help="path to bridge.conf")
+    parser.add_argument("--example", default="", help="path to bridge.conf.example")
+    parser.add_argument("--prompt", default="", help="path to the lantern prompt")
+    parser.add_argument("--state", default=".", help="plugin state directory")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate the config and print a redacted summary, then exit",
+    )
+    return parser
+
+
+def die(message: str) -> None:
+    sys.stderr.write("\nlantern-bridge: %s\n" % message)
+    if sys.stdin.isatty():
+        sys.stderr.write("Fix the config, then reopen the bridge. Press Enter.\n")
+        try:
+            sys.stdin.readline()
+        except (KeyboardInterrupt, OSError):
+            pass
+    raise SystemExit(2)
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    conf_path = Path(args.conf) if args.conf else None
+    example_path = Path(args.example) if args.example else None
+    try:
+        cfg = load_config(conf_path)
+    except (ConfigError, OSError) as exc:
+        die("could not read %s: %s" % (conf_path, exc))
+        return 2
+
+    if args.check:
+        return check(cfg, args, conf_path, example_path)
+
+    problems = validate(cfg, conf_path, example_path)
+    if problems:
+        die("\n  ".join(["cannot start:"] + problems))
+    try:
+        helper = resolve_helper(cfg)
+    except ConfigError as exc:
+        die(str(exc))
+        return 2
+    if not shutil.which(helper):
+        die("bridge helper not found on PATH: %s" % helper)
+
+    log("helper %s, channels %s" % (helper, ", ".join(enabled_channels(cfg))))
+    die("no channel adapter is wired into this build yet")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
