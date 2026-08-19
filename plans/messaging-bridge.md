@@ -370,6 +370,13 @@ nothing saying that text is not addressed to it.
 - [x] B9-A18: A `.elves-session.json` holding a byte that is not UTF-8 is
   skipped, and a readable session elsewhere under the same root is still
   reported.
+- [x] B9-A19: The `elves-floor --root` case fails against the old append on
+  any machine, `~/aigora` or not: the bait sits under the run's own `HOME`.
+- [x] B9-A20: The bridge config case asserts against the refusal line, not
+  `check()`'s unconditional `config:` header.
+- [x] B9-A21: The version case covers every file that prints the version —
+  `README.md`, `CHANGELOG.md`, `howto.html`, `docs/index.html` — and refuses
+  an older version string left next to the current one.
 
 ## Master Acceptance
 

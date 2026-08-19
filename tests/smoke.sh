@@ -187,12 +187,23 @@ grep -q '^command = \["sh", "bridge.sh"\]$' "$root/herdr-plugin.toml" ||
 grep -q '^command = \["sh", "bridge.sh", "--open"\]$' "$root/herdr-plugin.toml" ||
     fail "the bridge action should open the bridge pane"
 
-# One version, three files. A manifest bump nobody echoed is how a marketplace
-# listing and a README start disagreeing.
+# One version, every file that prints it. A manifest bump nobody echoed is how
+# a marketplace listing and a README start disagreeing — and howto.html and
+# docs/index.html are the two that actually drifted, three releases behind,
+# while this case checked the two that had not.
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/herdr-plugin.toml")
 [ -n "$version" ] || fail "no version in herdr-plugin.toml"
 grep -qF "**v$version**" "$root/README.md" || fail "README does not say v$version"
 grep -qF "## [$version]" "$root/CHANGELOG.md" || fail "CHANGELOG has no $version entry"
+for version_page in howto.html docs/index.html; do
+    grep -qF "v$version" "$root/$version_page" ||
+        fail "$version_page does not say v$version"
+    # And nothing older left behind next to it.
+    if grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' "$root/$version_page" |
+        grep -qvF "v$version"; then
+        fail "$version_page still carries a version that is not v$version"
+    fi
+done
 
 # Every key the example file offers has to be documented, or people fill in a
 # key the README never explains.
@@ -734,11 +745,28 @@ $smoke_python "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floo
 # An explicit --root has to be the whole search. The scan used to append
 # ~/aigora on top of whatever the caller asked for, so a scoped run reported
 # sessions from outside its root and walked the user's tree every time.
+#
+# The bait sits under this run's own HOME, because ~/aigora is precisely what
+# the old append reached for. An empty root alone proves nothing: on a machine
+# with no ~/aigora — every CI runner — the old scan also answered
+# elves_detected 0, and the regression this case exists for went unguarded in
+# the one place it would show up first. USERPROFILE is set as well; that is
+# what Path.home() reads on Windows.
 elves_tmp=$(mktemp -d)
+mkdir -p "$elves_tmp/home/aigora/outside" "$elves_tmp/scan"
+printf '%s' '{"status":"executing","batches":[{"id":"B1","status":"open"}]}' \
+    >"$elves_tmp/home/aigora/outside/.elves-session.json"
 # shellcheck disable=SC2086
-$smoke_python "$root/bin/elves-floor" --root "$elves_tmp" |
-    grep -q 'elves_detected 0' ||
+HOME="$elves_tmp/home" USERPROFILE="$elves_tmp/home" \
+    $smoke_python "$root/bin/elves-floor" --root "$elves_tmp/scan" >"$tmp" 2>&1 ||
+    fail "elves-floor --root should still run"
+if grep -q 'outside' "$tmp"; then
+    cat "$tmp" >&2
+    fail "elves-floor --root reported a session from outside its root"
+fi
+grep -q 'elves_detected 0' "$tmp" ||
     fail "elves-floor --root should scan only the roots it was given"
+rm -rf "$elves_tmp/home"
 
 # One session file with one byte that is not UTF-8 used to end the whole
 # scan: load_session caught OSError and JSONDecodeError, and read_text raises
@@ -1035,8 +1063,13 @@ bridge_out=$(run_bridge --check) && bridge_fail "bridge with no channels should 
 # back with backslashes; and cygpath answers with the 8.3 short form of a
 # temporary directory (C:\Users\RUNNER~1\...) where Python has the long one
 # (C:\Users\runneradmin\...). Two spellings of one path, neither wrong.
-printf '%s\n' "$bridge_out" | grep -qE 'config[/\\]bridge\.conf' ||
-    bridge_fail "bridge should name the config file it wants filled in"
+#
+# Match the refusal line itself. `check()` prints an unconditional
+# "config: <path>" header, so a bare path match passed whether or not the
+# refusal ever named a file to fill in.
+printf '%s\n' "$bridge_out" |
+    grep -qE 'no channels configured:.*config[/\\]bridge\.conf' ||
+    bridge_fail "the refusal should name the config file it wants filled in"
 printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
     bridge_fail "bridge should name the example file"
 [ -f "$bridge_dir/config/bridge.conf" ] || bridge_fail "bridge should seed bridge.conf"
