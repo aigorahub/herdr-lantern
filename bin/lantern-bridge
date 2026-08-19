@@ -16,6 +16,9 @@ Standard library only, same rule as bin/goals-floor and bin/elves-floor.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
+import http.server
 import json
 import os
 import queue
@@ -96,6 +99,11 @@ LONG_POLL_TIMEOUT = TELEGRAM_POLL + 15
 # single line, waits this long, and goes round again.
 BACKOFF = 5.0
 
+WHATSAPP_API_VERSION = "v20.0"
+# A webhook body is a handful of small JSON objects. Anything larger is not a
+# message, and it is read into memory before it can be checked.
+MAX_WEBHOOK_BODY = 1 << 20
+
 CLAUDE_TOOLS = "Bash,Read,Glob,Grep,LS"
 
 # Anything outside this set is replaced in a chat id before it becomes a
@@ -167,6 +175,11 @@ def load_config(conf_path: Path | None, env: dict | None = None) -> dict:
 def split_list(value: str) -> list:
     """Comma-separated allowlist to a list, blanks dropped."""
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def only_digits(value: str) -> str:
+    """E.164 comparison without caring whether anyone typed + or spaces."""
+    return re.sub(r"\D", "", value or "")
 
 
 def redact(key: str, value: str) -> str:
@@ -681,9 +694,215 @@ class SlackAdapter(Adapter):
             http_json(url, payload, headers=self.headers())
 
 
+class WebhookHandler(http.server.BaseHTTPRequestHandler):
+    """Meta Cloud API webhook. A subclass carries the adapter as `adapter`."""
+
+    adapter = None
+    server_version = "lantern-bridge"
+    sys_version = ""
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt, *args):
+        # The default writes the request line to stderr. On the GET path that
+        # line contains hub.verify_token, so there is no version of this worth
+        # keeping.
+        return
+
+    def respond(self, status: int, body: str = "") -> None:
+        payload = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if payload:
+            self.wfile.write(payload)
+
+    def do_GET(self):  # noqa: N802 - http.server's naming
+        query = urllib.parse.urlparse(self.path).query
+        params = urllib.parse.parse_qs(query)
+        challenge = self.adapter.verify_challenge(params)
+        if challenge is None:
+            self.respond(403, "forbidden")
+            return
+        self.respond(200, challenge)
+
+    def do_POST(self):  # noqa: N802 - http.server's naming
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self.respond(400, "bad request")
+            return
+        if length < 0 or length > MAX_WEBHOOK_BODY:
+            self.respond(413, "too large")
+            return
+        # The raw bytes, read once and hashed before anything looks at them.
+        # Parsing first and re-serialising would sign a different document.
+        raw = self.rfile.read(length)
+        signature = self.headers.get("X-Hub-Signature-256", "")
+        if not self.adapter.verify_signature(raw, signature):
+            log("whatsapp: rejected a POST with a bad signature (%d bytes)" % len(raw))
+            self.respond(401, "unauthorized")
+            return
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.respond(400, "bad request")
+            return
+        if not isinstance(payload, dict):
+            self.respond(400, "bad request")
+            return
+        for sender, text in self.adapter.accepted_from(payload):
+            self.adapter.offer(sender, text)
+        # Meta retries anything that is not answered quickly, so the reply goes
+        # out now and the helper runs on the dispatch thread.
+        self.respond(200, "ok")
+
+
+class WhatsAppAdapter(Adapter):
+    """Meta Cloud API. Inbound is a webhook, so this one listens rather than
+    polls. It binds localhost; a tunnel gives Meta the public HTTPS URL."""
+
+    name = "whatsapp"
+    limit = WHATSAPP_LIMIT
+
+    def __init__(self, cfg: dict, inbox):
+        super().__init__(cfg, inbox)
+        self.token = cfg["WHATSAPP_ACCESS_TOKEN"]
+        self.phone_number_id = cfg["WHATSAPP_PHONE_NUMBER_ID"]
+        self.verify_token = cfg["WHATSAPP_VERIFY_TOKEN"]
+        self.app_secret = cfg["WHATSAPP_APP_SECRET"]
+        self.allowed = {only_digits(n) for n in split_list(cfg["WHATSAPP_ALLOWED_NUMBERS"])}
+        self.allowed.discard("")
+        self.host = cfg["WHATSAPP_WEBHOOK_HOST"] or "127.0.0.1"
+        self.port = int(cfg["WHATSAPP_WEBHOOK_PORT"] or 8787)
+        self.server = None
+        # These two are re-checked here, not only in validate(), because this
+        # object is the thing that opens a socket to the internet.
+        if not self.app_secret:
+            raise ConfigError(
+                "WHATSAPP_APP_SECRET is required: without it the "
+                "X-Hub-Signature-256 check cannot run and anyone who finds the "
+                "webhook can drive the lantern"
+            )
+        if not self.allowed:
+            raise ConfigError(
+                "WHATSAPP_ALLOWED_NUMBERS is required: list the sender numbers "
+                "the bridge may answer"
+            )
+
+    def verify_challenge(self, params: dict):
+        """The GET Meta sends once, when the webhook is registered."""
+        mode = (params.get("hub.mode") or [""])[0]
+        token = (params.get("hub.verify_token") or [""])[0]
+        challenge = (params.get("hub.challenge") or [""])[0]
+        if mode != "subscribe" or not challenge:
+            return None
+        if not hmac.compare_digest(str(token), self.verify_token):
+            return None
+        return challenge
+
+    def verify_signature(self, raw: bytes, header: str) -> bool:
+        """HMAC-SHA256 of the raw body, compared in constant time.
+
+        Mandatory, not optional. This is the only thing standing between the
+        public tunnel and a helper CLI running as the user.
+        """
+        if not header or not self.app_secret:
+            return False
+        algorithm, _, digest = header.strip().partition("=")
+        if algorithm != "sha256" or not digest:
+            return False
+        expected = hmac.new(
+            self.app_secret.encode("utf-8"), raw, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(expected, digest.lower())
+
+    def extract_messages(self, payload: dict):
+        """Every text message in one webhook body, allowlist not yet applied."""
+        found = []
+        for entry in payload.get("entry") or []:
+            if not isinstance(entry, dict):
+                continue
+            for change in entry.get("changes") or []:
+                if not isinstance(change, dict):
+                    continue
+                value = change.get("value")
+                if not isinstance(value, dict):
+                    continue
+                for message in value.get("messages") or []:
+                    if not isinstance(message, dict):
+                        continue
+                    # statuses (delivered, read) come through the same hook,
+                    # and so do images, audio, and reactions.
+                    if message.get("type") != "text":
+                        continue
+                    body = message.get("text")
+                    text = body.get("body") if isinstance(body, dict) else None
+                    sender = message.get("from")
+                    if not isinstance(sender, str) or not isinstance(text, str):
+                        continue
+                    if not text.strip():
+                        continue
+                    found.append((sender, text.strip()))
+        return found
+
+    def accepted_from(self, payload: dict):
+        accepted = []
+        for sender, text in self.extract_messages(payload):
+            if only_digits(sender) not in self.allowed:
+                log("whatsapp: dropped a message from an unlisted number")
+                continue
+            accepted.append((sender, text))
+        return accepted
+
+    def start_server(self):
+        handler = type("LanternWebhookHandler", (WebhookHandler,), {"adapter": self})
+        self.server = http.server.ThreadingHTTPServer((self.host, self.port), handler)
+        return self.server
+
+    def poll_once(self) -> None:
+        # Not a poll: this blocks until the socket dies, and then the base
+        # class's backoff brings it back.
+        server = self.start_server()
+        log(
+            "whatsapp: webhook listening on %s:%d"
+            % (self.host, server.server_address[1])
+        )
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
+            self.server = None
+
+    def send_payloads(self, chat_id, text: str):
+        url = "https://graph.facebook.com/%s/%s/messages" % (
+            WHATSAPP_API_VERSION,
+            self.phone_number_id,
+        )
+        return [
+            (
+                url,
+                {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": str(chat_id),
+                    "type": "text",
+                    "text": {"preview_url": False, "body": chunk},
+                },
+            )
+            for chunk in split_message(text, self.limit)
+        ]
+
+    def send(self, chat_id, text: str) -> None:
+        headers = {"Authorization": "Bearer %s" % self.token}
+        for url, payload in self.send_payloads(chat_id, text):
+            http_json(url, payload, headers=headers)
+
+
 ADAPTERS = {
     "telegram": TelegramAdapter,
     "slack": SlackAdapter,
+    "whatsapp": WhatsAppAdapter,
 }
 
 
@@ -700,7 +919,10 @@ def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
         factory = ADAPTERS.get(channel)
         if factory is None:
             die("no adapter for channel %s in this build" % channel)
-        adapters[channel] = factory(cfg, inbox)
+        try:
+            adapters[channel] = factory(cfg, inbox)
+        except (ConfigError, ValueError) as exc:
+            die("%s: %s" % (channel, exc))
     for channel, adapter in adapters.items():
         threading.Thread(target=adapter.run, name=channel, daemon=True).start()
         log("%s: listening" % channel)

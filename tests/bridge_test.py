@@ -6,10 +6,17 @@ name. SourceFileLoader is how you import one of those.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib.util
+import json
 import queue
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -539,6 +546,241 @@ class SlackSendTest(unittest.TestCase):
         self.assertGreater(len(sends), 1)
         for _url, payload in sends:
             self.assertLessEqual(len(payload["text"]), lb.SLACK_LIMIT)
+
+
+WHATSAPP_SECRET = "app-secret-value"
+
+
+def whatsapp_config(**overrides):
+    cfg = base_config(
+        WHATSAPP_ACCESS_TOKEN="access-token-value",
+        WHATSAPP_PHONE_NUMBER_ID="PN1",
+        WHATSAPP_VERIFY_TOKEN="verify-token-value",
+        WHATSAPP_APP_SECRET=WHATSAPP_SECRET,
+        WHATSAPP_ALLOWED_NUMBERS="+1 555 123 4567, 447700900000",
+    )
+    cfg.update(overrides)
+    return cfg
+
+
+def whatsapp_body(sender="15551234567", text="hello", kind="text"):
+    message = {"from": sender, "id": "wamid.1", "type": kind}
+    if kind == "text":
+        message["text"] = {"body": text}
+    return {
+        "object": "whatsapp_business_account",
+        "entry": [{"id": "E1", "changes": [{"value": {"messages": [message]}, "field": "messages"}]}],
+    }
+
+
+def sign(raw: bytes, secret=WHATSAPP_SECRET):
+    return "sha256=" + hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+
+
+class WhatsAppConfigTest(unittest.TestCase):
+    def test_missing_app_secret_refuses(self):
+        cfg = whatsapp_config(WHATSAPP_APP_SECRET="")
+        with self.assertRaises(lb.ConfigError) as caught:
+            lb.WhatsAppAdapter(cfg, queue.Queue())
+        self.assertIn("WHATSAPP_APP_SECRET", str(caught.exception))
+
+    def test_missing_allowlist_refuses(self):
+        cfg = whatsapp_config(WHATSAPP_ALLOWED_NUMBERS="")
+        with self.assertRaises(lb.ConfigError) as caught:
+            lb.WhatsAppAdapter(cfg, queue.Queue())
+        self.assertIn("WHATSAPP_ALLOWED_NUMBERS", str(caught.exception))
+
+    def test_allowlist_ignores_formatting(self):
+        adapter = lb.WhatsAppAdapter(whatsapp_config(), queue.Queue())
+        self.assertEqual(adapter.allowed, {"15551234567", "447700900000"})
+
+
+class WhatsAppSignatureTest(unittest.TestCase):
+    def setUp(self):
+        self.adapter = lb.WhatsAppAdapter(whatsapp_config(), queue.Queue())
+
+    def test_valid_signature(self):
+        raw = b'{"a":1}'
+        self.assertTrue(self.adapter.verify_signature(raw, sign(raw)))
+
+    def test_wrong_secret(self):
+        raw = b'{"a":1}'
+        self.assertFalse(self.adapter.verify_signature(raw, sign(raw, "other")))
+
+    def test_body_tampered_after_signing(self):
+        signature = sign(b'{"a":1}')
+        self.assertFalse(self.adapter.verify_signature(b'{"a":2}', signature))
+
+    def test_missing_or_malformed_header(self):
+        raw = b'{"a":1}'
+        for header in ("", "sha1=deadbeef", "sha256=", "deadbeef", "sha256"):
+            self.assertFalse(self.adapter.verify_signature(raw, header), header)
+
+    def test_uppercase_digest_is_accepted(self):
+        raw = b'{"a":1}'
+        self.assertTrue(self.adapter.verify_signature(raw, sign(raw).upper().replace("SHA256", "sha256")))
+
+    def test_verify_challenge(self):
+        params = {
+            "hub.mode": ["subscribe"],
+            "hub.verify_token": ["verify-token-value"],
+            "hub.challenge": ["1234"],
+        }
+        self.assertEqual(self.adapter.verify_challenge(params), "1234")
+        bad = dict(params, **{"hub.verify_token": ["wrong"]})
+        self.assertIsNone(self.adapter.verify_challenge(bad))
+        self.assertIsNone(self.adapter.verify_challenge({}))
+        self.assertIsNone(
+            self.adapter.verify_challenge(dict(params, **{"hub.mode": ["unsubscribe"]}))
+        )
+
+
+class WhatsAppExtractTest(unittest.TestCase):
+    def setUp(self):
+        self.adapter = lb.WhatsAppAdapter(whatsapp_config(), queue.Queue())
+
+    def test_text_message(self):
+        self.assertEqual(
+            self.adapter.accepted_from(whatsapp_body(text=" hi ")),
+            [("15551234567", "hi")],
+        )
+
+    def test_non_text_message_is_ignored(self):
+        self.assertEqual(self.adapter.extract_messages(whatsapp_body(kind="image")), [])
+
+    def test_status_only_body_is_ignored(self):
+        body = {"entry": [{"changes": [{"value": {"statuses": [{"status": "read"}]}}]}]}
+        self.assertEqual(self.adapter.extract_messages(body), [])
+
+    def test_disallowed_number_is_dropped(self):
+        body = whatsapp_body(sender="19998887777")
+        self.assertEqual(len(self.adapter.extract_messages(body)), 1)
+        self.assertEqual(self.adapter.accepted_from(body), [])
+
+    def test_garbage_body_does_not_raise(self):
+        for body in ({}, {"entry": None}, {"entry": [1, {"changes": [2]}]}):
+            self.assertEqual(self.adapter.extract_messages(body), [])
+
+
+class WhatsAppSendTest(unittest.TestCase):
+    def setUp(self):
+        self.adapter = lb.WhatsAppAdapter(whatsapp_config(), queue.Queue())
+
+    def test_payload_shape(self):
+        sends = self.adapter.send_payloads("15551234567", "hi")
+        url, payload = sends[0]
+        self.assertEqual(
+            url, "https://graph.facebook.com/%s/PN1/messages" % lb.WHATSAPP_API_VERSION
+        )
+        self.assertEqual(payload["messaging_product"], "whatsapp")
+        self.assertEqual(payload["to"], "15551234567")
+        self.assertEqual(payload["type"], "text")
+        self.assertEqual(payload["text"]["body"], "hi")
+
+    def test_split_at_the_whatsapp_limit(self):
+        text = "\n".join(["z" * 200] * 60)
+        sends = self.adapter.send_payloads("15551234567", text)
+        self.assertGreater(len(sends), 1)
+        for _url, payload in sends:
+            self.assertLessEqual(len(payload["text"]["body"]), lb.WHATSAPP_LIMIT)
+
+    def test_access_token_is_not_in_the_url(self):
+        url, _payload = self.adapter.send_payloads("15551234567", "hi")[0]
+        self.assertNotIn("access-token-value", url)
+
+
+class WhatsAppWebhookTest(unittest.TestCase):
+    """The signature check against a real socket, on an ephemeral port."""
+
+    def setUp(self):
+        self.inbox = queue.Queue()
+        cfg = whatsapp_config(WHATSAPP_WEBHOOK_HOST="127.0.0.1", WHATSAPP_WEBHOOK_PORT="0")
+        self.adapter = lb.WhatsAppAdapter(cfg, self.inbox)
+        self.server = self.adapter.start_server()
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.stop)
+
+    def stop(self):
+        self.server.shutdown()
+        self.thread.join(timeout=5)
+        self.server.server_close()
+
+    def url(self, path="/"):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def post(self, raw: bytes, signature):
+        headers = {"Content-Type": "application/json"}
+        if signature is not None:
+            headers["X-Hub-Signature-256"] = signature
+        request = urllib.request.Request(self.url(), data=raw, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            with exc:
+                return exc.code, exc.read()
+
+    def test_good_signature_enqueues_the_message(self):
+        raw = json.dumps(whatsapp_body(text="light the field")).encode("utf-8")
+        status, _body = self.post(raw, sign(raw))
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            self.inbox.get(timeout=5), ("whatsapp", "15551234567", "light the field")
+        )
+
+    def test_bad_signature_is_401_and_enqueues_nothing(self):
+        raw = json.dumps(whatsapp_body()).encode("utf-8")
+        status, _body = self.post(raw, sign(raw, "wrong-secret"))
+        self.assertEqual(status, 401)
+        self.assertTrue(self.inbox.empty())
+
+    def test_missing_signature_is_401_and_enqueues_nothing(self):
+        raw = json.dumps(whatsapp_body()).encode("utf-8")
+        status, _body = self.post(raw, None)
+        self.assertEqual(status, 401)
+        self.assertTrue(self.inbox.empty())
+
+    def test_disallowed_sender_is_accepted_but_never_queued(self):
+        raw = json.dumps(whatsapp_body(sender="19998887777")).encode("utf-8")
+        status, _body = self.post(raw, sign(raw))
+        self.assertEqual(status, 200)
+        self.assertTrue(self.inbox.empty())
+
+    def test_signed_garbage_is_400(self):
+        raw = b"not json"
+        status, _body = self.post(raw, sign(raw))
+        self.assertEqual(status, 400)
+        self.assertTrue(self.inbox.empty())
+
+    def test_get_verification_echoes_the_challenge(self):
+        query = urllib.parse.urlencode(
+            {
+                "hub.mode": "subscribe",
+                "hub.verify_token": "verify-token-value",
+                "hub.challenge": "42424",
+            }
+        )
+        with urllib.request.urlopen(self.url("/?" + query), timeout=10) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.read(), b"42424")
+
+    def test_get_verification_mismatch_is_403(self):
+        query = urllib.parse.urlencode(
+            {
+                "hub.mode": "subscribe",
+                "hub.verify_token": "wrong",
+                "hub.challenge": "42424",
+            }
+        )
+        try:
+            with urllib.request.urlopen(self.url("/?" + query), timeout=10) as response:
+                self.fail("expected 403, got %d" % response.status)
+        except urllib.error.HTTPError as exc:
+            with exc:
+                self.assertEqual(exc.code, 403)
+                self.assertNotIn(b"42424", exc.read())
 
 
 class AdapterLoopTest(unittest.TestCase):
