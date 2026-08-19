@@ -104,6 +104,37 @@ helper_detect_agent() {
     return 1
 }
 
+helper_detect_python() {
+    # Prints a working Python 3 command, or fails.
+    #
+    # Windows keeps a zero-byte Microsoft Store alias named python3 on PATH.
+    # It satisfies `command -v` and then opens the Store instead of running,
+    # so a name on PATH proves nothing. A candidate is accepted only when the
+    # file has content and the interpreter reports major version 3.
+    #
+    # Known limit: a shadowing stub hides a real python3 further along PATH.
+    # The fallbacks below cover that on Windows, where the stub lives.
+    for _helper_py in python3 python; do
+        _helper_py_path=$(command -v "$_helper_py" 2>/dev/null) || continue
+        [ -s "$_helper_py_path" ] || continue
+        if "$_helper_py" -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' \
+            >/dev/null 2>&1; then
+            printf '%s' "$_helper_py"
+            return 0
+        fi
+    done
+    # The Windows launcher picks the interpreter itself and is not a plain
+    # file on PATH, so it gets its own check. Two words on purpose.
+    if command -v py >/dev/null 2>&1; then
+        if py -3 -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' \
+            >/dev/null 2>&1; then
+            printf '%s' 'py -3'
+            return 0
+        fi
+    fi
+    return 1
+}
+
 helper_expand_tilde() {
     _helper_path=$1
     case $_helper_path in

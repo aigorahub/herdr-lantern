@@ -199,3 +199,89 @@ is forbidden by this run's non-negotiables, and the byte rewrite is narrower:
 it touches only tracked text files and cannot discard uncommitted work.
 
 **Next required action:** Batch 2, the mutation gate.
+
+---
+
+## 2026-08-19 — Batches 2, 3, and 7
+
+These three closed together because they unblock each other. The suite stopped
+at the Windows failure in `tests/smoke.sh:245`, so no test added after that
+line could run until Batch 7 repaired it, and Batch 7 needed the interpreter
+detection from Batch 3.
+
+**Rollback ref**
+
+`refs/elves/rollback/lantern-windows-2026-08-/lantern-windows-/b2-9570aa7b4948`
+at `148c405`, pushed.
+
+### Batch 2: the mutation gate
+
+New `bin/herdr.cmd`. It resolves `sh.exe` from PATH, then from the usual Git
+for Windows locations, forwards to the POSIX wrapper, and returns its exit
+code. With no `sh.exe` it exits 127 and says so. It never reaches the real
+herdr on its own.
+
+Proved by hand before the tests existed: blocked mutate returned 2 with the
+hint, `agent list` returned real JSON from the live binary, the scrubbed
+environment returned 127, and Git Bash still resolved `herdr` to `bin/herdr`.
+
+Two MSYS traps cost time here, both now recorded in `learnings.md`:
+
+1. `cmd.exe /c` does not survive Git Bash. MSYS rewrites the lone `/c` into
+   the `C:` drive path, and cmd.exe starts interactively instead of running
+   the command. The idiom is `cmd.exe //c`.
+2. A `cmd.exe //c "set X=1 && ..."` string does not survive either. MSYS
+   escapes the embedded quotes to `\"`, and cmd.exe answers
+   `'\"C:\...\herdr.cmd\"' is not recognized`. The scrubbed-environment case
+   writes its own small batch file instead.
+
+### Batch 3: interpreter detection
+
+`helper_detect_python` in `lib.sh`. It tries `python3`, `python`, then `py -3`,
+skips a zero-byte file, and accepts a candidate only after running it and
+seeing major version 3. `launch.sh` uses it for both snapshot scripts.
+
+A second Windows defect turned up while writing the test, and it is a real one
+rather than a test artifact: `bin/goals-floor` ran herdr with `text=True` and
+no encoding, so it decoded pane output with the locale code page. Real pane
+text carries box drawing, arrows, and emoji, and one undecodable byte would
+have ended the snapshot with a UnicodeDecodeError on any non-UTF-8 Windows
+console. `run_herdr` now passes `encoding="utf-8", errors="replace"`. The plan
+gained B3-A4 for it, and the goals-floor fixture now contains `※` and `◎` so
+the decoding stays proven. `bin/elves-floor` was already explicit about UTF-8
+and needed nothing.
+
+The goals-floor stub also had to change. goals-floor executes the herdr binary
+itself, and Python on Windows cannot run a script by its shebang, so the stub
+is a batch file there and a shell script elsewhere. Both now print the same
+fixtures from disk, which keeps JSON and Unicode out of the quoting.
+
+### Batch 7: suite portability
+
+The `chmod 500` case now probes whether the platform honours directory
+permission bits and prints a SKIP line when it does not. The assertion is
+unchanged where the bits are real. The suite uses the detected interpreter
+instead of a bare `python3`.
+
+**Gate**
+
+```
+& 'C:\Program Files\Git\bin\sh.exe' tests/smoke.sh
+SKIP: platform ignores directory permission bits (unlockable state dir)
+ok: windows herdr.cmd gate
+ok
+exit=0
+```
+
+First green run of the full suite on Windows.
+
+**B7-A2 is not closed**
+
+"That case still runs and passes on Linux and macOS" cannot be executed on this
+machine. Rather than close it on reasoning, this batch adds
+`.github/workflows/tests.yml`: a smoke-test matrix over ubuntu-latest,
+macos-latest, and windows-latest. On the Windows runner `shell: bash` is Git
+Bash, the same interpreter Herdr uses there. Batch 7 closes when that run is
+green. Batch 7 stays `in_progress` until then.
+
+**Next required action:** push, watch the CI matrix, then Batch 4.

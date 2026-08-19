@@ -21,8 +21,10 @@ err=$(mktemp)
 fake=
 fake_prompt=
 fake_ws=
+fake_cmd=
+fake_py=
 open_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$open_dir" ] && rm -rf "$open_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -241,9 +243,15 @@ STUB_FOCUS_FAIL=
 STUB_PANE=
 
 # A state directory that cannot be locked is an error, not silence.
+# Windows ignores the permission bits on a directory, so chmod cannot set the
+# precondition there. Probe for that instead of failing on it, and keep the
+# assertion wherever the bits are real.
 reset_open
 chmod 500 "$open_state"
-if run_open; then
+if mkdir "$open_state/probe" 2>/dev/null; then
+    rmdir "$open_state/probe"
+    printf 'SKIP: platform ignores directory permission bits (unlockable state dir)\n'
+elif run_open; then
     chmod 700 "$open_state"
     fail "an unlockable state dir should exit nonzero"
 fi
@@ -359,27 +367,164 @@ printf '%s\n' "$out" | grep -q 'agent wait w1:p1' ||
 unset HERDR_REAL
 fake_prompt=
 
-python3 "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
-python3 -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" || fail "py_compile"
+# Windows: bin/herdr has no file extension, so a native caller resolving
+# `herdr` on PATH skips it under PATHEXT and reaches the real herdr.exe. The
+# .cmd sibling is what that caller finds instead. Nothing here runs elsewhere.
+#
+# `cmd.exe //c` is not a typo. MSYS rewrites a lone `/c` argument into the C:
+# drive path before cmd.exe sees it, and cmd.exe then starts interactively.
+# The doubled slash survives the rewrite as a single one.
+if [ -f "$root/bin/herdr.cmd" ] &&
+    command -v cygpath >/dev/null 2>&1 &&
+    command -v cmd.exe >/dev/null 2>&1; then
+    win_cmd=$(cygpath -w "$root/bin/herdr.cmd")
+
+    fake_cmd=$(mktemp -d)
+    cat >"$fake_cmd/herdr" <<'EOF'
+#!/bin/sh
+printf 'real herdr %s\n' "$*"
+exit 7
+EOF
+    chmod +x "$fake_cmd/herdr"
+    export HERDR_REAL="$fake_cmd/herdr"
+
+    # A mutating verb is blocked, and the block reaches the caller as a
+    # non-zero status with the hint on stderr.
+    export HERDR_HELPER_OK=
+    if cmd.exe //c "$win_cmd" workspace create --cwd C:\\Temp --label x \
+        >/dev/null 2>"$err"; then
+        fail "herdr.cmd mutate without OK should fail"
+    fi
+    grep -q HERDR_HELPER_OK "$err" || fail "herdr.cmd blocked hint missing"
+    if grep -q 'real herdr' "$err"; then
+        fail "herdr.cmd blocked path reached the real herdr"
+    fi
+
+    # An inspect verb passes through, and the wrapper's exit code survives the
+    # trip through cmd.exe. The stub exits 7 so a swallowed code is visible.
+    cmd_status=0
+    cmd.exe //c "$win_cmd" agent list >"$tmp" 2>/dev/null || cmd_status=$?
+    [ "$cmd_status" = 7 ] ||
+        fail "herdr.cmd should return the wrapper exit code (got $cmd_status)"
+    grep -q 'real herdr agent list' "$tmp" ||
+        fail "herdr.cmd inspect did not reach the real herdr"
+
+    # With no sh.exe anywhere, it refuses. It must never fall through to the
+    # real herdr, because that is the gate-free path this file exists to close.
+    # The scrubbed environment goes in its own batch file. Passing it as one
+    # long `cmd.exe //c "set ... && ..."` string does not survive: MSYS escapes
+    # the embedded quotes to \" on the way to a native program, and cmd.exe
+    # reports the command as unrecognised.
+    nowhere=$win_cmd.nowhere
+    no_sh_cmd=$fake_cmd/no-sh.cmd
+    cat >"$no_sh_cmd" <<EOF
+@echo off
+set "PATH=C:\\Windows\\System32"
+set "ProgramFiles=$nowhere"
+set "ProgramFiles(x86)=$nowhere"
+set "LOCALAPPDATA=$nowhere"
+call "$win_cmd" workspace create --cwd C:\\Temp --label x
+exit /b %ERRORLEVEL%
+EOF
+    if cmd.exe //c "$(cygpath -w "$no_sh_cmd")" >"$tmp" 2>"$err"; then
+        fail "herdr.cmd without sh.exe should fail"
+    fi
+    grep -q 'refusing to run herdr' "$err" ||
+        fail "herdr.cmd without sh.exe should say why"
+    if grep -q 'real herdr' "$tmp" "$err"; then
+        fail "herdr.cmd without sh.exe must not reach the real herdr"
+    fi
+
+    # Git Bash still matches the exact name, so the POSIX wrapper stays in
+    # front of the agent's own calls.
+    resolved=$(PATH="$root/bin:$PATH" command -v herdr)
+    [ "$resolved" = "$root/bin/herdr" ] ||
+        fail "Git Bash should resolve herdr to the POSIX wrapper (got $resolved)"
+
+    unset HERDR_REAL
+    export HERDR_HELPER_OK=
+    rm -rf "$fake_cmd"
+    fake_cmd=
+    printf 'ok: windows herdr.cmd gate\n'
+fi
+
+smoke_python=$(helper_detect_python) || fail "no working python 3 on this machine"
+# shellcheck disable=SC2086
+$smoke_python -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' ||
+    fail "helper_detect_python returned something that is not python 3"
+
+# Windows ships a zero-byte Microsoft Store alias named python3. It satisfies
+# `command -v` and then opens the Store. Detection must refuse it, either by
+# choosing another interpreter or by failing outright.
+fake_py=$(mktemp -d)
+: >"$fake_py/python3"
+chmod +x "$fake_py/python3"
+stub_pick=$(PATH="$fake_py:$PATH"; export PATH; helper_detect_python) || stub_pick=
+if [ "$stub_pick" = python3 ]; then
+    fail "helper_detect_python accepted a zero-byte python3 stub"
+fi
+rm -rf "$fake_py"
+fake_py=
+
+# shellcheck disable=SC2086
+$smoke_python "$root/bin/elves-floor" --root /tmp >/dev/null || fail "elves-floor"
+# shellcheck disable=SC2086
+$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" || fail "py_compile"
+
+grep -q 'helper_detect_python' "$root/launch.sh" ||
+    fail "launch.sh should use the detected interpreter"
+if grep -qE '^[^#]*\bpython3 "\$plugin_root' "$root/launch.sh"; then
+    fail "launch.sh still calls python3 directly"
+fi
 
 fake=$(mktemp -d)
-cat >"$fake/herdr" <<'EOF'
+printf '%s\n' \
+    '{"result":{"agents":[{"pane_id":"w1:p1","agent":"claude","agent_status":"done","cwd":"/tmp/demo","terminal_title_stripped":"Fix login"}]}}' \
+    >"$fake/list.json"
+# Non-ASCII on purpose. goals-floor reads real pane text, which carries box
+# drawing, arrows, and emoji, and it must not decode that with a code page.
+printf '%s\n' \
+    '※ recap: Goal: fix login. Next: your go-ahead to merge #12.' \
+    '◎ /goal active (2h)' \
+    >"$fake/read.txt"
+
+# goals-floor runs the herdr binary itself, so on Windows the stub has to be a
+# native batch file: Python there cannot execute a script by its shebang. Both
+# stubs just print the fixtures above, so neither has to quote JSON or Unicode.
+if command -v cygpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+    fake_herdr=$fake/herdr.cmd
+    {
+        printf '@echo off\r\n'
+        printf 'if "%%2"=="list" (\r\n'
+        printf '  type "%s"\r\n' "$(cygpath -w "$fake/list.json")"
+        printf '  exit /b 0\r\n'
+        printf ')\r\n'
+        printf 'if "%%2"=="read" (\r\n'
+        printf '  type "%s"\r\n' "$(cygpath -w "$fake/read.txt")"
+        printf '  exit /b 0\r\n'
+        printf ')\r\n'
+        printf 'exit /b 1\r\n'
+    } >"$fake_herdr"
+    fake_herdr_arg=$(cygpath -w "$fake_herdr")
+else
+    fake_herdr=$fake/herdr
+    cat >"$fake_herdr" <<EOF
 #!/bin/sh
-if [ "$1" = agent ] && [ "$2" = list ]; then
-    cat <<'JSON'
-{"result":{"agents":[{"pane_id":"w1:p1","agent":"claude","agent_status":"done","cwd":"/tmp/demo","terminal_title_stripped":"Fix login"}]}}
-JSON
+if [ "\$1" = agent ] && [ "\$2" = list ]; then
+    cat "$fake/list.json"
     exit 0
 fi
-if [ "$1" = agent ] && [ "$2" = read ]; then
-    printf '%s\n' '※ recap: Goal: fix login. Next: your go-ahead to merge #12.'
-    printf '%s\n' '◎ /goal active (2h)'
+if [ "\$1" = agent ] && [ "\$2" = read ]; then
+    cat "$fake/read.txt"
     exit 0
 fi
 exit 1
 EOF
-chmod +x "$fake/herdr"
-goals=$(python3 "$root/bin/goals-floor" --herdr "$fake/herdr") || fail "goals-floor"
+    chmod +x "$fake_herdr"
+    fake_herdr_arg=$fake_herdr
+fi
+# shellcheck disable=SC2086
+goals=$($smoke_python "$root/bin/goals-floor" --herdr "$fake_herdr_arg") || fail "goals-floor"
 printf '%s\n' "$goals" | grep -q 'herd_detected 1' || fail "goals-floor herd_detected"
 printf '%s\n' "$goals" | grep -q 'NEEDS YOU' || fail "goals-floor needs you"
 printf '%s\n' "$goals" | grep -q '/goal 2h' || fail "goals-floor goal age"

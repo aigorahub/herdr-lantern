@@ -102,6 +102,7 @@ the Store alias on Windows.
 - [ ] B3-A1: `lib.sh` has `helper_detect_python`, which rejects a zero-byte candidate and validates each candidate by running it.
 - [ ] B3-A2: `launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.
 - [ ] B3-A3: A missing interpreter skips the snapshot and never kills the pane.
+- [ ] B3-A4: `bin/goals-floor` decodes herdr output as UTF-8 with replacement, so pane text carrying box drawing or emoji cannot crash the snapshot on a Windows code page.
 
 ### Batch 4: Path form handed to herdr
 

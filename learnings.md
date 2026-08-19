@@ -29,6 +29,32 @@ because PATHEXT resolution skips it and finds the real `.exe` further down the
 PATH. Any security gate built on PATH interception needs a `.cmd` sibling on
 Windows, or it fails open and silently.
 
+**`cmd.exe /c` does not survive Git Bash.** MSYS rewrites a lone `/c` argument
+into the `C:` drive path before cmd.exe sees it, so cmd.exe starts an
+interactive shell and the command never runs, with exit status 0. Write
+`cmd.exe //c`; the doubled slash arrives as one.
+
+**Do not pass a quoted command string to cmd.exe from Git Bash.** MSYS escapes
+embedded double quotes to `\"` on the way to a native program, and cmd.exe
+answers `'\"C:\path\thing.cmd\"' is not recognized`. Write the command into a
+small batch file and run that file instead.
+
+**Python on Windows cannot execute a script by its shebang.** A test that
+hands a program the path of a shell-script stub works everywhere except
+Windows, where the stub has to be a batch file. Keep the fixture data in
+separate files so both stubs only print it and neither has to quote JSON.
+
+**`text=True` on `subprocess.run` decodes with the locale encoding.** On
+Windows that is a code page, so any byte outside it raises UnicodeDecodeError.
+Terminal output carries box drawing, arrows, and emoji. Pass
+`encoding="utf-8", errors="replace"` whenever the output is terminal text.
+
+**`git checkout-index -f -a` will not rewrite a file whose stat information
+matches**, even with `-f`. `git ls-files --eol` showing `i/lf w/crlf` with the
+right attributes is the signature. The documented renormalization recipe ends
+in `git reset --hard`; where that is not allowed, rewriting the bytes directly
+is narrower and safer.
+
 ---
 
 ## Herdr plugins

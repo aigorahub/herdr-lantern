@@ -44,22 +44,23 @@
     },
     {
       "id": "B2",
-      "status": "pending",
+      "status": "complete",
       "acceptance": [
-        {"id": "B2-A1", "criterion": "`bin/herdr.cmd` forwards its arguments to the POSIX wrapper through `sh.exe` and exits with the wrapper's exit code.", "met": false, "evidence": ""},
-        {"id": "B2-A2", "criterion": "A mutating command through `bin/herdr.cmd` without `HERDR_HELPER_OK` exits non-zero and prints the `HERDR_HELPER_OK` hint.", "met": false, "evidence": ""},
-        {"id": "B2-A3", "criterion": "An inspect command through `bin/herdr.cmd` reaches the real herdr.", "met": false, "evidence": ""},
-        {"id": "B2-A4", "criterion": "With both files present, Git Bash `command -v herdr` still selects the extensionless wrapper.", "met": false, "evidence": ""},
-        {"id": "B2-A5", "criterion": "`bin/herdr.cmd` never falls through to the real herdr when `sh.exe` is missing.", "met": false, "evidence": ""}
+        {"id": "B2-A1", "criterion": "`bin/herdr.cmd` forwards its arguments to the POSIX wrapper through `sh.exe` and exits with the wrapper's exit code.", "met": true, "evidence": "tests/smoke.sh runs `herdr.cmd agent list` against a stub that exits 7 and asserts status 7. Passes."},
+        {"id": "B2-A2", "criterion": "A mutating command through `bin/herdr.cmd` without `HERDR_HELPER_OK` exits non-zero and prints the `HERDR_HELPER_OK` hint.", "met": true, "evidence": "tests/smoke.sh asserts `workspace create` through herdr.cmd fails and that stderr carries the HERDR_HELPER_OK hint. Confirmed by hand at exit 2 before the test existed."},
+        {"id": "B2-A3", "criterion": "An inspect command through `bin/herdr.cmd` reaches the real herdr.", "met": true, "evidence": "tests/smoke.sh asserts the stub printed `real herdr agent list`. By hand against the live binary, `cmd /c bin\\herdr.cmd agent list` returned the agent_list JSON."},
+        {"id": "B2-A4", "criterion": "With both files present, Git Bash `command -v herdr` still selects the extensionless wrapper.", "met": true, "evidence": "tests/smoke.sh asserts `PATH=$root/bin:$PATH command -v herdr` equals `$root/bin/herdr`. Passes with bin/herdr.cmd present."},
+        {"id": "B2-A5", "criterion": "`bin/herdr.cmd` never falls through to the real herdr when `sh.exe` is missing.", "met": true, "evidence": "tests/smoke.sh runs herdr.cmd from a batch file with PATH, ProgramFiles, ProgramFiles(x86) and LOCALAPPDATA scrubbed: exit 127, stderr says `refusing to run herdr`, and neither stream contains `real herdr`."}
       ]
     },
     {
       "id": "B3",
-      "status": "pending",
+      "status": "complete",
       "acceptance": [
-        {"id": "B3-A1", "criterion": "`lib.sh` has `helper_detect_python`, which rejects a zero-byte candidate and validates each candidate by running it.", "met": false, "evidence": ""},
-        {"id": "B3-A2", "criterion": "`launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.", "met": false, "evidence": ""},
-        {"id": "B3-A3", "criterion": "A missing interpreter skips the snapshot and never kills the pane.", "met": false, "evidence": ""}
+        {"id": "B3-A1", "criterion": "`lib.sh` has `helper_detect_python`, which rejects a zero-byte candidate and validates each candidate by running it.", "met": true, "evidence": "lib.sh helper_detect_python skips a candidate failing `[ -s ]` and requires `sys.version_info[0] == 3` from a real run. tests/smoke.sh puts a zero-byte python3 first on PATH and asserts detection does not return python3."},
+        {"id": "B3-A2", "criterion": "`launch.sh` uses the detected interpreter for `bin/goals-floor` and `bin/elves-floor`.", "met": true, "evidence": "launch.sh calls helper_detect_python once and uses $helper_python for both scripts. tests/smoke.sh asserts launch.sh mentions helper_detect_python and no longer calls python3 against $plugin_root."},
+        {"id": "B3-A3", "criterion": "A missing interpreter skips the snapshot and never kills the pane.", "met": true, "evidence": "Detection failure falls to `helper_python=` and the block is guarded by `[ -n \"$helper_python\" ]`. launch.sh runs under `set -u` only, so no failure path exits."},
+        {"id": "B3-A4", "criterion": "`bin/goals-floor` decodes herdr output as UTF-8 with replacement, so pane text carrying box drawing or emoji cannot crash the snapshot on a Windows code page.", "met": true, "evidence": "run_herdr now passes encoding=\"utf-8\", errors=\"replace\". tests/smoke.sh feeds goals-floor a fixture containing ※ and ◎ through a native stub and asserts herd_detected 1, NEEDS YOU, and /goal 2h."}
       ]
     },
     {
@@ -88,12 +89,13 @@
     },
     {
       "id": "B7",
-      "status": "pending",
+      "status": "in_progress",
+      "note": "B7-A2 needs a Linux and macOS run. .github/workflows/tests.yml adds an ubuntu, macos, windows matrix so the PR proves it instead of arguing it. Close this batch when that run is green.",
       "acceptance": [
-        {"id": "B7-A1", "criterion": "The unwritable-state-dir case detects a platform that ignores the permission bits and prints a SKIP line instead of failing.", "met": false, "evidence": ""},
-        {"id": "B7-A2", "criterion": "That case still runs and passes on Linux and macOS.", "met": false, "evidence": ""},
-        {"id": "B7-A3", "criterion": "The suite uses the detected Python instead of a bare `python3`.", "met": false, "evidence": ""},
-        {"id": "B7-A4", "criterion": "The full suite passes under Git Bash on Windows with the plain Windows PATH.", "met": false, "evidence": ""}
+        {"id": "B7-A1", "criterion": "The unwritable-state-dir case detects a platform that ignores the permission bits and prints a SKIP line instead of failing.", "met": true, "evidence": "After `chmod 500`, the test probes with `mkdir \"$open_state/probe\"`. On this machine it succeeds, so the suite prints `SKIP: platform ignores directory permission bits (unlockable state dir)` and continues."},
+        {"id": "B7-A2", "criterion": "That case still runs and passes on Linux and macOS.", "met": false, "evidence": "NOT VERIFIED BY EXECUTION. No Linux or macOS host was available in this session. By construction the probe mkdir fails inside a 0500 directory on those platforms, so the elif branch runs run_open and the original assertion is unchanged. This is reasoning, not a run, and it is called out in the PR."},
+        {"id": "B7-A3", "criterion": "The suite uses the detected Python instead of a bare `python3`.", "met": true, "evidence": "tests/smoke.sh resolves $smoke_python from helper_detect_python and uses it for elves-floor, py_compile, and goals-floor. No bare python3 call remains in the suite."},
+        {"id": "B7-A4", "criterion": "The full suite passes under Git Bash on Windows with the plain Windows PATH.", "met": true, "evidence": "`& 'C:\\Program Files\\Git\\bin\\sh.exe' tests/smoke.sh` from PowerShell prints the SKIP line, `ok: windows herdr.cmd gate`, and `ok`, then exits 0."}
       ]
     },
     {

@@ -134,15 +134,21 @@ if [ -n "$real_herdr" ]; then
 else
     : >"$workdir/floor.txt"
 fi
-if command -v python3 >/dev/null 2>&1; then
+helper_python=$(helper_detect_python) || helper_python=
+if [ -n "$helper_python" ]; then
+    # $helper_python is split on purpose: the Windows launcher is `py -3`.
     if [ -n "$real_herdr" ]; then
-        python3 "$plugin_root/bin/goals-floor" --herdr "$real_herdr" \
+        # shellcheck disable=SC2086
+        $helper_python "$plugin_root/bin/goals-floor" --herdr "$real_herdr" \
             >"$workdir/goals-floor.txt" 2>/dev/null || true
     fi
     if [ "$search_root" = "$HOME" ]; then
-        python3 "$plugin_root/bin/elves-floor" >"$workdir/elves-floor.txt" 2>/dev/null || true
+        # shellcheck disable=SC2086
+        $helper_python "$plugin_root/bin/elves-floor" \
+            >"$workdir/elves-floor.txt" 2>/dev/null || true
     else
-        python3 "$plugin_root/bin/elves-floor" --root "$search_root" \
+        # shellcheck disable=SC2086
+        $helper_python "$plugin_root/bin/elves-floor" --root "$search_root" \
             >"$workdir/elves-floor.txt" 2>/dev/null || true
     fi
 fi

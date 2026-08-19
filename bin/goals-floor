@@ -42,6 +42,11 @@ def run_herdr(herdr: str, args: list[str], timeout: float) -> str:
             check=False,
             capture_output=True,
             text=True,
+            # Pane text carries box drawing, arrows, and emoji. text=True would
+            # otherwise decode with the locale encoding, which is a Windows
+            # code page, and one stray byte would end the snapshot.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
