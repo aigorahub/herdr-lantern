@@ -25,9 +25,11 @@ Fixing the second makes the first tractable.
 | Question | Answer |
 | --- | --- |
 | Whose herd does a message reach? | The sender's own. |
-| What is it for? | Full conversation, not only status. |
+| What opens on their machine? | Lantern. The Slack app is a remote control for the Lantern plugin (its prompt / skill), not a generic coding agent. |
+| What is it for? | Full conversation with Lantern, not only status. |
 | Where does the router run? | Railway. Router alone, 512MB, roughly $6/month at the published per-second rates. |
 | Machine offline? | Queue. |
+| Missing Herdr or missing Lantern? | Tell them, with install directions. Do not try another machine and do not run the work in the cloud. |
 | One repo or two? | One. |
 | Slack shape | DM: full conversation, no mention. Channel: answer only an `@Lantern` mention, reply in the thread. |
 | Who may use it? | Everyone in the Aigora workspace. |
@@ -56,30 +58,66 @@ connector. A workspace member who has not enrolled reaches nothing and is told
 how to enroll. That is what makes opening it to the whole workspace safe: the
 door is wide, but each person can only ever reach their own machine.
 
-## Answering, without picking an agent
+## What a DM does
 
-`herdr agent start <name> --kind <kind> --pane <id>` accepts 22 kinds and
-confirms the agent came up and is ready for input. Herdr is already the
-abstraction layer, so Lantern does not need to learn how Grok differs from
-Codex.
+Someone DMs the Lantern Slack app (or `@Lantern` in a channel). The hosted app
+looks up **that Slack user** and talks to **their** machine.
 
-A conversation is a pane. Messages go in with `herdr agent prompt --wait`;
-replies come back with `herdr agent read --source recent`.
+**If they are enrolled and Herdr is up with Lantern installed,** the connector
+opens (or focuses) the Lantern session in their Herdr — the plugin chat with
+its prompt/skill, the same thing `hsh` / `prefix+H` opens locally. The Slack
+message is the first turn of that conversation. Lantern then does what Lantern
+does: illuminate the field, walk to a pane, start an agent when they ask. It
+does not start a random Grok or Claude in their stead.
 
-Headless helpers are the wrong foundation here: only a few of the 22 have a
-real one-shot-plus-resume mode, so building on it silently re-picks Claude.
+**If they do not have Herdr,** the Slack app does not open anything on anyone
+else's computer. It replies that they need Herdr, and how:
+
+```
+Herdr 0.7.5+ on macOS, Linux, or Windows.
+https://herdr.dev
+```
+
+**If they have Herdr but not Lantern** (the plugin is missing, unlinked, or
+disabled), it replies that they need the Lantern plugin, and how:
+
+```
+herdr plugin install aigorahub/herdr-lantern
+```
+
+Then open it once locally (`hsh`, or `herdr plugin action invoke aigora.lantern.open`)
+and enroll so Slack knows this machine is theirs.
+
+**If Herdr is installed but the laptop is asleep or the connector is not
+dialled in,** that is not "you don't have Herdr." The message waits on the
+router (see stale-queue, still open). A setup miss gets directions; an offline
+machine gets a queue.
+
+## Answering: open Lantern, do not pick a coding agent
+
+The Slack app opens **Lantern** in the sender's Herdr. That is the plugin
+session (`aigora.lantern`), with its prompt/skill, not `herdr agent start`
+of a random `--kind`. Whatever helper they already chose in `helper.conf`
+(Grok, Cursor, Codex, Claude, …) is what Lantern runs as. The cloud app
+never chooses Claude, never ships a model key, and never starts a coding
+agent on their behalf. If they later ask Lantern to seat one, Lantern does
+that the way it does locally.
+
+A conversation is that lantern pane. Messages go in with
+`herdr agent prompt --wait`; replies come back with
+`herdr agent read --source recent`.
+
+Headless `claude -p` / `codex exec` are the wrong foundation: they silently
+re-pick Claude and they are not Lantern.
 
 Three consequences worth the change:
 
 - **Turn boundaries come from `agent_status`** (working, blocked, idle, done)
   rather than from parsing a redrawing TUI. What remains is extracting the new
   text since the prompt.
-- **Conversations run in parallel**, one turn per pane, instead of today's
-  single global worker.
-- **Continuity is the agent's own**, in whatever form that agent keeps it.
-
-Bootstrapping is the first prompt rather than a seeded `CLAUDE.md`, because
-file conventions differ per agent and a first turn works for all 22.
+- **Conversations run in parallel**, one lantern turn per person, instead of
+  today's single global worker.
+- **Continuity is Lantern's own**, in whatever form that helper keeps it.
 
 ## What carries over from 0.5.x
 
