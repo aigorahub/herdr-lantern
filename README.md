@@ -252,6 +252,21 @@ token. Message your bot once, then read your chat id out of
 `TELEGRAM_ALLOWED_CHATS`. The bridge long-polls, so nothing has to be
 reachable from outside.
 
+**One bot per person, named after that person.** Telegram has no workspace, so
+a team does not share a bot: two bridges polling one token make Telegram answer
+409 and fight over the offset, and messages get answered twice or lost. Each
+person makes their own bot on their own machine, so name it so the owner is
+obvious in a list of them:
+
+```
+Display name:  Aigora Mason Lantern
+Username:      aigora_mason_lantern_bot
+```
+
+Telegram requires the username to end in `bot`. `<org>_<person>_lantern_bot`
+keeps them sorted together and makes it plain whose machine a bot reaches,
+which matters because that is exactly what an allowlist entry grants.
+
 The id you took from your own private chat is your user id, and that is what
 the allowlist is for: **a chat id here is a person, not a room.** A group or
 supergroup id would name a room, and the bridge will not answer one — putting
