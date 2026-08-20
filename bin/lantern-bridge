@@ -83,6 +83,9 @@ UNSAFE_CHARS = "$`;|&<>(){}"
 # Per-channel outbound limits, from each provider's documented maximum.
 TELEGRAM_LIMIT = 4096
 SLACK_LIMIT = 4000
+# How many WhatsApp message ids to remember. Meta retries within minutes,
+# so this only has to outlast a retry window.
+WHATSAPP_SEEN_MAX = 512
 WHATSAPP_LIMIT = 4096
 
 # A headless turn can legitimately run for minutes; it is still bounded.
@@ -93,6 +96,22 @@ HELPER_TIMEOUT = 900
 TELEGRAM_POLL = 50
 # Slack has no long poll on this endpoint, so it is a plain interval.
 SLACK_POLL = 3.0
+# Slack rates conversations.history at Tier 3, about 50 requests a minute. Kept
+# under that so every watched conversation can be read on every pass.
+SLACK_TIER3_BUDGET = 45.0
+# Slack errors that will not fix themselves, so a DM returning one is retired
+# rather than retried. Everything else, rate limits included, is transient.
+SLACK_PERMANENT_ERRORS = frozenset(
+    {
+        "missing_scope",
+        "not_allowed_token_type",
+        "channel_not_found",
+        "not_in_channel",
+        "invalid_auth",
+        "account_inactive",
+        "token_revoked",
+    }
+)
 # How long to wait before asking Slack to open the DMs again, when the last
 # attempt opened none.
 DM_OPEN_RETRY = 60.0
@@ -805,7 +824,6 @@ class SlackAdapter(Adapter):
         # Herdr autostarting before DHCP) would otherwise turn DMs off for the
         # life of the process and report it as a missing scope.
         self._dms_next_try = 0.0
-        self._poll_order = []
 
     def headers(self) -> dict:
         return {"Authorization": "Bearer %s" % self.token}
@@ -926,31 +944,67 @@ class SlackAdapter(Adapter):
         return accepted, oldest
 
     def poll_conversations(self):
-        """The conversations this pass reads: round-robin, one per pass.
+        """Every conversation this bridge watches. The channel, then the DMs."""
+        return [self.channel] + sorted(self.dms)
 
-        Every pass is one history call, so N watched conversations cost the
-        same request rate as one and each is read every N * SLACK_POLL
-        seconds. conversations.history is a Slack Tier 3 method; reading all
-        of them every pass would trip its limit at three or four DMs.
+    def poll_interval(self, watched) -> float:
+        """Seconds to wait after reading them all.
+
+        The rate limit is held by slowing the pass, not by reading fewer
+        conversations per pass. Reading one at a time made each conversation
+        wait len(watched) intervals before anyone looked at it; reading them
+        all and stretching the interval makes every conversation wait exactly
+        one, for the same number of requests a minute.
+
+        Slack rates conversations.history at Tier 3, about 50 a minute.
         """
-        if not self._poll_order:
-            self._poll_order = [self.channel] + sorted(self.dms)
-        return [self._poll_order.pop(0)]
+        per_second = SLACK_TIER3_BUDGET / 60.0
+        if per_second <= 0:
+            return SLACK_POLL
+        return max(SLACK_POLL, len(watched) / per_second)
 
     def drop_conversation(self, conversation: str) -> None:
         self.dms.pop(conversation, None)
         self.cursors.pop(conversation, None)
-        self._poll_order = [c for c in self._poll_order if c != conversation]
+        if not self.dms:
+            # The last DM is gone, usually to a scope error whose remedy is a
+            # reinstall of the Slack app. open_dms stops asking once it has
+            # opened one, so without this the fix would take effect only at
+            # the next daemon restart, and nothing would say so.
+            self._dms_next_try = time.time() + DM_OPEN_RETRY
 
     def poll_once(self) -> None:
         self.open_dms()
-        for conversation in self.poll_conversations():
+        watched = self.poll_conversations()
+        # The sleep is in a finally because it is the rate limit, not a
+        # courtesy. http_json raises on 429 and on timeouts, and the channel
+        # error path raises too; leaving the sleep on the clean path only meant
+        # a failing bridge fell back to Adapter.run's five second backoff and
+        # sent len(watched) requests every five seconds, which is several times
+        # the budget this interval exists to hold.
+        try:
+            self._poll_watched(watched)
+        finally:
+            time.sleep(self.poll_interval(watched))
+
+    def _poll_watched(self, watched) -> None:
+        for conversation in watched:
             payload = http_json(self.history_url(conversation), headers=self.headers())
             if not payload.get("ok", False):
                 # Slack reports failure in the body with HTTP 200. The error
                 # slug is a fixed vocabulary, never a token, so it is safe to
                 # log and it is the only thing that names the cause.
                 slug = payload.get("error", "unknown")
+                if conversation in self.dms and slug not in SLACK_PERMANENT_ERRORS:
+                    # Transient: rate limits and Slack faults come back. Now
+                    # that every watched conversation is read on every pass, a
+                    # single bad window would otherwise retire every DM at
+                    # once, and open_dms never reopens one after its first
+                    # success, so the bridge would run channel-only until
+                    # somebody restarted it.
+                    log("slack: could not read the DM for %s (%s); will try again"
+                        % (self.dms[conversation], slug))
+                    continue
                 if conversation in self.dms:
                     # A DM that opens but cannot be read is the shape of
                     # im:write granted without im:history. Raising here would
@@ -960,7 +1014,8 @@ class SlackAdapter(Adapter):
                     log(
                         "slack: no longer reading the DM for %s (%s); "
                         "reading a DM needs the im:history scope and an app "
-                        "reinstall" % (self.dms[conversation], slug)
+                        "reinstall, then a bridge restart"
+                        % (self.dms[conversation], slug)
                     )
                     self.drop_conversation(conversation)
                     continue
@@ -969,7 +1024,6 @@ class SlackAdapter(Adapter):
             self.cursors[conversation] = oldest
             for user, reply_to, text in accepted:
                 self.offer(user, text, reply_to=reply_to)
-        time.sleep(SLACK_POLL)
 
     def thread_footer(self, user=None) -> str:
         # The one thing a threaded answer must say: the bridge cannot read
@@ -1161,8 +1215,25 @@ class WhatsAppAdapter(Adapter):
         self.host = cfg["WHATSAPP_WEBHOOK_HOST"] or "127.0.0.1"
         self.port = int(cfg["WHATSAPP_WEBHOOK_PORT"] or 8787)
         self.server = None
-        # These three are re-checked here, not only in validate(), because this
-        # object is the thing that opens a socket to the internet.
+        # Meta documents webhook delivery as at-least-once and retries anything
+        # it does not see acknowledged quickly. This bridge answers before the
+        # helper has finished, which keeps Meta happy, so a real redelivery
+        # would otherwise run the helper twice and send two replies, consuming
+        # the single worker twice on the way. Telegram dedupes with its offset
+        # and Slack with a seen set; this is WhatsApp's.
+        #
+        # A dict rather than a set, because eviction has to drop the oldest and
+        # a wamid carries no order to sort by. Slack's ids are timestamps and
+        # can be sorted; sorting these would evict arbitrary entries, including
+        # one that arrived a second ago, and Meta's retry of that one would run
+        # the helper twice, which is the bug this exists to prevent.
+        self.seen = {}
+        # Webhook bodies arrive on ThreadingHTTPServer worker threads, so the
+        # check and the add have to be one step. Two overlapping deliveries of
+        # one id would otherwise both pass the check, and a resize during
+        # iteration would raise out of do_POST, costing Meta its 200 and
+        # earning another retry.
+        self._seen_lock = threading.Lock()
         if not self.verify_token:
             raise ConfigError(
                 "WHATSAPP_VERIFY_TOKEN is required: compare_digest of two empty "
@@ -1241,12 +1312,44 @@ class WhatsAppAdapter(Adapter):
                         continue
                     if not text.strip():
                         continue
-                    found.append((sender, text.strip()))
+                    message_id = message.get("id")
+                    if not isinstance(message_id, str):
+                        message_id = ""
+                    found.append((message_id, sender, text.strip()))
         return found
+
+    def remember(self, message_id: str) -> None:
+        """Record an id, dropping the oldest when the record is full."""
+        with self._seen_lock:
+            self._remember_locked(message_id)
+
+    def _remember_locked(self, message_id: str) -> None:
+        self.seen[message_id] = None
+        # Bounded on purpose: this runs for weeks. Meta retries within minutes,
+        # so the oldest entries can never come back. Insertion order is what
+        # makes "oldest" meaningful here.
+        while len(self.seen) > WHATSAPP_SEEN_MAX:
+            self.seen.pop(next(iter(self.seen)))
+
+    def seen_before(self, message_id: str) -> bool:
+        """True when this id has already been taken. Records it if not.
+
+        One step under the lock: a check followed by a separate add lets two
+        threads carrying the same redelivery both decide they are first.
+        """
+        with self._seen_lock:
+            if message_id in self.seen:
+                return True
+            self._remember_locked(message_id)
+            return False
 
     def accepted_from(self, payload: dict):
         accepted = []
-        for sender, text in self.extract_messages(payload):
+        for message_id, sender, text in self.extract_messages(payload):
+            if message_id:
+                if self.seen_before(message_id):
+                    log("whatsapp: skipped a redelivered message")
+                    continue
             if only_digits(sender) not in self.allowed:
                 log("whatsapp: dropped a message from an unlisted number")
                 continue
@@ -1352,6 +1455,40 @@ def _take_lock(fd):
     return True
 
 
+def _release_lock(fd) -> None:
+    """Undo _take_lock before closing the descriptor.
+
+    Closing the handle releases the lock on both platforms eventually, but
+    Windows documents that a byte-range lock released by handle close may not
+    be released immediately. The probe in daemon_running runs moments before
+    a fresh daemon tries to take this same lock, and a delayed release would
+    kill that daemon with "already running" and no retry, so the probe lets
+    go explicitly.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    if fcntl is not None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        return
+    try:
+        import msvcrt
+    except ImportError:
+        return
+    try:
+        os.lseek(fd, LOCK_BYTE_OFFSET, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    finally:
+        os.lseek(fd, 0, os.SEEK_SET)
+
+
 def acquire_daemon_lock(state_dir):
     """One bridge per state directory. Returns the fd to hold, or None.
 
@@ -1369,6 +1506,13 @@ def acquire_daemon_lock(state_dir):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
     taken = _take_lock(fd)
+    if taken is False:
+        # The holder can be the --open probe, which takes this lock for a
+        # moment to ask whether a daemon is running and lets go straight
+        # after. Dying on that instant would end a daemon whose own pane was
+        # seated a second ago, so give the holder one moment to finish.
+        time.sleep(0.2)
+        taken = _take_lock(fd)
     if taken is None:
         os.close(fd)
         log(
@@ -1563,6 +1707,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt", default="", help="path to the lantern prompt")
     parser.add_argument("--state", default=".", help="plugin state directory")
     parser.add_argument(
+        "--daemon-running",
+        action="store_true",
+        help="exit 0 when a bridge daemon holds the lock, 1 when none does",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="validate the config and print a redacted summary, then exit",
@@ -1581,8 +1730,55 @@ def die(message: str) -> None:
     raise SystemExit(2)
 
 
+def daemon_running(state_dir) -> bool:
+    """True when another process holds the daemon lock.
+
+    Taking the lock and dropping it is the only honest test. The lock is
+    advisory and the kernel releases it when a process dies, so the file
+    outliving its daemon proves nothing, and the pid written inside can belong
+    to something else entirely after a reboot. Closing the descriptor releases
+    the lock on both platforms, which the finally below does either way.
+    """
+    try:
+        fd = os.open(str(daemon_lock_path(state_dir)), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        # Nothing to lock in means nothing is running in it.
+        return False
+    try:
+        taken = _take_lock(fd)
+        if taken is None:
+            # No locking primitive on this Python. Refusing to answer beats
+            # answering wrongly in either direction: a false "running" leaves
+            # a dead pane focused forever, a false "not running" seats a
+            # second daemon that fights the first over every message.
+            raise ConfigError(
+                "cannot tell whether a bridge is running: this Python has "
+                "neither fcntl nor msvcrt"
+            )
+        if taken:
+            # Held only to answer the question. Let go before the close, or
+            # a daemon started moments from now can find it still held.
+            _release_lock(fd)
+            return False
+        return True
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    if args.daemon_running:
+        # Asked before the config is read on purpose: whether a daemon holds
+        # the lock has nothing to do with whether bridge.conf parses, and
+        # `bridge.sh --open` has to be able to ask while the config is broken.
+        try:
+            return 0 if daemon_running(args.state) else 1
+        except ConfigError as exc:
+            die(str(exc))
+            return 2
     conf_path = Path(args.conf) if args.conf else None
     example_path = Path(args.example) if args.example else None
     try:

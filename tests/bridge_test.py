@@ -805,13 +805,20 @@ class SlackParseTest(unittest.TestCase):
         # channel's poll down each cycle.
         self.adapter.dms["D77"] = "U1"
         self.adapter.cursors["D77"] = "1000.000000"
-        self.adapter._poll_order = ["D77"]
         lines = []
         original = lb.log
         lb.log = lines.append
         self.addCleanup(setattr, lb, "log", original)
         original_http = lb.http_json
-        lb.http_json = lambda *a, **k: {"ok": False, "error": "missing_scope"}
+
+        def per_conversation(url, payload=None, headers=None, timeout=None):
+            # The channel reads fine; only the DM is unreadable. That is the
+            # shape of im:write granted without im:history.
+            if "channel=D77" in url:
+                return {"ok": False, "error": "missing_scope"}
+            return {"ok": True, "messages": []}
+
+        lb.http_json = per_conversation
         self.addCleanup(setattr, lb, "http_json", original_http)
         original_sleep = lb.time.sleep
         lb.time.sleep = lambda _s: None
@@ -824,13 +831,101 @@ class SlackParseTest(unittest.TestCase):
         self.assertTrue(any("missing_scope" in line for line in lines), lines)
         self.assertTrue(any("im:history" in line for line in lines), lines)
 
+    def test_the_rate_limit_holds_when_a_poll_fails(self):
+        # The sleep is the rate limit, not a courtesy. On the failure path it
+        # used to be skipped entirely, leaving Adapter.run's five second
+        # backoff to send len(watched) requests every five seconds.
+        slept = []
+        original_sleep = lb.time.sleep
+        lb.time.sleep = slept.append
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+        original_http = lb.http_json
+        lb.http_json = lambda *a, **k: (_ for _ in ()).throw(OSError("429"))
+        self.addCleanup(setattr, lb, "http_json", original_http)
+
+        with self.assertRaises(OSError):
+            self.adapter.poll_once()
+        self.assertEqual(slept, [self.adapter.poll_interval(["C123"])])
+
     def test_the_channel_failing_still_raises(self):
         original_http = lb.http_json
         lb.http_json = lambda *a, **k: {"ok": False, "error": "ratelimited"}
         self.addCleanup(setattr, lb, "http_json", original_http)
-        self.adapter._poll_order = ["C123"]
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
         with self.assertRaises(RuntimeError):
             self.adapter.poll_once()
+
+    def test_a_transient_dm_error_keeps_the_dm(self):
+        # Every watched conversation is read on every pass now, so one bad
+        # window would otherwise retire every DM at once, and open_dms does not
+        # reopen one after its first success.
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        original = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original)
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+        original_http = lb.http_json
+
+        def flaky(url, payload=None, headers=None, timeout=None):
+            if "channel=D77" in url:
+                return {"ok": False, "error": "ratelimited"}
+            return {"ok": True, "messages": []}
+
+        lb.http_json = flaky
+        self.addCleanup(setattr, lb, "http_json", original_http)
+
+        self.adapter.poll_once()
+        self.assertIn("D77", self.adapter.dms)
+
+    def test_the_last_retired_dm_can_come_back_without_a_restart(self):
+        # A scope error's remedy is reinstalling the Slack app. open_dms stops
+        # asking once it has opened one DM, so without a timer reset the
+        # reinstall would take effect only at the next daemon restart.
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        self.adapter._dms_next_try = float("inf")
+        original = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original)
+
+        self.adapter.drop_conversation("D77")
+        self.assertEqual(self.adapter.dms, {})
+        self.assertNotEqual(self.adapter._dms_next_try, float("inf"))
+
+        original_http = lb.http_json
+        lb.http_json = lambda *a, **k: {"ok": True, "channel": {"id": "D88"}}
+        self.addCleanup(setattr, lb, "http_json", original_http)
+        self.adapter.open_dms(now=self.adapter._dms_next_try + 1.0)
+        self.assertIn("D88", self.adapter.dms)
+
+    def test_a_permanent_dm_error_retires_the_dm(self):
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        lines = []
+        original = lb.log
+        lb.log = lines.append
+        self.addCleanup(setattr, lb, "log", original)
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+        original_http = lb.http_json
+
+        def scoped(url, payload=None, headers=None, timeout=None):
+            if "channel=D77" in url:
+                return {"ok": False, "error": "missing_scope"}
+            return {"ok": True, "messages": []}
+
+        lb.http_json = scoped
+        self.addCleanup(setattr, lb, "http_json", original_http)
+
+        self.adapter.poll_once()
+        self.assertNotIn("D77", self.adapter.dms)
+        self.assertTrue(any("missing_scope" in line for line in lines), lines)
 
     def test_dms_are_retried_after_a_blip_rather_than_given_up_on(self):
         # A network failure at daemon start must not turn DMs off for the life
@@ -870,10 +965,29 @@ class SlackParseTest(unittest.TestCase):
         self.assertEqual(url, "https://slack.com/api/conversations.open")
         self.assertEqual(payload, {"users": "U1"})
 
-    def test_poll_order_round_robins_the_channel_and_every_dm(self):
+    def test_a_small_watch_list_is_read_whole_every_pass(self):
+        # Round-robin made a DM wait len(watched) * SLACK_POLL seconds before
+        # anyone looked at it, for no benefit at this size.
         self.adapter.dms = {"D1": "U1", "D2": "U2"}
-        seen = [self.adapter.poll_conversations()[0] for _ in range(6)]
-        self.assertEqual(seen, ["C123", "D1", "D2", "C123", "D1", "D2"])
+        self.assertEqual(self.adapter.poll_conversations(), ["C123", "D1", "D2"])
+        self.assertEqual(self.adapter.poll_conversations(), ["C123", "D1", "D2"])
+
+    def test_the_interval_stretches_to_stay_inside_the_rate_limit(self):
+        # Rate is held by slowing the pass rather than reading fewer
+        # conversations, so each one still waits exactly one interval.
+        one = self.adapter.poll_interval(["C123"])
+        self.assertEqual(one, lb.SLACK_POLL)
+        many = ["C123"] + ["D%d" % i for i in range(20)]
+        stretched = self.adapter.poll_interval(many)
+        self.assertGreater(stretched, lb.SLACK_POLL)
+        requests_per_minute = len(many) * (60.0 / stretched)
+        self.assertLessEqual(requests_per_minute, lb.SLACK_TIER3_BUDGET + 0.001)
+
+    def test_every_watched_conversation_waits_one_interval(self):
+        watched = ["C123"] + ["D%d" % i for i in range(5)]
+        interval = self.adapter.poll_interval(watched)
+        # Round-robin would have been len(watched) * interval for each one.
+        self.assertLess(interval, len(watched) * lb.SLACK_POLL)
 
     def test_own_bot_message_is_skipped(self):
         accepted, oldest = self.parse(
@@ -1015,6 +1129,125 @@ class SlackSendTest(unittest.TestCase):
             self.assertLessEqual(len(payload["text"]), lb.SLACK_LIMIT)
             # Every chunk of a threaded reply stays in the thread.
             self.assertEqual(payload["thread_ts"], "1001.000100")
+
+
+class WhatsAppDedupeTest(unittest.TestCase):
+    """Meta documents delivery as at-least-once and retries anything it does
+    not see acknowledged. The bridge answers before the helper finishes, so a
+    redelivery would run the helper twice and reply twice."""
+
+    def setUp(self):
+        cfg = base_config(
+            WHATSAPP_ACCESS_TOKEN="access-token-value",
+            WHATSAPP_PHONE_NUMBER_ID="PN1",
+            WHATSAPP_VERIFY_TOKEN="verify-token-value",
+            WHATSAPP_APP_SECRET="app-secret-value",
+            WHATSAPP_ALLOWED_NUMBERS="15551234567",
+        )
+        self.adapter = lb.WhatsAppAdapter(cfg, queue.Queue())
+        original = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original)
+
+    def body(self, message_id, text="light the field"):
+        return {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "id": message_id,
+                                        "type": "text",
+                                        "from": "15551234567",
+                                        "text": {"body": text},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+
+    def test_extraction_carries_the_message_id(self):
+        self.assertEqual(
+            self.adapter.extract_messages(self.body("wamid.1")),
+            [("wamid.1", "15551234567", "light the field")],
+        )
+
+    def test_the_same_message_is_answered_once(self):
+        self.assertEqual(len(self.adapter.accepted_from(self.body("wamid.1"))), 1)
+        self.assertEqual(self.adapter.accepted_from(self.body("wamid.1")), [])
+
+    def test_a_different_message_still_gets_through(self):
+        self.adapter.accepted_from(self.body("wamid.1"))
+        self.assertEqual(len(self.adapter.accepted_from(self.body("wamid.2"))), 1)
+
+    def test_a_body_with_no_id_is_not_dropped(self):
+        payload = self.body("wamid.3")
+        del payload["entry"][0]["changes"][0]["value"]["messages"][0]["id"]
+        self.assertEqual(len(self.adapter.accepted_from(payload)), 1)
+        self.assertEqual(len(self.adapter.accepted_from(payload)), 1)
+
+    def test_the_seen_set_stays_bounded(self):
+        for i in range(700):
+            self.adapter.remember("wamid.%d" % i)
+        self.assertLessEqual(len(self.adapter.seen), lb.WHATSAPP_SEEN_MAX)
+
+    def test_eviction_drops_the_oldest_not_the_alphabetically_first(self):
+        # A wamid carries no time order, so sorting the ids evicts arbitrary
+        # entries. One that arrived a second ago could be dropped, Meta would
+        # retry it, and the helper would run twice: the exact bug the seen
+        # record exists to prevent.
+        first = "wamid.zzz_oldest"
+        self.adapter.remember(first)
+        for i in range(lb.WHATSAPP_SEEN_MAX):
+            self.adapter.remember("wamid.aaa_%06d" % i)
+        newest = "wamid.aaa_%06d" % (lb.WHATSAPP_SEEN_MAX - 1)
+        self.assertNotIn(first, self.adapter.seen)
+        self.assertIn(newest, self.adapter.seen)
+
+    def test_two_threads_carrying_one_redelivery_only_one_wins(self):
+        # do_POST runs on ThreadingHTTPServer workers, so a check followed by
+        # a separate add lets both threads decide they are first.
+        import threading as _threading
+
+        winners = []
+        start = _threading.Barrier(8)
+
+        def race():
+            start.wait()
+            if not self.adapter.seen_before("wamid.race"):
+                winners.append(1)
+
+        threads = [_threading.Thread(target=race) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(len(winners), 1)
+
+    def test_recording_while_another_thread_evicts_does_not_raise(self):
+        import threading as _threading
+
+        errors = []
+
+        def churn(tag):
+            try:
+                for i in range(400):
+                    self.adapter.seen_before("wamid.%s_%d" % (tag, i))
+            except Exception as exc:  # noqa: BLE001 - the point of the test
+                errors.append(exc)
+
+        threads = [_threading.Thread(target=churn, args=(t,)) for t in "abcd"]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        self.assertLessEqual(len(self.adapter.seen), lb.WHATSAPP_SEEN_MAX)
 
 
 WHATSAPP_SECRET = "app-secret-value"
@@ -1496,6 +1729,58 @@ class DaemonLockTest(unittest.TestCase):
         self.take()
         body = lb.daemon_lock_path(self.state).read_text(encoding="utf-8")
         self.assertEqual(body.strip(), str(os.getpid()))
+
+
+class DaemonProbeLockTest(unittest.TestCase):
+    """The probe and the daemon share one lock, moments apart."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(lb.release_daemon_locks)
+        self.state = tmp.name
+
+    def test_probe_then_immediate_acquire_succeeds(self):
+        # --open probes, then seats a pane whose daemon takes this same lock
+        # a moment later. Windows may not release a byte-range lock promptly
+        # on handle close, so the probe has to let go explicitly.
+        self.assertFalse(lb.daemon_running(self.state))
+        fd = lb.acquire_daemon_lock(self.state)
+        self.assertIsNotNone(fd)
+        os.close(fd)
+
+    def test_probe_sees_a_held_lock_and_releases_nothing(self):
+        fd = lb.acquire_daemon_lock(self.state)
+        try:
+            self.assertTrue(lb.daemon_running(self.state))
+            # The probe must not have broken the daemon's hold.
+            self.assertTrue(lb.daemon_running(self.state))
+        finally:
+            os.close(fd)
+        self.assertFalse(lb.daemon_running(self.state))
+
+    def test_acquire_retries_once_when_the_probe_holds_the_lock(self):
+        # A second --open press can hold the probe lock at the instant a
+        # starting daemon asks for it. One retry outlives that moment.
+        calls = []
+        original = lb._take_lock
+
+        def contended_once(fd):
+            calls.append(1)
+            if len(calls) == 1:
+                return False
+            return original(fd)
+
+        lb._take_lock = contended_once
+        self.addCleanup(setattr, lb, "_take_lock", original)
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+
+        fd = lb.acquire_daemon_lock(self.state)
+        self.assertIsNotNone(fd)
+        self.assertEqual(len(calls), 2)
+        os.close(fd)
 
 
 class DispatchLoopTest(unittest.TestCase):
