@@ -1,5 +1,11 @@
 # Handoff: Lantern on Slack, cloud path
 
+> **Superseded in one respect.** This was written before the SOC 2 constraint
+> was known. Its architecture and its four open questions still stand, but its
+> premise, that a connector on each person's laptop can serve an always-on
+> Slack app, does not hold when machines must be allowed to sleep. See
+> [`slack-app-discontinued.md`](slack-app-discontinued.md).
+
 **For the next person or agent.** Written 2026-08-20 after the conversation
 that landed PR #13. Design lives in
 [`plans/bridge-v2-router-connector.md`](bridge-v2-router-connector.md). This

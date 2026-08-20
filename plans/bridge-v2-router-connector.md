@@ -1,5 +1,13 @@
 # Plan: Lantern Bridge v2, a router and a connector
 
+> **Conditional, and not the path Aigora took.** This design assumes each
+> person's machine is reachable while they are messaging. Aigora stopped there
+> because SOC 2 requires machines to be able to sleep, which no laptop-bound
+> design survives. The design itself still holds for a team whose machines can
+> stay awake. Read
+> [`slack-app-discontinued.md`](slack-app-discontinued.md) before building
+> from this.
+
 **Status: designed; cloud path chosen; not started.** Build is blocked on the
 four open questions below. Session record and next steps:
 [`plans/bridge-v2-handoff.md`](bridge-v2-handoff.md).
