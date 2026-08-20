@@ -9,7 +9,11 @@ All notable changes to Lantern, by Elves are documented here.
 - Slack DMs. The bridge now opens and polls each allowlisted member's DM with
   the bot, besides the one watched channel. Needs the `im:history` and
   `im:write` scopes and an app reinstall; without them the bridge logs which
-  scope is missing and runs channel-only, as before.
+  scope is missing and runs channel-only, as before. It also needs the app's
+  Messages tab switched on under App Home, which is a setting rather than a
+  scope: until it is, Slack refuses to let anyone send the app a DM at all.
+  Both the README and the Slack trial guide say so, and the trial guide's
+  troubleshooting table names the symptom.
 - `BRIDGE_AUTOSTART`. Set it to `1` in `bridge.conf` and a `[[startup]]` hook
   has the Herdr server seat the bridge pane itself, so no terminal stays open
   for the bridge. The hook reads the config file only, exits quietly when the

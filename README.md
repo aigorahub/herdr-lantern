@@ -256,7 +256,11 @@ their messages are answered there and everyone else's are dropped.
 
 **Slack.** Create an app at api.slack.com, add the bot scopes
 `channels:history`, `chat:write`, `im:history`, and `im:write`, install it to
-the workspace, and invite the bot to the channel (`/invite @yourbot`).
+the workspace, and invite the bot to the channel (`/invite @yourbot`). For the
+DM half, also switch on **App Home** → **Show Tabs** → **Messages Tab** and its
+checkbox: without it Slack will not let anyone send the app a direct message,
+whatever the scopes say. That is a setting, not a scope, so it needs no
+reinstall; the scopes do.
 `SLACK_CHANNEL` is that channel's id (`C…`), and `SLACK_ALLOWED_USERS` holds
 your member id (`U…`). The bridge polls that one channel and each allowlisted
 member's DM with the bot, and ignores everything it did not hear from an
