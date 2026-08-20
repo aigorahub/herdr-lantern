@@ -176,6 +176,13 @@ action focuses a running bridge instead of seating another.
 moment the daemon comes up, so nothing in the channel's history is read. Start
 the daemon, then send your test message.
 
+**In a channel it answers only when you mention it.** Type `@Lantern` and it
+replies; say anything else in that channel and it stays quiet. In its DM you
+need no mention, because the DM is the conversation. If the bridge cannot work
+out its own user id, it says so in the log and answers every allowlisted
+message in the channel until it can, on the grounds that a silent bot is
+harder to diagnose than a chatty one.
+
 **It answers you and ignores everyone else.** Messages from anyone outside
 `SLACK_ALLOWED_USERS` are dropped, as are the bot's own messages and Slack's
 join/leave notices.

@@ -779,6 +779,69 @@ class SlackParseTest(unittest.TestCase):
         self.assertEqual(accepted, [("U1", ("C123", "1001.000100", "U1"), "hi")])
         self.assertEqual(oldest, "1001.000100")
 
+    def test_the_channel_answers_only_a_mention(self):
+        # A channel has other people in it. Answering everything an
+        # allowlisted person says there is what made the trial noisy.
+        self.adapter.bot_user_id = "UBOT"
+        self.assertEqual(self.parse([slack_message("1001.000100", "U1", "chatting")])[0], [])
+        accepted, _ = self.parse(
+            [slack_message("1002.000100", "U1", "<@UBOT> what is running?")]
+        )
+        self.assertEqual(len(accepted), 1)
+
+    def test_the_mention_is_taken_out_of_the_text(self):
+        self.adapter.bot_user_id = "UBOT"
+        accepted, _ = self.parse(
+            [slack_message("1001.000100", "U1", "<@UBOT> what is running?")]
+        )
+        self.assertEqual(accepted[0][2], "what is running?")
+
+    def test_a_bare_mention_still_gets_an_answer(self):
+        self.adapter.bot_user_id = "UBOT"
+        accepted, _ = self.parse([slack_message("1001.000100", "U1", "<@UBOT>")])
+        self.assertEqual(accepted[0][2], "hello")
+
+    def test_a_dm_needs_no_mention(self):
+        self.adapter.bot_user_id = "UBOT"
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        accepted, _ = self.parse(
+            [slack_message("1001.000100", "U1", "no mention here")], conversation="D77"
+        )
+        self.assertEqual(len(accepted), 1)
+
+    def test_the_channel_answers_everything_until_the_bot_id_is_known(self):
+        # A quiet channel is worse than an eager one, and the log says which.
+        self.assertEqual(self.adapter.bot_user_id, "")
+        accepted, _ = self.parse([slack_message("1001.000100", "U1", "chatting")])
+        self.assertEqual(len(accepted), 1)
+
+    def test_the_bot_id_is_asked_for_again_after_a_failure(self):
+        calls = []
+        original = lb.http_json
+
+        def flaky(url, payload=None, headers=None, timeout=None):
+            calls.append(url)
+            if len(calls) == 1:
+                return {"ok": False, "error": "ratelimited"}
+            return {"ok": True, "user_id": "UBOT"}
+
+        lb.http_json = flaky
+        self.addCleanup(setattr, lb, "http_json", original)
+        original_log = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original_log)
+
+        self.adapter.resolve_bot_user_id(now=0.0)
+        self.assertEqual(self.adapter.bot_user_id, "")
+        self.adapter.resolve_bot_user_id(now=1.0)
+        self.assertEqual(len(calls), 1)
+        self.adapter.resolve_bot_user_id(now=lb.BOT_ID_RETRY + 1.0)
+        self.assertEqual(self.adapter.bot_user_id, "UBOT")
+        # Known now, so it stops asking.
+        self.adapter.resolve_bot_user_id(now=lb.BOT_ID_RETRY * 100)
+        self.assertEqual(len(calls), 2)
+
     def test_a_dm_replies_in_the_dm_with_no_thread(self):
         self.adapter.dms["D77"] = "U1"
         self.adapter.cursors["D77"] = "1000.000000"
@@ -1063,6 +1126,30 @@ class SlackParseTest(unittest.TestCase):
             self.adapter.parse_history({"messages": [None, {"ts": "nope"}]}),
             ([], startup),
         )
+
+
+class FormattingNoteTest(unittest.TestCase):
+    """Ordinary Markdown is wrong on all three channels, differently."""
+
+    def note(self, channel):
+        cfg = base_config(BRIDGE_SPAWN_KIND="claude")
+        return lb.remote_appendix(cfg, channel, "/home/x")
+
+    def test_slack_is_told_its_own_dialect(self):
+        self.assertIn("*one asterisk*", self.note("slack"))
+
+    def test_telegram_is_told_nothing_renders(self):
+        self.assertIn("no parse mode", self.note("telegram"))
+
+    def test_whatsapp_is_told_single_markers(self):
+        self.assertIn("single markers", self.note("whatsapp"))
+
+    def test_every_channel_warns_off_double_asterisks(self):
+        for channel in ("slack", "whatsapp"):
+            self.assertIn("**two", self.note(channel))
+
+    def test_an_unknown_channel_still_gets_a_note(self):
+        self.assertIn("Do not assume any Markdown", self.note("carrier-pigeon"))
 
 
 class SlackSendTest(unittest.TestCase):
