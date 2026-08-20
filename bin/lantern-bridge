@@ -83,6 +83,9 @@ UNSAFE_CHARS = "$`;|&<>(){}"
 # Per-channel outbound limits, from each provider's documented maximum.
 TELEGRAM_LIMIT = 4096
 SLACK_LIMIT = 4000
+# How many WhatsApp message ids to remember. Meta retries within minutes,
+# so this only has to outlast a retry window.
+WHATSAPP_SEEN_MAX = 512
 WHATSAPP_LIMIT = 4096
 
 # A headless turn can legitimately run for minutes; it is still bounded.
@@ -96,6 +99,19 @@ SLACK_POLL = 3.0
 # Slack rates conversations.history at Tier 3, about 50 requests a minute. Kept
 # under that so every watched conversation can be read on every pass.
 SLACK_TIER3_BUDGET = 45.0
+# Slack errors that will not fix themselves, so a DM returning one is retired
+# rather than retried. Everything else, rate limits included, is transient.
+SLACK_PERMANENT_ERRORS = frozenset(
+    {
+        "missing_scope",
+        "not_allowed_token_type",
+        "channel_not_found",
+        "not_in_channel",
+        "invalid_auth",
+        "account_inactive",
+        "token_revoked",
+    }
+)
 # How long to wait before asking Slack to open the DMs again, when the last
 # attempt opened none.
 DM_OPEN_RETRY = 60.0
@@ -954,6 +970,18 @@ class SlackAdapter(Adapter):
     def poll_once(self) -> None:
         self.open_dms()
         watched = self.poll_conversations()
+        # The sleep is in a finally because it is the rate limit, not a
+        # courtesy. http_json raises on 429 and on timeouts, and the channel
+        # error path raises too; leaving the sleep on the clean path only meant
+        # a failing bridge fell back to Adapter.run's five second backoff and
+        # sent len(watched) requests every five seconds, which is several times
+        # the budget this interval exists to hold.
+        try:
+            self._poll_watched(watched)
+        finally:
+            time.sleep(self.poll_interval(watched))
+
+    def _poll_watched(self, watched) -> None:
         for conversation in watched:
             payload = http_json(self.history_url(conversation), headers=self.headers())
             if not payload.get("ok", False):
@@ -961,6 +989,16 @@ class SlackAdapter(Adapter):
                 # slug is a fixed vocabulary, never a token, so it is safe to
                 # log and it is the only thing that names the cause.
                 slug = payload.get("error", "unknown")
+                if conversation in self.dms and slug not in SLACK_PERMANENT_ERRORS:
+                    # Transient: rate limits and Slack faults come back. Now
+                    # that every watched conversation is read on every pass, a
+                    # single bad window would otherwise retire every DM at
+                    # once, and open_dms never reopens one after its first
+                    # success, so the bridge would run channel-only until
+                    # somebody restarted it.
+                    log("slack: could not read the DM for %s (%s); will try again"
+                        % (self.dms[conversation], slug))
+                    continue
                 if conversation in self.dms:
                     # A DM that opens but cannot be read is the shape of
                     # im:write granted without im:history. Raising here would
@@ -979,7 +1017,6 @@ class SlackAdapter(Adapter):
             self.cursors[conversation] = oldest
             for user, reply_to, text in accepted:
                 self.offer(user, text, reply_to=reply_to)
-        time.sleep(self.poll_interval(watched))
 
     def thread_footer(self, user=None) -> str:
         # The one thing a threaded answer must say: the bridge cannot read
@@ -1177,7 +1214,19 @@ class WhatsAppAdapter(Adapter):
         # would otherwise run the helper twice and send two replies, consuming
         # the single worker twice on the way. Telegram dedupes with its offset
         # and Slack with a seen set; this is WhatsApp's.
-        self.seen = set()
+        #
+        # A dict rather than a set, because eviction has to drop the oldest and
+        # a wamid carries no order to sort by. Slack's ids are timestamps and
+        # can be sorted; sorting these would evict arbitrary entries, including
+        # one that arrived a second ago, and Meta's retry of that one would run
+        # the helper twice, which is the bug this exists to prevent.
+        self.seen = {}
+        # Webhook bodies arrive on ThreadingHTTPServer worker threads, so the
+        # check and the add have to be one step. Two overlapping deliveries of
+        # one id would otherwise both pass the check, and a resize during
+        # iteration would raise out of do_POST, costing Meta its 200 and
+        # earning another retry.
+        self._seen_lock = threading.Lock()
         if not self.verify_token:
             raise ConfigError(
                 "WHATSAPP_VERIFY_TOKEN is required: compare_digest of two empty "
@@ -1263,21 +1312,37 @@ class WhatsAppAdapter(Adapter):
         return found
 
     def remember(self, message_id: str) -> None:
-        self.seen.add(message_id)
-        if len(self.seen) > 512:
-            # Bounded on purpose: this runs for weeks. Meta retries within
-            # minutes, so anything this old will not come back.
-            for old in sorted(self.seen)[:256]:
-                self.seen.discard(old)
+        """Record an id, dropping the oldest when the record is full."""
+        with self._seen_lock:
+            self._remember_locked(message_id)
+
+    def _remember_locked(self, message_id: str) -> None:
+        self.seen[message_id] = None
+        # Bounded on purpose: this runs for weeks. Meta retries within minutes,
+        # so the oldest entries can never come back. Insertion order is what
+        # makes "oldest" meaningful here.
+        while len(self.seen) > WHATSAPP_SEEN_MAX:
+            self.seen.pop(next(iter(self.seen)))
+
+    def seen_before(self, message_id: str) -> bool:
+        """True when this id has already been taken. Records it if not.
+
+        One step under the lock: a check followed by a separate add lets two
+        threads carrying the same redelivery both decide they are first.
+        """
+        with self._seen_lock:
+            if message_id in self.seen:
+                return True
+            self._remember_locked(message_id)
+            return False
 
     def accepted_from(self, payload: dict):
         accepted = []
         for message_id, sender, text in self.extract_messages(payload):
             if message_id:
-                if message_id in self.seen:
+                if self.seen_before(message_id):
                     log("whatsapp: skipped a redelivered message")
                     continue
-                self.remember(message_id)
             if only_digits(sender) not in self.allowed:
                 log("whatsapp: dropped a message from an unlisted number")
                 continue

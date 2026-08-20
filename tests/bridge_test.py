@@ -831,6 +831,22 @@ class SlackParseTest(unittest.TestCase):
         self.assertTrue(any("missing_scope" in line for line in lines), lines)
         self.assertTrue(any("im:history" in line for line in lines), lines)
 
+    def test_the_rate_limit_holds_when_a_poll_fails(self):
+        # The sleep is the rate limit, not a courtesy. On the failure path it
+        # used to be skipped entirely, leaving Adapter.run's five second
+        # backoff to send len(watched) requests every five seconds.
+        slept = []
+        original_sleep = lb.time.sleep
+        lb.time.sleep = slept.append
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+        original_http = lb.http_json
+        lb.http_json = lambda *a, **k: (_ for _ in ()).throw(OSError("429"))
+        self.addCleanup(setattr, lb, "http_json", original_http)
+
+        with self.assertRaises(OSError):
+            self.adapter.poll_once()
+        self.assertEqual(slept, [self.adapter.poll_interval(["C123"])])
+
     def test_the_channel_failing_still_raises(self):
         original_http = lb.http_json
         lb.http_json = lambda *a, **k: {"ok": False, "error": "ratelimited"}
@@ -840,6 +856,55 @@ class SlackParseTest(unittest.TestCase):
         self.addCleanup(setattr, lb.time, "sleep", original_sleep)
         with self.assertRaises(RuntimeError):
             self.adapter.poll_once()
+
+    def test_a_transient_dm_error_keeps_the_dm(self):
+        # Every watched conversation is read on every pass now, so one bad
+        # window would otherwise retire every DM at once, and open_dms does not
+        # reopen one after its first success.
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        original = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original)
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+        original_http = lb.http_json
+
+        def flaky(url, payload=None, headers=None, timeout=None):
+            if "channel=D77" in url:
+                return {"ok": False, "error": "ratelimited"}
+            return {"ok": True, "messages": []}
+
+        lb.http_json = flaky
+        self.addCleanup(setattr, lb, "http_json", original_http)
+
+        self.adapter.poll_once()
+        self.assertIn("D77", self.adapter.dms)
+
+    def test_a_permanent_dm_error_retires_the_dm(self):
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        lines = []
+        original = lb.log
+        lb.log = lines.append
+        self.addCleanup(setattr, lb, "log", original)
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+        original_http = lb.http_json
+
+        def scoped(url, payload=None, headers=None, timeout=None):
+            if "channel=D77" in url:
+                return {"ok": False, "error": "missing_scope"}
+            return {"ok": True, "messages": []}
+
+        lb.http_json = scoped
+        self.addCleanup(setattr, lb, "http_json", original_http)
+
+        self.adapter.poll_once()
+        self.assertNotIn("D77", self.adapter.dms)
+        self.assertTrue(any("missing_scope" in line for line in lines), lines)
 
     def test_dms_are_retried_after_a_blip_rather_than_given_up_on(self):
         # A network failure at daemon start must not turn DMs off for the life
@@ -1108,7 +1173,60 @@ class WhatsAppDedupeTest(unittest.TestCase):
     def test_the_seen_set_stays_bounded(self):
         for i in range(700):
             self.adapter.remember("wamid.%d" % i)
-        self.assertLessEqual(len(self.adapter.seen), 512)
+        self.assertLessEqual(len(self.adapter.seen), lb.WHATSAPP_SEEN_MAX)
+
+    def test_eviction_drops_the_oldest_not_the_alphabetically_first(self):
+        # A wamid carries no time order, so sorting the ids evicts arbitrary
+        # entries. One that arrived a second ago could be dropped, Meta would
+        # retry it, and the helper would run twice: the exact bug the seen
+        # record exists to prevent.
+        first = "wamid.zzz_oldest"
+        self.adapter.remember(first)
+        for i in range(lb.WHATSAPP_SEEN_MAX):
+            self.adapter.remember("wamid.aaa_%06d" % i)
+        newest = "wamid.aaa_%06d" % (lb.WHATSAPP_SEEN_MAX - 1)
+        self.assertNotIn(first, self.adapter.seen)
+        self.assertIn(newest, self.adapter.seen)
+
+    def test_two_threads_carrying_one_redelivery_only_one_wins(self):
+        # do_POST runs on ThreadingHTTPServer workers, so a check followed by
+        # a separate add lets both threads decide they are first.
+        import threading as _threading
+
+        winners = []
+        start = _threading.Barrier(8)
+
+        def race():
+            start.wait()
+            if not self.adapter.seen_before("wamid.race"):
+                winners.append(1)
+
+        threads = [_threading.Thread(target=race) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(len(winners), 1)
+
+    def test_recording_while_another_thread_evicts_does_not_raise(self):
+        import threading as _threading
+
+        errors = []
+
+        def churn(tag):
+            try:
+                for i in range(400):
+                    self.adapter.seen_before("wamid.%s_%d" % (tag, i))
+            except Exception as exc:  # noqa: BLE001 - the point of the test
+                errors.append(exc)
+
+        threads = [_threading.Thread(target=churn, args=(t,)) for t in "abcd"]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        self.assertLessEqual(len(self.adapter.seen), lb.WHATSAPP_SEEN_MAX)
 
 
 WHATSAPP_SECRET = "app-secret-value"

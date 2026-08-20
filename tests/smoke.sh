@@ -29,8 +29,10 @@ open_dir=
 bridge_dir=
 autostart_dir=
 deadpane_dir=
+statedir_dir=
+probe_dir=
 elves_tmp=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$deadpane_dir" ] && rm -rf "$deadpane_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$deadpane_dir" ] && rm -rf "$deadpane_dir"; [ -n "$statedir_dir" ] && rm -rf "$statedir_dir"; [ -n "$probe_dir" ] && rm -rf "$probe_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -1418,5 +1420,106 @@ fi
 rm -rf "$deadpane_dir"
 deadpane_dir=
 printf 'ok: a dead bridge pane is replaced, not focused\n'
+
+# --open has to look for the lock where the daemon takes it. With no
+# HERDR_PLUGIN_STATE_DIR the daemon uses $config_dir/state, so an --open that
+# fell back to the checkout probed a lock nobody holds, always answered
+# "nothing running", closed the live pane past the grace window, and started a
+# second bridge that died on the first one's lock. Reading pane.id survived
+# that only because it was written under the same wrong directory.
+statedir_dir=$(mktemp -d)
+mkdir -p "$statedir_dir/config/state/bridge" "$statedir_dir/bin"
+cat >"$statedir_dir/bin/herdr" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STATEDIR_LOG"
+case "$1 $2 $3" in
+"pane get"*)
+    printf '{"result":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p2","workspace_id":"w1"}}}\n'
+    ;;
+"workspace get"*)
+    printf '{"result":{"workspace":{"label":"x","workspace_id":"w1"}}}\n'
+    ;;
+"plugin pane open"*)
+    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","workspace_id":"w1"}}}}\n'
+    ;;
+esac
+exit 0
+EOF
+chmod +x "$statedir_dir/bin/herdr"
+# The pane id lives under the config directory, where the daemon would put it.
+# Nothing is written into the checkout.
+printf 'w1:p2\n' >"$statedir_dir/config/state/bridge/pane.id"
+touch -t 202001010000 "$statedir_dir/config/state/bridge/pane.id"
+STATEDIR_LOG=$statedir_dir/calls.txt
+export STATEDIR_LOG
+: >"$STATEDIR_LOG"
+
+HERDR_PLUGIN_ROOT="$root" \
+    HERDR_PLUGIN_CONFIG_DIR="$statedir_dir/config" \
+    HERDR_BIN_PATH="$statedir_dir/bin/herdr" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null 2>&1 ||
+    fail "open without HERDR_PLUGIN_STATE_DIR should still succeed"
+grep -q 'pane close w1:p2' "$STATEDIR_LOG" ||
+    fail "open should read the state directory under the config dir, not the checkout"
+if [ -e "$root/state" ]; then
+    fail "open must not create a state directory inside the checkout"
+fi
+rm -rf "$statedir_dir"
+statedir_dir=
+
+# A probe that cannot answer must not be read as "nothing running". The wrong
+# answers are not symmetrical: a false "running" leaves a dead pane focused, a
+# false "not running" closes a live pane and seats a second daemon.
+probe_dir=$(mktemp -d)
+mkdir -p "$probe_dir/state/bridge" "$probe_dir/bin" "$probe_dir/config" "$probe_dir/py"
+cat >"$probe_dir/bin/herdr" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$PROBE_LOG"
+case "$1 $2 $3" in
+"pane get"*)
+    printf '{"result":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p2","workspace_id":"w1"}}}\n'
+    ;;
+"workspace get"*)
+    printf '{"result":{"workspace":{"label":"x","workspace_id":"w1"}}}\n'
+    ;;
+"plugin pane open"*)
+    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","workspace_id":"w1"}}}}\n'
+    ;;
+esac
+exit 0
+EOF
+chmod +x "$probe_dir/bin/herdr"
+# Passes helper_detect_python's version check, then fails the probe with 2.
+cat >"$probe_dir/py/python3" <<'EOF'
+#!/bin/sh
+case "$*" in
+*version_info*) exit 0 ;;
+*--daemon-running*) exit 2 ;;
+esac
+exit 0
+EOF
+chmod +x "$probe_dir/py/python3"
+printf 'w1:p2\n' >"$probe_dir/state/bridge/pane.id"
+touch -t 202001010000 "$probe_dir/state/bridge/pane.id"
+PROBE_LOG=$probe_dir/calls.txt
+export PROBE_LOG
+: >"$PROBE_LOG"
+
+probe_err=$probe_dir/err.txt
+PATH="$probe_dir/py:$PATH" \
+    HERDR_PLUGIN_ROOT="$root" \
+    HERDR_PLUGIN_CONFIG_DIR="$probe_dir/config" \
+    HERDR_PLUGIN_STATE_DIR="$probe_dir/state" \
+    HERDR_BIN_PATH="$probe_dir/bin/herdr" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null 2>"$probe_err" ||
+    fail "open should survive a probe that cannot answer"
+if grep -q 'pane close' "$PROBE_LOG"; then
+    fail "a probe that cannot answer must not close a pane"
+fi
+grep -q 'could not tell whether a bridge is already running' "$probe_err" ||
+    fail "a probe that cannot answer should say so"
+rm -rf "$probe_dir"
+probe_dir=
+printf 'ok: --open finds the daemon lock, and never guesses\n'
 
 printf 'ok\n'
