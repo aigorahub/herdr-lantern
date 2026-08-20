@@ -882,6 +882,27 @@ class SlackParseTest(unittest.TestCase):
         self.adapter.poll_once()
         self.assertIn("D77", self.adapter.dms)
 
+    def test_the_last_retired_dm_can_come_back_without_a_restart(self):
+        # A scope error's remedy is reinstalling the Slack app. open_dms stops
+        # asking once it has opened one DM, so without a timer reset the
+        # reinstall would take effect only at the next daemon restart.
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        self.adapter._dms_next_try = float("inf")
+        original = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original)
+
+        self.adapter.drop_conversation("D77")
+        self.assertEqual(self.adapter.dms, {})
+        self.assertNotEqual(self.adapter._dms_next_try, float("inf"))
+
+        original_http = lb.http_json
+        lb.http_json = lambda *a, **k: {"ok": True, "channel": {"id": "D88"}}
+        self.addCleanup(setattr, lb, "http_json", original_http)
+        self.adapter.open_dms(now=self.adapter._dms_next_try + 1.0)
+        self.assertIn("D88", self.adapter.dms)
+
     def test_a_permanent_dm_error_retires_the_dm(self):
         self.adapter.dms["D77"] = "U1"
         self.adapter.cursors["D77"] = "1000.000000"
@@ -1708,6 +1729,58 @@ class DaemonLockTest(unittest.TestCase):
         self.take()
         body = lb.daemon_lock_path(self.state).read_text(encoding="utf-8")
         self.assertEqual(body.strip(), str(os.getpid()))
+
+
+class DaemonProbeLockTest(unittest.TestCase):
+    """The probe and the daemon share one lock, moments apart."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(lb.release_daemon_locks)
+        self.state = tmp.name
+
+    def test_probe_then_immediate_acquire_succeeds(self):
+        # --open probes, then seats a pane whose daemon takes this same lock
+        # a moment later. Windows may not release a byte-range lock promptly
+        # on handle close, so the probe has to let go explicitly.
+        self.assertFalse(lb.daemon_running(self.state))
+        fd = lb.acquire_daemon_lock(self.state)
+        self.assertIsNotNone(fd)
+        os.close(fd)
+
+    def test_probe_sees_a_held_lock_and_releases_nothing(self):
+        fd = lb.acquire_daemon_lock(self.state)
+        try:
+            self.assertTrue(lb.daemon_running(self.state))
+            # The probe must not have broken the daemon's hold.
+            self.assertTrue(lb.daemon_running(self.state))
+        finally:
+            os.close(fd)
+        self.assertFalse(lb.daemon_running(self.state))
+
+    def test_acquire_retries_once_when_the_probe_holds_the_lock(self):
+        # A second --open press can hold the probe lock at the instant a
+        # starting daemon asks for it. One retry outlives that moment.
+        calls = []
+        original = lb._take_lock
+
+        def contended_once(fd):
+            calls.append(1)
+            if len(calls) == 1:
+                return False
+            return original(fd)
+
+        lb._take_lock = contended_once
+        self.addCleanup(setattr, lb, "_take_lock", original)
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+
+        fd = lb.acquire_daemon_lock(self.state)
+        self.assertIsNotNone(fd)
+        self.assertEqual(len(calls), 2)
+        os.close(fd)
 
 
 class DispatchLoopTest(unittest.TestCase):

@@ -966,6 +966,12 @@ class SlackAdapter(Adapter):
     def drop_conversation(self, conversation: str) -> None:
         self.dms.pop(conversation, None)
         self.cursors.pop(conversation, None)
+        if not self.dms:
+            # The last DM is gone, usually to a scope error whose remedy is a
+            # reinstall of the Slack app. open_dms stops asking once it has
+            # opened one, so without this the fix would take effect only at
+            # the next daemon restart, and nothing would say so.
+            self._dms_next_try = time.time() + DM_OPEN_RETRY
 
     def poll_once(self) -> None:
         self.open_dms()
@@ -1008,7 +1014,8 @@ class SlackAdapter(Adapter):
                     log(
                         "slack: no longer reading the DM for %s (%s); "
                         "reading a DM needs the im:history scope and an app "
-                        "reinstall" % (self.dms[conversation], slug)
+                        "reinstall, then a bridge restart"
+                        % (self.dms[conversation], slug)
                     )
                     self.drop_conversation(conversation)
                     continue
@@ -1448,6 +1455,40 @@ def _take_lock(fd):
     return True
 
 
+def _release_lock(fd) -> None:
+    """Undo _take_lock before closing the descriptor.
+
+    Closing the handle releases the lock on both platforms eventually, but
+    Windows documents that a byte-range lock released by handle close may not
+    be released immediately. The probe in daemon_running runs moments before
+    a fresh daemon tries to take this same lock, and a delayed release would
+    kill that daemon with "already running" and no retry, so the probe lets
+    go explicitly.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    if fcntl is not None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        return
+    try:
+        import msvcrt
+    except ImportError:
+        return
+    try:
+        os.lseek(fd, LOCK_BYTE_OFFSET, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    finally:
+        os.lseek(fd, 0, os.SEEK_SET)
+
+
 def acquire_daemon_lock(state_dir):
     """One bridge per state directory. Returns the fd to hold, or None.
 
@@ -1465,6 +1506,13 @@ def acquire_daemon_lock(state_dir):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
     taken = _take_lock(fd)
+    if taken is False:
+        # The holder can be the --open probe, which takes this lock for a
+        # moment to ask whether a daemon is running and lets go straight
+        # after. Dying on that instant would end a daemon whose own pane was
+        # seated a second ago, so give the holder one moment to finish.
+        time.sleep(0.2)
+        taken = _take_lock(fd)
     if taken is None:
         os.close(fd)
         log(
@@ -1707,7 +1755,12 @@ def daemon_running(state_dir) -> bool:
                 "cannot tell whether a bridge is running: this Python has "
                 "neither fcntl nor msvcrt"
             )
-        return not taken
+        if taken:
+            # Held only to answer the question. Let go before the close, or
+            # a daemon started moments from now can find it still held.
+            _release_lock(fd)
+            return False
+        return True
     finally:
         try:
             os.close(fd)
