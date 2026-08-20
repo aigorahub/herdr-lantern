@@ -2,6 +2,81 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.6.0] - 2026-08-20
+
+### Fixed
+
+These came out of a pre-merge review of the Slack work below, and every one of
+them was introduced by it.
+
+- The dedupe set lost a whole conversation at a time. It changed from holding
+  timestamps to holding `(conversation, timestamp)` pairs, but the eviction
+  still sorted the pairs, which sorts by conversation id first. Channel ids
+  start with `C` and DM ids with `D`, so a busy DM evicted every channel entry
+  before touching any DM entry, newest included. That newest entry is the
+  cursor boundary the set exists to protect, so the next poll could answer the
+  same channel message twice. Eviction now sorts on the timestamp.
+- Splitting a long reply ate the shape it was sent with. The chunk boundary
+  did `rstrip()` and `lstrip("\n ")`, so a blank line between steps vanished
+  and an indented continuation line arrived flush left. Exactly one separator
+  character is now removed, which is what the new formatting instruction
+  promises the helper.
+- A DM that opened but could not be read took the channel down with it, once
+  per poll, forever. That is the shape of `im:write` granted without
+  `im:history`. The failure raised out of the poll, and the retry loop logged
+  only the exception class, discarding the error slug that names the cause.
+  Such a DM is now dropped with the slug and the missing scope named, and the
+  channel keeps working.
+- A network blip while the daemon started turned DMs off for the life of the
+  process and reported it as a missing scope. Opening is now retried on a slow
+  timer until at least one DM opens.
+- The threaded footer told people to DM the bot based on whether anyone had a
+  DM open, not whether they did. Someone whose own DM failed to open was sent
+  somewhere nothing is read. The footer now follows the person it is answering.
+- The autostart hook read `BRIDGE_AUTOSTART` anchored at column 0 and matched
+  only lowercase, while the daemon's parser strips the line first. An indented
+  key was therefore valid config that the hook could not see, and the symptom
+  was a key that looks set, no bridge, and nothing logged. The hook now matches
+  the daemon, accepts any case, and says so when the value is set to something
+  it does not understand.
+
+### Added
+
+- Slack DMs. The bridge now opens and polls each allowlisted member's DM with
+  the bot, besides the one watched channel. Needs the `im:history` and
+  `im:write` scopes and an app reinstall; without them the bridge logs which
+  scope is missing and runs channel-only, as before. It also needs the app's
+  Messages tab switched on under App Home, which is a setting rather than a
+  scope: until it is, Slack refuses to let anyone send the app a DM at all.
+  Both the README and the Slack trial guide say so, and the trial guide's
+  troubleshooting table names the symptom.
+- `BRIDGE_AUTOSTART`. Set it to `1` in `bridge.conf` and a `[[startup]]` hook
+  has the Herdr server seat the bridge pane itself, so no terminal stays open
+  for the bridge. The hook reads the config file only, exits quietly when the
+  key is off or the file does not exist, and never seeds anything.
+
+### Changed
+
+- Slack replies follow the message and the session follows the person. A
+  channel message is answered in its own thread, so the channel stays
+  readable; a DM is answered in the DM; and both share one conversation per
+  allowlisted member, so a question asked in the channel continues in the DM
+  without starting over. Sessions used to be keyed by the channel, so an
+  existing conversation starts fresh once on upgrade.
+- Threaded answers carry one line saying the bridge cannot read the thread.
+  Slack's history API does not return thread replies, so a reply typed into
+  the thread reaches nobody; the line says where to continue instead.
+- Slack polling is round-robin, one conversation per pass, so watching the
+  DMs costs the same request rate as watching the channel alone.
+- The remote appendix separates brevity from formatting. A conversational
+  answer is two or three short sentences, but anything with a shape, a list,
+  steps, a recipe, or output relayed from another agent, is passed through
+  with its own line breaks and numbering. The first version of this said only
+  "keep replies short" with "no headings, no tables", and a relayed recipe
+  came back as paragraphs with the numbering run inline, losing the shape the
+  user had asked to see. Length is explicitly not a reason to condense: line
+  breaks reach the chat app unchanged and long replies are split at one.
+
 ## [0.5.1] - 2026-08-19
 
 ### Fixed

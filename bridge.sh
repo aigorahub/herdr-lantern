@@ -39,6 +39,46 @@ bridge_pane_title='Lantern Bridge'
 # the pane runs this file again without --open. The real herdr is called
 # directly here, the way open.sh does: the wrapper's gate is for the helper
 # CLI, not for the plugin's own entrypoints.
+# --autostart is the [[startup]] hook: Herdr runs it once after the server
+# comes up. It never seeds anything and it never becomes the daemon. When the
+# owner has written BRIDGE_AUTOSTART="1" into an existing bridge.conf, it
+# turns into --open, which seats the bridge pane inside Herdr; otherwise it
+# exits quietly, so the hook costs nothing on a machine that never configured
+# the bridge.
+if [ "${1:-}" = "--autostart" ]; then
+    auto_config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
+    if [ -z "$auto_config_dir" ]; then
+        auto_config_dir=$(herdr plugin config-dir aigora.lantern 2>/dev/null) ||
+            auto_config_dir=
+    fi
+    [ -n "$auto_config_dir" ] || exit 0
+    [ -f "$auto_config_dir/bridge.conf" ] || exit 0
+    # Match the daemon's own parser, which strips the line before splitting on
+    # the first '=', so an indented key is valid config. Anchoring at column 0
+    # here made a line the daemon accepts invisible to this hook, and the
+    # symptom was a key that looks set and a bridge that never starts.
+    auto_value=$(sed -n 's/^[[:space:]]*BRIDGE_AUTOSTART[[:space:]]*=//p' \
+        "$auto_config_dir/bridge.conf" | sed -n '1p')
+    # The conf writes values quoted; both quote styles count as the bare value.
+    auto_value=$(printf '%s' "$auto_value" | tr -d '[:space:]' | tr 'A-Z' 'a-z')
+    auto_value=${auto_value%\"}
+    auto_value=${auto_value#\"}
+    auto_value=${auto_value%\'}
+    auto_value=${auto_value#\'}
+    case $auto_value in
+    1 | yes | true) ;;
+    '') exit 0 ;;
+    *)
+        # Set to something, but not something this understands. Silence here
+        # leaves nothing at all to diagnose from.
+        printf 'lantern bridge: BRIDGE_AUTOSTART=%s not understood; not starting. Use 1, yes, or true.\n' \
+            "$auto_value" >&2
+        exit 0
+        ;;
+    esac
+    set -- --open
+fi
+
 if [ "${1:-}" = "--open" ]; then
     real_herdr=${HERDR_BIN_PATH:-}
     case $real_herdr in

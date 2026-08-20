@@ -338,6 +338,43 @@ class SplitMessageTest(unittest.TestCase):
     def test_empty_text_is_one_empty_chunk(self):
         self.assertEqual(lb.split_message("", 100), [""])
 
+    def test_interior_line_breaks_survive(self):
+        # A relayed list has to arrive as a list. Splitting cuts on newlines,
+        # so the risk is it eating the ones inside a chunk.
+        recipe = "Koftas\n1. Drain the tuna.\n2. Flake it.\n3. Chill it.\n"
+        self.assertEqual(lb.split_message(recipe, 4000), [recipe])
+        self.assertEqual(lb.split_message(recipe, 4000)[0].count("\n"), 4)
+
+    def test_line_breaks_survive_a_split_across_chunks(self):
+        block = "\n".join("%d. step" % n for n in range(1, 21))
+        chunks = lb.split_message(block, 40)
+        self.assertGreater(len(chunks), 1)
+        # Rejoining restores every line: nothing was flattened into a space.
+        self.assertEqual("\n".join(chunks).split("\n"), block.split("\n"))
+
+    def test_blank_lines_and_indentation_survive_a_split(self):
+        # The appendix promises the helper that line breaks reach the chat app
+        # unchanged, so length is not a reason to condense a list. Stripping at
+        # the chunk boundary broke that promise for exactly the shaped content
+        # the instruction asks for: blank lines between steps vanished and
+        # indented continuation lines arrived flush left.
+        shaped = (
+            "1. first step\n"
+            "\n"
+            "2. second step\n"
+            "   - detail a\n"
+            "   - detail b\n"
+            "\n"
+            "3. third step\n"
+        )
+        chunks = lb.split_message(shaped, 30)
+        self.assertGreater(len(chunks), 1)
+        # Rejoining with the one separator that was removed gives the
+        # original back byte for byte, blank lines and indentation included.
+        self.assertEqual("\n".join(chunks), shaped)
+        self.assertTrue(any(c.startswith("   - detail a") or "\n   - detail a" in c
+                            for c in chunks), chunks)
+
     def test_every_chunk_respects_the_limit(self):
         text = ("word " * 400).strip()
         chunks = lb.split_message(text, 50)
@@ -710,7 +747,7 @@ class TelegramSendTest(unittest.TestCase):
         inbox = queue.Queue()
         cfg = base_config(TELEGRAM_BOT_TOKEN="tok", TELEGRAM_ALLOWED_CHATS="42")
         lb.TelegramAdapter(cfg, inbox).offer(42, "hi")
-        self.assertEqual(inbox.get_nowait(), ("telegram", "42", "hi"))
+        self.assertEqual(inbox.get_nowait(), ("telegram", "42", "42", "hi"))
 
 
 def slack_message(ts, user="U1", text="hello", **extra):
@@ -729,14 +766,114 @@ class SlackParseTest(unittest.TestCase):
         self.inbox = queue.Queue()
         self.adapter = lb.SlackAdapter(cfg, self.inbox, now=1000.0)
 
-    def parse(self, messages):
+    def parse(self, messages, conversation=None):
         # Slack returns history newest first.
-        return self.adapter.parse_history({"ok": True, "messages": list(reversed(messages))})
+        return self.adapter.parse_history(
+            {"ok": True, "messages": list(reversed(messages))}, conversation
+        )
 
     def test_allowed_user_is_accepted(self):
         accepted, oldest = self.parse([slack_message("1001.000100", "U1", " hi ")])
-        self.assertEqual(accepted, [("C123", "hi")])
+        # The session keys on the person; the reply goes to the message's
+        # own thread, which is what keeps the channel readable.
+        self.assertEqual(accepted, [("U1", ("C123", "1001.000100", "U1"), "hi")])
         self.assertEqual(oldest, "1001.000100")
+
+    def test_a_dm_replies_in_the_dm_with_no_thread(self):
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        accepted, oldest = self.parse(
+            [slack_message("1001.000100", "U1", "still there?")], conversation="D77"
+        )
+        self.assertEqual(accepted, [("U1", ("D77", None, "U1"), "still there?")])
+        self.assertEqual(oldest, "1001.000100")
+        # The channel cursor did not move: cursors are per conversation.
+        self.assertEqual(self.adapter.cursors["C123"], "1000.000000")
+
+    def test_channel_and_dm_share_one_session_key(self):
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        in_channel, _ = self.parse([slack_message("1001.000100", "U1", "one")])
+        in_dm, _ = self.parse(
+            [slack_message("1002.000100", "U1", "two")], conversation="D77"
+        )
+        self.assertEqual(in_channel[0][0], in_dm[0][0])
+
+    def test_a_dm_that_cannot_be_read_is_dropped_and_named(self):
+        # im:write without im:history: the DM opens, then every read fails.
+        # Raising would retry forever with the reason discarded and take the
+        # channel's poll down each cycle.
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        self.adapter._poll_order = ["D77"]
+        lines = []
+        original = lb.log
+        lb.log = lines.append
+        self.addCleanup(setattr, lb, "log", original)
+        original_http = lb.http_json
+        lb.http_json = lambda *a, **k: {"ok": False, "error": "missing_scope"}
+        self.addCleanup(setattr, lb, "http_json", original_http)
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
+
+        self.adapter.poll_once()
+
+        self.assertNotIn("D77", self.adapter.dms)
+        self.assertNotIn("D77", self.adapter.cursors)
+        self.assertTrue(any("missing_scope" in line for line in lines), lines)
+        self.assertTrue(any("im:history" in line for line in lines), lines)
+
+    def test_the_channel_failing_still_raises(self):
+        original_http = lb.http_json
+        lb.http_json = lambda *a, **k: {"ok": False, "error": "ratelimited"}
+        self.addCleanup(setattr, lb, "http_json", original_http)
+        self.adapter._poll_order = ["C123"]
+        with self.assertRaises(RuntimeError):
+            self.adapter.poll_once()
+
+    def test_dms_are_retried_after_a_blip_rather_than_given_up_on(self):
+        # A network failure at daemon start must not turn DMs off for the life
+        # of the process, and must not be reported as a missing scope.
+        calls = []
+        original_http = lb.http_json
+
+        def flaky(url, payload=None, headers=None, timeout=None):
+            calls.append(url)
+            # The allowlist holds two users, so one attempt is two calls.
+            if len(calls) <= 2:
+                raise OSError("network is down")
+            return {"ok": True, "channel": {"id": "D99"}}
+
+        lb.http_json = flaky
+        self.addCleanup(setattr, lb, "http_json", original_http)
+        original = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original)
+
+        self.adapter.open_dms(now=0.0)
+        self.assertEqual(self.adapter.dms, {})
+        self.assertEqual(len(calls), 2)
+        # Too soon: nothing asked again.
+        self.adapter.open_dms(now=1.0)
+        self.assertEqual(len(calls), 2)
+        # After the retry window it asks again and succeeds.
+        self.adapter.open_dms(now=lb.DM_OPEN_RETRY + 1.0)
+        self.assertIn("D99", self.adapter.dms)
+        # Having opened one, it stops asking.
+        before = len(calls)
+        self.adapter.open_dms(now=lb.DM_OPEN_RETRY * 100)
+        self.assertEqual(len(calls), before)
+
+    def test_dm_open_payload_shape(self):
+        url, payload = self.adapter.dm_open_payload("U1")
+        self.assertEqual(url, "https://slack.com/api/conversations.open")
+        self.assertEqual(payload, {"users": "U1"})
+
+    def test_poll_order_round_robins_the_channel_and_every_dm(self):
+        self.adapter.dms = {"D1": "U1", "D2": "U2"}
+        seen = [self.adapter.poll_conversations()[0] for _ in range(6)]
+        self.assertEqual(seen, ["C123", "D1", "D2", "C123", "D1", "D2"])
 
     def test_own_bot_message_is_skipped(self):
         accepted, oldest = self.parse(
@@ -766,32 +903,51 @@ class SlackParseTest(unittest.TestCase):
         )
         # Oldest first, whichever order Slack listed them in, and the cursor
         # clears the dropped message too.
-        self.assertEqual([t for _c, t in accepted], ["one", "two"])
+        self.assertEqual([t for _u, _r, t in accepted], ["one", "two"])
         self.assertEqual(oldest, "1003.000100")
 
     def test_a_replayed_message_is_not_answered_twice(self):
         message = slack_message("1001.000100", "U1", "hi")
         self.assertEqual(len(self.parse([message])[0]), 1)
-        self.adapter.oldest = "1000.000000"
+        self.adapter.cursors["C123"] = "1000.000000"
         self.assertEqual(self.parse([message])[0], [])
 
     def test_messages_before_startup_never_arrive(self):
         # The cursor is sent to Slack, so old history is not returned at all;
         # this pins the cursor's initial value, which is what does that.
-        self.assertEqual(self.adapter.oldest, "%.6f" % 1000.0)
+        self.assertEqual(self.adapter.cursors["C123"], "%.6f" % 1000.0)
         self.assertIn("oldest=1000.000000", self.adapter.history_url())
         self.assertIn("channel=C123", self.adapter.history_url())
 
     def test_seen_set_stays_bounded(self):
         for i in range(700):
-            self.adapter.remember("2000.%06d" % i)
+            self.adapter.remember("C123", "2000.%06d" % i)
         self.assertLessEqual(len(self.adapter.seen), 512)
 
+    def test_pruning_keeps_the_newest_of_every_conversation(self):
+        # The set holds (conversation, ts) pairs. Sorting the pairs sorts by
+        # conversation id first, so pruning that way evicts one conversation
+        # whole: channel ids start with C, DM ids with D, so a busy DM would
+        # wipe the channel including its newest entry, which is the cursor
+        # boundary. Losing that answers the same message twice.
+        for i in range(30):
+            self.adapter.remember("C123", "3000.%06d" % i)
+        for i in range(490):
+            self.adapter.remember("D777", "4000.%06d" % i)
+        self.adapter.remember("C123", "5000.000000")
+        for i in range(200):
+            self.adapter.remember("D777", "6000.%06d" % i)
+        self.assertLessEqual(len(self.adapter.seen), 512)
+        self.assertIn(("C123", "5000.000000"), self.adapter.seen)
+        survivors = {c for c, _ts in self.adapter.seen}
+        self.assertIn("C123", survivors)
+
     def test_garbage_payload_does_not_raise(self):
-        self.assertEqual(self.adapter.parse_history({}), ([], self.adapter.oldest))
+        startup = self.adapter.cursors["C123"]
+        self.assertEqual(self.adapter.parse_history({}), ([], startup))
         self.assertEqual(
             self.adapter.parse_history({"messages": [None, {"ts": "nope"}]}),
-            ([], self.adapter.oldest),
+            ([], startup),
         )
 
 
@@ -804,7 +960,44 @@ class SlackSendTest(unittest.TestCase):
         )
         self.adapter = lb.SlackAdapter(cfg, queue.Queue(), now=1000.0)
 
-    def test_payload_shape(self):
+    def test_dm_payload_shape(self):
+        sends = self.adapter.send_payloads(("D77", None), "hi")
+        self.assertEqual(
+            sends, [("https://slack.com/api/chat.postMessage", {"channel": "D77", "text": "hi"})]
+        )
+
+    def test_channel_reply_lands_in_the_thread(self):
+        sends = self.adapter.send_payloads(("C123", "1001.000100"), "hi")
+        self.assertEqual(len(sends), 1)
+        _url, payload = sends[0]
+        self.assertEqual(payload["channel"], "C123")
+        self.assertEqual(payload["thread_ts"], "1001.000100")
+        # A threaded answer must say the bridge cannot read the thread, or
+        # the person replies into a hole.
+        self.assertIn("cannot see replies in this thread", payload["text"])
+
+    def test_footer_points_at_the_dm_when_that_person_has_one(self):
+        self.adapter.dms["D77"] = "U1"
+        _url, payload = self.adapter.send_payloads(("C123", "1001.000100", "U1"), "hi")[0]
+        self.assertIn("DM me to continue", payload["text"])
+
+    def test_footer_points_at_the_channel_when_dms_are_unavailable(self):
+        _url, payload = self.adapter.send_payloads(("C123", "1001.000100", "U1"), "hi")[0]
+        self.assertIn("Post in the channel to continue", payload["text"])
+
+    def test_footer_does_not_send_a_user_to_a_dm_that_is_not_theirs(self):
+        # open_dms carries on past a user whose DM will not open. Telling that
+        # person to DM would send them somewhere nothing is read.
+        self.adapter.dms["D77"] = "U1"
+        _url, payload = self.adapter.send_payloads(("C123", "1001.000100", "U2"), "hi")[0]
+        self.assertIn("Post in the channel to continue", payload["text"])
+
+    def test_a_two_part_reply_target_still_sends(self):
+        sends = self.adapter.send_payloads(("D77", None), "hi")
+        self.assertEqual(sends[0][1]["channel"], "D77")
+
+    def test_a_plain_string_target_still_sends(self):
+        # The failure path in serve() sends to whatever it was given.
         sends = self.adapter.send_payloads("C123", "hi")
         self.assertEqual(
             sends, [("https://slack.com/api/chat.postMessage", {"channel": "C123", "text": "hi"})]
@@ -816,10 +1009,12 @@ class SlackSendTest(unittest.TestCase):
 
     def test_long_reply_is_split_at_the_slack_limit(self):
         text = "\n".join(["y" * 200] * 60)
-        sends = self.adapter.send_payloads("C123", text)
+        sends = self.adapter.send_payloads(("C123", "1001.000100"), text)
         self.assertGreater(len(sends), 1)
         for _url, payload in sends:
             self.assertLessEqual(len(payload["text"]), lb.SLACK_LIMIT)
+            # Every chunk of a threaded reply stays in the thread.
+            self.assertEqual(payload["thread_ts"], "1001.000100")
 
 
 WHATSAPP_SECRET = "app-secret-value"
@@ -1019,7 +1214,8 @@ class WhatsAppWebhookTest(unittest.TestCase):
         status, _body = self.post(raw, sign(raw))
         self.assertEqual(status, 200)
         self.assertEqual(
-            self.inbox.get(timeout=5), ("whatsapp", "15551234567", "light the field")
+            self.inbox.get(timeout=5),
+            ("whatsapp", "15551234567", "15551234567", "light the field"),
         )
 
     def test_bad_signature_is_401_and_enqueues_nothing(self):
@@ -1368,8 +1564,8 @@ class DispatchLoopTest(unittest.TestCase):
         worker.start()
         self.assertTrue(started.wait(10), "the adapter thread never started")
         inbox = captured[0].inbox
-        inbox.put(("telegram", "1", "first"))
-        inbox.put(("telegram", "1", "second"))
+        inbox.put(("telegram", "1", "1", "first"))
+        inbox.put(("telegram", "1", "1", "second"))
         self.assertTrue(answered.wait(10), "the loop died on the first message")
         self.assertTrue(worker.is_alive())
         # The first turn failed before its reply, so the user hears about it.

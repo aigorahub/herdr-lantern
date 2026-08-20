@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.5.1** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.6.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -188,6 +188,13 @@ The **Lantern Bridge** is a second pane that answers chat messages with the
 same lantern. Open it with `herdr plugin action invoke aigora.lantern.bridge`,
 or run `sh bridge.sh` from a checkout. Leave it running; it is a daemon.
 
+No terminal has to stay open for it. The pane lives inside the Herdr server,
+and `BRIDGE_AUTOSTART="1"` in `bridge.conf` makes the server seat that pane
+itself on startup, so the bridge is simply up whenever Herdr is. Autostart
+reads the config file only, so the tokens must live in `bridge.conf` (it is
+created `0600`) rather than in an exported variable, which no longer exists
+by the time the server boots.
+
 One bridge runs at a time. Invoking the action again focuses the pane that is
 already open, and a second daemon on the same state directory refuses to start
 and names the lock file — two pollers on one token would answer every message
@@ -210,6 +217,7 @@ is empty, so tokens can stay out of the file.
 
 | Key | What it is |
 | --- | --- |
+| `BRIDGE_AUTOSTART` | `1`, `yes`, or `true`: the Herdr server opens the bridge pane on startup |
 | `BRIDGE_HELPER` | `claude` or `codex`; empty = first of those on `PATH` |
 | `BRIDGE_MODEL` | optional `--model` |
 | `BRIDGE_EFFORT` | `claude --effort`, `codex model_reasoning_effort` |
@@ -253,12 +261,28 @@ the bridge in a group, allowlist the user ids of the people who may drive it;
 their messages are answered there and everyone else's are dropped.
 
 **Slack.** Create an app at api.slack.com, add the bot scopes
-`channels:history` and `chat:write`, install it to the workspace, and invite
-the bot to the channel (`/invite @yourbot`). `SLACK_CHANNEL` is that channel's
-id (`C…`), and `SLACK_ALLOWED_USERS` holds your member id (`U…`). The bridge
-polls that one channel and ignores everything it did not hear from an
-allowlisted human. Step by step, including where to find both ids and what to
-do when it does not answer: [docs/slack-trial.md](docs/slack-trial.md).
+`channels:history`, `chat:write`, `im:history`, and `im:write`, install it to
+the workspace, and invite the bot to the channel (`/invite @yourbot`). For the
+DM half, also switch on **App Home** → **Show Tabs** → **Messages Tab** and its
+checkbox: without it Slack will not let anyone send the app a direct message,
+whatever the scopes say. That is a setting, not a scope, so it needs no
+reinstall; the scopes do.
+`SLACK_CHANNEL` is that channel's id (`C…`), and `SLACK_ALLOWED_USERS` holds
+your member id (`U…`). The bridge polls that one channel and each allowlisted
+member's DM with the bot, and ignores everything it did not hear from an
+allowlisted human.
+
+Replies follow the message and the session follows the person. A message in
+the channel is answered in its own thread, so the channel stays readable; a
+DM is answered in the DM. Both places share one conversation per person, so a
+question asked in the channel can be continued in the DM without starting
+over. Threads are reply-only: Slack's history API does not return thread
+replies, so the bridge cannot see anything typed inside one, and the threaded
+answer says so. Without the two `im:` scopes the bridge logs which scope is
+missing and runs channel-only.
+
+Step by step, including where to find both ids and what to do when it does
+not answer: [docs/slack-trial.md](docs/slack-trial.md).
 
 **WhatsApp.** Meta Cloud API only. Create a Meta app with the WhatsApp
 product, note the phone number id, the access token, and the app secret. The
@@ -276,7 +300,11 @@ token, and subscribe to `messages`. Every POST is checked against
 required rather than optional: without it the tunnel is an open door.
 
 Text messages only, both directions. Replies are split at each provider's
-limit.
+limit, at a line break where there is one nearby, so a list stays a list.
+
+Conversational answers are short by instruction. Content is not: a list, a
+set of steps, or output relayed from another agent is passed through with its
+own line breaks and numbering rather than condensed into a paragraph.
 
 ### What a sender gets
 

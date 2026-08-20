@@ -1,9 +1,14 @@
 id = "aigora.lantern"
 name = "Lantern, by Elves"
-version = "0.5.1"
+version = "0.6.0"
 min_herdr_version = "0.7.5"
 description = "From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field."
 platforms = ["linux", "macos", "windows"]
+
+[[startup]]
+# One-shot: after the server is up, seat the bridge pane when the owner set
+# BRIDGE_AUTOSTART="1" in bridge.conf. Exits quietly otherwise.
+command = ["sh", "bridge.sh", "--autostart"]
 
 [[panes]]
 id = "helper"

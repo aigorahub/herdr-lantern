@@ -8,6 +8,11 @@
 # A channel turns on when its credential is set, and refuses to start until its
 # allowlist names who may talk to it.
 
+# Start the bridge with the Herdr server, in its own Herdr pane, so no
+# terminal has to stay open. "1", "yes", or "true"; anything else means the
+# bridge starts only when you open it yourself.
+BRIDGE_AUTOSTART=""
+
 # Headless helper CLI. claude or codex only -- they are the two with a real
 # one-shot mode that also resumes. Empty: the first of them on PATH.
 BRIDGE_HELPER=""

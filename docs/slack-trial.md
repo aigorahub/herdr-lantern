@@ -32,14 +32,28 @@ Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** �
 **From scratch**. Name it something the channel will recognise (`Lantern` is
 fine) and pick your workspace.
 
-In **OAuth & Permissions**, scroll to **Bot Token Scopes** and add exactly two:
+In **OAuth & Permissions**, scroll to **Bot Token Scopes** and add exactly
+four:
 
 | Scope | Why |
 | --- | --- |
 | `channels:history` | read the messages in the channel it watches |
 | `chat:write` | post its answers back |
+| `im:history` | read your DM with the bot, where a conversation continues |
+| `im:write` | open that DM |
 
-Add nothing else. The bridge uses no other Slack API.
+Add nothing else. The bridge uses no other Slack API. If you added scopes
+after installing the app, reinstall it from this same page; scope changes do
+not take effect until you do.
+
+Then turn the DM on. Scopes alone do not do it: a Slack app cannot be sent a
+direct message until its Messages tab is enabled, and Slack shows either no
+message box at all or "Sending messages to this app has been turned off".
+
+Go to **App Home** in the left sidebar, find **Show Tabs**, switch on
+**Messages Tab**, and tick **Allow users to send Slash commands and messages
+from the messages tab**. This one is a setting rather than a scope, so it
+takes effect at once with no reinstall.
 
 If you plan to watch a **private** channel, use `groups:history` instead of
 `channels:history`. Everything else is the same.
@@ -166,6 +180,18 @@ the daemon, then send your test message.
 `SLACK_ALLOWED_USERS` are dropped, as are the bot's own messages and Slack's
 join/leave notices.
 
+**Channel answers land in a thread; the conversation lives in your DM.** A
+message in the channel is answered in its own thread, so the channel stays
+readable. Do not reply inside the thread: Slack's history API does not return
+thread replies, so the bridge cannot see them, and the threaded answer says
+so. Open the bot's DM instead and carry on there; it is the same conversation,
+because the session follows you rather than the room. The DM is also simply
+the better place to talk to it, phone included.
+
+**No terminal, if you want that.** Once the tokens are in `bridge.conf`
+rather than exported, set `BRIDGE_AUTOSTART="1"` in the same file and the
+Herdr server seats the bridge pane itself on startup.
+
 **Mutating Herdr still needs your confirmation.** Inspect commands run
 normally, but anything that creates, starts, focuses, closes, or prompts is
 blocked until you confirm the exact target — and over Slack that confirmation
@@ -190,6 +216,8 @@ cannot see any other conversation.
 | `missing_scope` in the log | A scope was added after installing. Re-install the app from **OAuth & Permissions**; scope changes need it. |
 | `a lantern bridge is already running` | One is. The message names the lock file. Stop that daemon first. |
 | `no bridge helper on PATH` | Neither `claude` nor `codex` is installed, or `BRIDGE_HELPER` names something else. |
+| You cannot type a DM to the bot | The Messages tab is off. **App Home** → **Show Tabs** → **Messages Tab**, plus the checkbox under it. Not a scope, so no reinstall. |
+| The DM never answers, but the channel does | The `im:history` and `im:write` scopes were added after the app was installed. Reinstall it. The bridge log names the missing scope. |
 
 The daemon logs one line per message with the channel, the sender, and a byte
 count. It never logs message text or any token, and an unexpected error inside

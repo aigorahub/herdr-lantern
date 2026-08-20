@@ -36,6 +36,7 @@ from pathlib import Path
 SUPPORTED_HELPERS = ("claude", "codex")
 
 CONF_KEYS = (
+    "BRIDGE_AUTOSTART",
     "BRIDGE_HELPER",
     "BRIDGE_MODEL",
     "BRIDGE_EFFORT",
@@ -92,6 +93,9 @@ HELPER_TIMEOUT = 900
 TELEGRAM_POLL = 50
 # Slack has no long poll on this endpoint, so it is a plain interval.
 SLACK_POLL = 3.0
+# How long to wait before asking Slack to open the DMs again, when the last
+# attempt opened none.
+DM_OPEN_RETRY = 60.0
 HTTP_TIMEOUT = 30
 LONG_POLL_TIMEOUT = TELEGRAM_POLL + 15
 
@@ -426,13 +430,18 @@ def split_message(text: str, limit: int) -> list:
             chunks.append(rest[:cut])
             rest = rest[cut:]
             continue
-        chunk = rest[:cut].rstrip()
-        rest = rest[cut:].lstrip("\n ")
-        # A window that held nothing but whitespace up to the break leaves an
-        # empty chunk, and every provider rejects an empty message -- so the
-        # send raises, the dispatch loop logs one "send failed" line, and the
-        # whole reply is lost rather than one blank line of it.
-        if chunk:
+        # Take everything up to the break and drop exactly the one character
+        # that was the break. Stripping more ate the shape the message was
+        # sent for: a blank line between steps disappeared, and an indented
+        # continuation line arrived flush left. The appendix now promises the
+        # helper that line breaks survive, so this has to keep that promise.
+        chunk = rest[:cut]
+        rest = rest[cut + 1:]
+        # A window holding nothing but whitespace up to the break leaves a
+        # blank chunk, and every provider rejects an empty message -- the send
+        # raises, the dispatch loop logs one "send failed" line, and the whole
+        # reply is lost rather than one blank line of it.
+        if chunk.strip():
             chunks.append(chunk)
     if rest:
         chunks.append(rest)
@@ -461,8 +470,22 @@ def remote_appendix(cfg: dict, channel: str, search_root: str) -> str:
 Runtime (injected by the Lantern Bridge; do not ignore):
 
 - You are answering over a chat app (%s), not in a terminal pane. The person
-  is probably on a phone. Keep replies short and plain: no tables, no
-  headings, no code fences unless a command is the answer.
+  is probably on a phone, so a conversational answer is two or three short
+  sentences, and detail comes when they ask for it. Do not restate their
+  question back to them.
+- Content is not conversation. When they ask for something that has a shape,
+  a list, steps, a recipe, a plan, a file, send it with that shape intact:
+  one item per line, its own numbering, its own line breaks. Do not compress
+  it into a paragraph, and do not summarise it unless a summary is what they
+  asked for. Line breaks reach the chat app unchanged, and a reply too long
+  for one message is split for you at a line break, so length is not a reason
+  to condense.
+- Output you relayed from another agent belongs to that agent. Pass it
+  through as it came, with its own formatting, and keep your own words to a
+  line or two in front of it. Rewriting it loses the thing the user asked to
+  see.
+- No tables and no headings; both read badly on a phone. Code fences only for
+  code or a command.
 - Prefer $HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.
   Inspect commands (list/read/get) run as usual. Mutating commands (create,
   start, focus, close, remove, prompt, send-*) are blocked until the user
@@ -619,8 +642,13 @@ class Adapter:
     def send(self, chat_id, text: str) -> None:
         raise NotImplementedError
 
-    def offer(self, chat_id, text: str) -> None:
-        self.inbox.put((self.name, str(chat_id), text))
+    def offer(self, chat_id, text: str, reply_to=None) -> None:
+        # chat_id keys the conversation workdir; reply_to says where the
+        # answer goes. They are the same thing everywhere except Slack, where
+        # the session follows the person and the reply follows the message.
+        if reply_to is None:
+            reply_to = str(chat_id)
+        self.inbox.put((self.name, str(chat_id), reply_to, text))
 
     def run(self) -> None:
         while True:
@@ -738,7 +766,21 @@ class TelegramAdapter(Adapter):
 class SlackAdapter(Adapter):
     """Web API polling. Socket Mode needs websockets, which the stdlib lacks,
     and the Events API needs a public server; conversations.history needs
-    neither and one channel is all this watches."""
+    neither and one channel is all this watches.
+
+    Sessions follow the person, replies follow the message. A message in the
+    watched channel is answered in its own thread, so the channel stays
+    readable; the conversation itself lives in the sender's DM with the bot,
+    which the bridge also polls. One workdir per allowlisted user covers both
+    places, so a question asked in the channel can be continued in the DM
+    without starting over.
+
+    Threads are reply-only. conversations.history does not return thread
+    replies, so the bridge cannot see anything typed inside a thread; the
+    threaded answer carries one line saying so. Reading and opening DMs needs
+    the im:history and im:write scopes; without them the bridge says which
+    scope is missing and runs channel-only.
+    """
 
     name = "slack"
     limit = SLACK_LIMIT
@@ -748,40 +790,107 @@ class SlackAdapter(Adapter):
         self.token = cfg["SLACK_BOT_TOKEN"]
         self.channel = cfg["SLACK_CHANNEL"]
         self.allowed = set(split_list(cfg["SLACK_ALLOWED_USERS"]))
-        # History starts at startup. Whatever the channel said before the
+        # History starts at startup. Whatever a conversation said before the
         # bridge existed is somebody else's conversation, not a backlog.
-        self.oldest = "%.6f" % (time.time() if now is None else now)
-        # `oldest` is a boundary, not an acknowledgement: the message that sets
-        # the cursor can come back on the next poll. Remembering the ts is what
-        # stops a double answer.
+        self.started = "%.6f" % (time.time() if now is None else now)
+        # One cursor per polled conversation: the channel now, each DM once
+        # it is opened. `oldest` is a boundary, not an acknowledgement: the
+        # message that sets a cursor can come back on the next poll, so the
+        # (conversation, ts) pairs in `seen` are what stop a double answer.
+        self.cursors = {self.channel: self.started}
         self.seen = set()
+        # DM conversation id -> allowlisted user id. Filled by open_dms.
+        self.dms = {}
+        # Not a boolean: a network blip at daemon start (a laptop resuming, or
+        # Herdr autostarting before DHCP) would otherwise turn DMs off for the
+        # life of the process and report it as a missing scope.
+        self._dms_next_try = 0.0
+        self._poll_order = []
 
     def headers(self) -> dict:
         return {"Authorization": "Bearer %s" % self.token}
 
-    def history_url(self) -> str:
+    def history_url(self, conversation=None) -> str:
+        conversation = self.channel if conversation is None else conversation
         query = urllib.parse.urlencode(
             {
-                "channel": self.channel,
-                "oldest": self.oldest,
+                "channel": conversation,
+                "oldest": self.cursors.get(conversation, self.started),
                 "limit": 100,
                 "inclusive": "false",
             }
         )
         return "https://slack.com/api/conversations.history?%s" % query
 
-    def remember(self, ts: str) -> None:
-        self.seen.add(ts)
+    def dm_open_payload(self, user: str):
+        return ("https://slack.com/api/conversations.open", {"users": user})
+
+    def open_dms(self, now=None) -> None:
+        """One conversations.open per allowlisted user.
+
+        A failure is a log line, not a stop: a token installed before the
+        im:history/im:write scopes were added still runs the channel, and the
+        line says what to add and that the app needs a reinstall.
+
+        Retried on a slow timer until at least one DM opens, so a blip at
+        startup costs a minute rather than the whole run.
+        """
+        now = time.time() if now is None else now
+        if self.dms or now < self._dms_next_try:
+            return
+        self._dms_next_try = now + DM_OPEN_RETRY
+        for user in sorted(self.allowed):
+            url, payload = self.dm_open_payload(user)
+            try:
+                answer = http_json(url, payload, headers=self.headers())
+            except Exception as exc:  # noqa: BLE001 - channel-only is still a bridge
+                log(
+                    "slack: could not open the DM for %s (%s)"
+                    % (user, exc.__class__.__name__)
+                )
+                continue
+            if not answer.get("ok", False):
+                log(
+                    "slack: could not open the DM for %s (%s); "
+                    "DMs need the im:history and im:write scopes, then reinstall the app"
+                    % (user, answer.get("error", "unknown"))
+                )
+                continue
+            dm = (answer.get("channel") or {}).get("id")
+            if isinstance(dm, str) and dm:
+                self.dms[dm] = user
+                self.cursors.setdefault(dm, self.started)
+        if self.dms:
+            # Opened at least one, so stop asking.
+            self._dms_next_try = float("inf")
+            log("slack: watching %d DM(s) besides the channel" % len(self.dms))
+
+    def remember(self, conversation: str, ts: str) -> None:
+        self.seen.add((conversation, ts))
         if len(self.seen) > 512:
             # Bounded on purpose: this runs for weeks. Anything this old is
-            # far behind the cursor and can never come back.
-            for old in sorted(self.seen)[:256]:
+            # far behind its cursor and can never come back.
+            #
+            # Prune by timestamp, never by tuple order. Sorting the tuples
+            # themselves sorts by conversation id first, so it would evict one
+            # whole conversation before touching any other: channel ids start
+            # with C and DM ids with D, so busy DMs would wipe the channel's
+            # memory entirely, newest entry included. That newest entry is the
+            # cursor boundary this set exists to protect, and losing it means
+            # answering the same message twice.
+            for old in sorted(self.seen, key=lambda item: item[1])[:256]:
                 self.seen.discard(old)
 
-    def parse_history(self, payload: dict):
-        """Returns (accepted, next_oldest). history comes back newest first."""
+    def parse_history(self, payload: dict, conversation=None):
+        """Returns (accepted, next_oldest). history comes back newest first.
+
+        Each accepted item is (user, reply_to, text). The user keys the
+        session; reply_to is (conversation, thread_ts) for a channel message
+        and (dm, None) for a DM, because a DM needs no thread to stay tidy.
+        """
+        conversation = self.channel if conversation is None else conversation
         accepted = []
-        oldest = self.oldest
+        oldest = self.cursors.get(conversation, self.started)
         messages = payload.get("messages") or []
         for message in reversed(messages):
             if not isinstance(message, dict):
@@ -794,9 +903,9 @@ class SlackAdapter(Adapter):
                     oldest = ts
             except ValueError:
                 continue
-            if ts in self.seen:
+            if (conversation, ts) in self.seen:
                 continue
-            self.remember(ts)
+            self.remember(conversation, ts)
             # The bridge's own replies come back through history. So do joins,
             # topic changes, and every other subtype.
             if message.get("bot_id") or message.get("subtype"):
@@ -809,32 +918,97 @@ class SlackAdapter(Adapter):
             text = message.get("text")
             if not isinstance(text, str) or not text.strip():
                 continue
-            accepted.append((self.channel, text.strip()))
+            if conversation == self.channel:
+                reply_to = (conversation, ts, user)
+            else:
+                reply_to = (conversation, None, user)
+            accepted.append((user, reply_to, text.strip()))
         return accepted, oldest
 
+    def poll_conversations(self):
+        """The conversations this pass reads: round-robin, one per pass.
+
+        Every pass is one history call, so N watched conversations cost the
+        same request rate as one and each is read every N * SLACK_POLL
+        seconds. conversations.history is a Slack Tier 3 method; reading all
+        of them every pass would trip its limit at three or four DMs.
+        """
+        if not self._poll_order:
+            self._poll_order = [self.channel] + sorted(self.dms)
+        return [self._poll_order.pop(0)]
+
+    def drop_conversation(self, conversation: str) -> None:
+        self.dms.pop(conversation, None)
+        self.cursors.pop(conversation, None)
+        self._poll_order = [c for c in self._poll_order if c != conversation]
+
     def poll_once(self) -> None:
-        payload = http_json(self.history_url(), headers=self.headers())
-        if not payload.get("ok", False):
-            # Slack reports failure in the body with HTTP 200. The error slug
-            # is a fixed vocabulary, never a token.
-            raise RuntimeError("slack api error: %s" % payload.get("error", "unknown"))
-        accepted, oldest = self.parse_history(payload)
-        self.oldest = oldest
-        for chat_id, text in accepted:
-            self.offer(chat_id, text)
+        self.open_dms()
+        for conversation in self.poll_conversations():
+            payload = http_json(self.history_url(conversation), headers=self.headers())
+            if not payload.get("ok", False):
+                # Slack reports failure in the body with HTTP 200. The error
+                # slug is a fixed vocabulary, never a token, so it is safe to
+                # log and it is the only thing that names the cause.
+                slug = payload.get("error", "unknown")
+                if conversation in self.dms:
+                    # A DM that opens but cannot be read is the shape of
+                    # im:write granted without im:history. Raising here would
+                    # retry it every cycle forever with the slug discarded, and
+                    # take the channel's poll down with it each time. Drop the
+                    # DM, name the reason, keep the channel.
+                    log(
+                        "slack: no longer reading the DM for %s (%s); "
+                        "reading a DM needs the im:history scope and an app "
+                        "reinstall" % (self.dms[conversation], slug)
+                    )
+                    self.drop_conversation(conversation)
+                    continue
+                raise RuntimeError("slack api error: %s" % slug)
+            accepted, oldest = self.parse_history(payload, conversation)
+            self.cursors[conversation] = oldest
+            for user, reply_to, text in accepted:
+                self.offer(user, text, reply_to=reply_to)
         time.sleep(SLACK_POLL)
 
-    def send_payloads(self, chat_id, text: str):
-        return [
-            (
-                "https://slack.com/api/chat.postMessage",
-                {"channel": self.channel, "text": chunk},
-            )
-            for chunk in split_message(text, self.limit)
-        ]
+    def thread_footer(self, user=None) -> str:
+        # The one thing a threaded answer must say: the bridge cannot read
+        # this thread, so a reply typed here goes nowhere.
+        #
+        # Whether to point at the DM depends on this person's DM, not on
+        # anyone's. open_dms carries on past a user whose DM will not open, so
+        # telling them to DM would send them somewhere nothing is read.
+        if user is not None and user in self.dms.values():
+            return "(I cannot see replies in this thread. DM me to continue.)"
+        return "(I cannot see replies in this thread. Post in the channel to continue.)"
 
-    def send(self, chat_id, text: str) -> None:
-        for url, payload in self.send_payloads(chat_id, text):
+    def split_reply_to(self, reply_to):
+        """(conversation, thread_ts, user) whatever shape the queue handed over.
+
+        A plain string arrives from the failure path in serve(), which sends
+        to whatever it was given; treat it as a conversation with no thread.
+        """
+        if isinstance(reply_to, tuple):
+            if len(reply_to) == 3:
+                return reply_to
+            if len(reply_to) == 2:
+                return (reply_to[0], reply_to[1], None)
+        return (str(reply_to), None, None)
+
+    def send_payloads(self, reply_to, text: str):
+        conversation, thread_ts, user = self.split_reply_to(reply_to)
+        if thread_ts:
+            text = text.rstrip() + "\n\n" + self.thread_footer(user)
+        payloads = []
+        for chunk in split_message(text, self.limit):
+            body = {"channel": conversation, "text": chunk}
+            if thread_ts:
+                body["thread_ts"] = thread_ts
+            payloads.append(("https://slack.com/api/chat.postMessage", body))
+        return payloads
+
+    def send(self, reply_to, text: str) -> None:
+        for url, payload in self.send_payloads(reply_to, text):
             http_json(url, payload, headers=self.headers())
 
 
@@ -1271,7 +1445,7 @@ def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
 
     search_root = expand_root(cfg["BRIDGE_CWD"])
     while True:
-        channel, chat_id, text = inbox.get()
+        channel, chat_id, reply_to, text = inbox.get()
         # The adapters are daemon threads, so an exception that escapes here
         # ends the process and takes them with it, silently. A full disk in
         # seed_workdir is not a reason to stop answering the other channels.
@@ -1283,7 +1457,7 @@ def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
             reply = run_helper(cfg, helper, workdir, text)
             log("%s %s: %d bytes out" % (channel, chat_id, len(reply.encode("utf-8"))))
             try:
-                adapter.send(chat_id, reply)
+                adapter.send(reply_to, reply)
             except Exception as exc:  # noqa: BLE001 - a failed send is not fatal
                 log(
                     "%s %s: send failed (%s)"
@@ -1298,7 +1472,7 @@ def serve(cfg: dict, helper: str, prompt_text: str, state_dir) -> int:
             # them is best effort: whatever broke the turn may break this too.
             try:
                 adapters[channel].send(
-                    chat_id, "The lantern hit an error on that one. Try again."
+                    reply_to, "The lantern hit an error on that one. Try again."
                 )
             except Exception as exc2:  # noqa: BLE001 - never fatal
                 log(
