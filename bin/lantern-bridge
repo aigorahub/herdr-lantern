@@ -1594,6 +1594,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt", default="", help="path to the lantern prompt")
     parser.add_argument("--state", default=".", help="plugin state directory")
     parser.add_argument(
+        "--daemon-running",
+        action="store_true",
+        help="exit 0 when a bridge daemon holds the lock, 1 when none does",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="validate the config and print a redacted summary, then exit",
@@ -1612,8 +1617,50 @@ def die(message: str) -> None:
     raise SystemExit(2)
 
 
+def daemon_running(state_dir) -> bool:
+    """True when another process holds the daemon lock.
+
+    Taking the lock and dropping it is the only honest test. The lock is
+    advisory and the kernel releases it when a process dies, so the file
+    outliving its daemon proves nothing, and the pid written inside can belong
+    to something else entirely after a reboot. Closing the descriptor releases
+    the lock on both platforms, which the finally below does either way.
+    """
+    try:
+        fd = os.open(str(daemon_lock_path(state_dir)), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        # Nothing to lock in means nothing is running in it.
+        return False
+    try:
+        taken = _take_lock(fd)
+        if taken is None:
+            # No locking primitive on this Python. Refusing to answer beats
+            # answering wrongly in either direction: a false "running" leaves
+            # a dead pane focused forever, a false "not running" seats a
+            # second daemon that fights the first over every message.
+            raise ConfigError(
+                "cannot tell whether a bridge is running: this Python has "
+                "neither fcntl nor msvcrt"
+            )
+        return not taken
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    if args.daemon_running:
+        # Asked before the config is read on purpose: whether a daemon holds
+        # the lock has nothing to do with whether bridge.conf parses, and
+        # `bridge.sh --open` has to be able to ask while the config is broken.
+        try:
+            return 0 if daemon_running(args.state) else 1
+        except ConfigError as exc:
+            die(str(exc))
+            return 2
     conf_path = Path(args.conf) if args.conf else None
     example_path = Path(args.example) if args.example else None
     try:

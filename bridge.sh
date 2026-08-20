@@ -95,7 +95,46 @@ if [ "${1:-}" = "--open" ]; then
     # the cheap half, so a second press focuses instead of racing for it.
     open_state_dir=${HERDR_PLUGIN_STATE_DIR:-${HERDR_PLUGIN_CONFIG_DIR:-$plugin_root}/state}
     bridge_pane_file=$open_state_dir/bridge/pane.id
-    if [ -f "$bridge_pane_file" ]; then
+
+    # A remembered pane is only worth focusing while a daemon is alive in it.
+    # The title check below cannot tell: a pane whose daemon died keeps its
+    # title, so every later open focused a dead window and started nothing,
+    # with no way to tell from outside that anything was wrong. Ask the lock
+    # instead, which is the one thing only a live daemon holds.
+    #
+    # The path itself stays set either way: the open below records the new
+    # pane id in it.
+    bridge_daemon_alive=1
+    open_python=$(helper_detect_python) || open_python=
+    if [ -n "$open_python" ]; then
+        # shellcheck disable=SC2086
+        $open_python "$plugin_root/bin/lantern-bridge" \
+            --daemon-running --state "$open_state_dir" >/dev/null 2>&1 ||
+            bridge_daemon_alive=0
+    fi
+    if [ "$bridge_daemon_alive" = 0 ] && [ -f "$bridge_pane_file" ]; then
+        # An unheld lock is not proof of death. Herdr has to start bridge.sh
+        # in the pane this file records, and that takes a moment, so a second
+        # press during startup would otherwise seat a duplicate. Inside the
+        # grace window, treat the pane as coming up.
+        if [ -n "$(find "$bridge_pane_file" -mmin -2 2>/dev/null)" ]; then
+            bridge_daemon_alive=1
+        fi
+    fi
+    if [ "$bridge_daemon_alive" = 0 ] && [ -f "$bridge_pane_file" ]; then
+        # Past the grace window with nothing holding the lock: the daemon is
+        # gone and the pane is a husk. Close it rather than leaving it for the
+        # user to find and close by hand.
+        dead_pane=$(cat "$bridge_pane_file") || dead_pane=
+        if [ -n "$dead_pane" ]; then
+            if helper_lantern_pane_workspace \
+                "$real_herdr" "$dead_pane" "$bridge_pane_title" >/dev/null 2>&1; then
+                "$real_herdr" pane close "$dead_pane" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+
+    if [ "$bridge_daemon_alive" = 1 ] && [ -f "$bridge_pane_file" ]; then
         bridge_pane=$(cat "$bridge_pane_file") || bridge_pane=
         if [ -n "$bridge_pane" ]; then
             # The title check is what makes a remembered id safe: Herdr reuses

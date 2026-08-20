@@ -28,8 +28,9 @@ argv_dir=
 open_dir=
 bridge_dir=
 autostart_dir=
+deadpane_dir=
 elves_tmp=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$deadpane_dir" ] && rm -rf "$deadpane_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -1360,5 +1361,62 @@ grep -q -- '"--autostart"' "$root/herdr-plugin.toml" ||
 rm -rf "$autostart_dir"
 autostart_dir=
 printf 'ok: bridge.sh autostart gate\n'
+
+# A remembered bridge pane is only worth focusing while a daemon is alive in
+# it. The pane keeps its title after its daemon dies, so the title check alone
+# focused a dead window forever and started nothing, with no sign from outside
+# that anything was wrong. The lock is the one thing only a live daemon holds,
+# and a startup grace window keeps a second press during startup from seating
+# a duplicate.
+deadpane_dir=$(mktemp -d)
+mkdir -p "$deadpane_dir/state/bridge" "$deadpane_dir/bin" "$deadpane_dir/config"
+cat >"$deadpane_dir/bin/herdr" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$DEADPANE_LOG"
+case "$1 $2 $3" in
+"pane get"*)
+    printf '{"result":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p2","workspace_id":"w1"}}}\n'
+    ;;
+"workspace get"*)
+    printf '{"result":{"workspace":{"label":"x","workspace_id":"w1"}}}\n'
+    ;;
+"plugin pane open"*)
+    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","workspace_id":"w1"}}}}\n'
+    ;;
+esac
+exit 0
+EOF
+chmod +x "$deadpane_dir/bin/herdr"
+printf 'w1:p2\n' >"$deadpane_dir/state/bridge/pane.id"
+# Older than the startup grace window, so this is a dead pane rather than one
+# still coming up.
+touch -t 202001010000 "$deadpane_dir/state/bridge/pane.id"
+DEADPANE_LOG=$deadpane_dir/calls.txt
+export DEADPANE_LOG
+: >"$DEADPANE_LOG"
+
+HERDR_PLUGIN_ROOT="$root" \
+    HERDR_PLUGIN_CONFIG_DIR="$deadpane_dir/config" \
+    HERDR_PLUGIN_STATE_DIR="$deadpane_dir/state" \
+    HERDR_BIN_PATH="$deadpane_dir/bin/herdr" \
+    sh "$root/bridge.sh" --open </dev/null >/dev/null 2>&1 ||
+    fail "open with a dead bridge pane should still succeed"
+grep -q 'plugin pane open' "$DEADPANE_LOG" ||
+    fail "open should seat a fresh pane when no daemon holds the lock"
+if grep -q 'plugin pane focus' "$DEADPANE_LOG"; then
+    fail "open must not focus a pane whose daemon is gone"
+fi
+grep -q 'pane close w1:p2' "$DEADPANE_LOG" ||
+    fail "open should close the husk rather than leave it for the user"
+
+# The probe itself: nothing holds this lock.
+# shellcheck disable=SC2086
+if $smoke_python "$root/bin/lantern-bridge" --daemon-running \
+    --state "$deadpane_dir/state" >/dev/null 2>&1; then
+    fail "--daemon-running should report nothing running here"
+fi
+rm -rf "$deadpane_dir"
+deadpane_dir=
+printf 'ok: a dead bridge pane is replaced, not focused\n'
 
 printf 'ok\n'
