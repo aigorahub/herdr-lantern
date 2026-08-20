@@ -93,6 +93,9 @@ HELPER_TIMEOUT = 900
 TELEGRAM_POLL = 50
 # Slack has no long poll on this endpoint, so it is a plain interval.
 SLACK_POLL = 3.0
+# Slack rates conversations.history at Tier 3, about 50 requests a minute. Kept
+# under that so every watched conversation can be read on every pass.
+SLACK_TIER3_BUDGET = 45.0
 # How long to wait before asking Slack to open the DMs again, when the last
 # attempt opened none.
 DM_OPEN_RETRY = 60.0
@@ -805,7 +808,6 @@ class SlackAdapter(Adapter):
         # Herdr autostarting before DHCP) would otherwise turn DMs off for the
         # life of the process and report it as a missing scope.
         self._dms_next_try = 0.0
-        self._poll_order = []
 
     def headers(self) -> dict:
         return {"Authorization": "Bearer %s" % self.token}
@@ -926,25 +928,33 @@ class SlackAdapter(Adapter):
         return accepted, oldest
 
     def poll_conversations(self):
-        """The conversations this pass reads: round-robin, one per pass.
+        """Every conversation this bridge watches. The channel, then the DMs."""
+        return [self.channel] + sorted(self.dms)
 
-        Every pass is one history call, so N watched conversations cost the
-        same request rate as one and each is read every N * SLACK_POLL
-        seconds. conversations.history is a Slack Tier 3 method; reading all
-        of them every pass would trip its limit at three or four DMs.
+    def poll_interval(self, watched) -> float:
+        """Seconds to wait after reading them all.
+
+        The rate limit is held by slowing the pass, not by reading fewer
+        conversations per pass. Reading one at a time made each conversation
+        wait len(watched) intervals before anyone looked at it; reading them
+        all and stretching the interval makes every conversation wait exactly
+        one, for the same number of requests a minute.
+
+        Slack rates conversations.history at Tier 3, about 50 a minute.
         """
-        if not self._poll_order:
-            self._poll_order = [self.channel] + sorted(self.dms)
-        return [self._poll_order.pop(0)]
+        per_second = SLACK_TIER3_BUDGET / 60.0
+        if per_second <= 0:
+            return SLACK_POLL
+        return max(SLACK_POLL, len(watched) / per_second)
 
     def drop_conversation(self, conversation: str) -> None:
         self.dms.pop(conversation, None)
         self.cursors.pop(conversation, None)
-        self._poll_order = [c for c in self._poll_order if c != conversation]
 
     def poll_once(self) -> None:
         self.open_dms()
-        for conversation in self.poll_conversations():
+        watched = self.poll_conversations()
+        for conversation in watched:
             payload = http_json(self.history_url(conversation), headers=self.headers())
             if not payload.get("ok", False):
                 # Slack reports failure in the body with HTTP 200. The error
@@ -969,7 +979,7 @@ class SlackAdapter(Adapter):
             self.cursors[conversation] = oldest
             for user, reply_to, text in accepted:
                 self.offer(user, text, reply_to=reply_to)
-        time.sleep(SLACK_POLL)
+        time.sleep(self.poll_interval(watched))
 
     def thread_footer(self, user=None) -> str:
         # The one thing a threaded answer must say: the bridge cannot read
@@ -1161,8 +1171,13 @@ class WhatsAppAdapter(Adapter):
         self.host = cfg["WHATSAPP_WEBHOOK_HOST"] or "127.0.0.1"
         self.port = int(cfg["WHATSAPP_WEBHOOK_PORT"] or 8787)
         self.server = None
-        # These three are re-checked here, not only in validate(), because this
-        # object is the thing that opens a socket to the internet.
+        # Meta documents webhook delivery as at-least-once and retries anything
+        # it does not see acknowledged quickly. This bridge answers before the
+        # helper has finished, which keeps Meta happy, so a real redelivery
+        # would otherwise run the helper twice and send two replies, consuming
+        # the single worker twice on the way. Telegram dedupes with its offset
+        # and Slack with a seen set; this is WhatsApp's.
+        self.seen = set()
         if not self.verify_token:
             raise ConfigError(
                 "WHATSAPP_VERIFY_TOKEN is required: compare_digest of two empty "
@@ -1241,12 +1256,28 @@ class WhatsAppAdapter(Adapter):
                         continue
                     if not text.strip():
                         continue
-                    found.append((sender, text.strip()))
+                    message_id = message.get("id")
+                    if not isinstance(message_id, str):
+                        message_id = ""
+                    found.append((message_id, sender, text.strip()))
         return found
+
+    def remember(self, message_id: str) -> None:
+        self.seen.add(message_id)
+        if len(self.seen) > 512:
+            # Bounded on purpose: this runs for weeks. Meta retries within
+            # minutes, so anything this old will not come back.
+            for old in sorted(self.seen)[:256]:
+                self.seen.discard(old)
 
     def accepted_from(self, payload: dict):
         accepted = []
-        for sender, text in self.extract_messages(payload):
+        for message_id, sender, text in self.extract_messages(payload):
+            if message_id:
+                if message_id in self.seen:
+                    log("whatsapp: skipped a redelivered message")
+                    continue
+                self.remember(message_id)
             if only_digits(sender) not in self.allowed:
                 log("whatsapp: dropped a message from an unlisted number")
                 continue

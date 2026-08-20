@@ -805,13 +805,20 @@ class SlackParseTest(unittest.TestCase):
         # channel's poll down each cycle.
         self.adapter.dms["D77"] = "U1"
         self.adapter.cursors["D77"] = "1000.000000"
-        self.adapter._poll_order = ["D77"]
         lines = []
         original = lb.log
         lb.log = lines.append
         self.addCleanup(setattr, lb, "log", original)
         original_http = lb.http_json
-        lb.http_json = lambda *a, **k: {"ok": False, "error": "missing_scope"}
+
+        def per_conversation(url, payload=None, headers=None, timeout=None):
+            # The channel reads fine; only the DM is unreadable. That is the
+            # shape of im:write granted without im:history.
+            if "channel=D77" in url:
+                return {"ok": False, "error": "missing_scope"}
+            return {"ok": True, "messages": []}
+
+        lb.http_json = per_conversation
         self.addCleanup(setattr, lb, "http_json", original_http)
         original_sleep = lb.time.sleep
         lb.time.sleep = lambda _s: None
@@ -828,7 +835,9 @@ class SlackParseTest(unittest.TestCase):
         original_http = lb.http_json
         lb.http_json = lambda *a, **k: {"ok": False, "error": "ratelimited"}
         self.addCleanup(setattr, lb, "http_json", original_http)
-        self.adapter._poll_order = ["C123"]
+        original_sleep = lb.time.sleep
+        lb.time.sleep = lambda _s: None
+        self.addCleanup(setattr, lb.time, "sleep", original_sleep)
         with self.assertRaises(RuntimeError):
             self.adapter.poll_once()
 
@@ -870,10 +879,29 @@ class SlackParseTest(unittest.TestCase):
         self.assertEqual(url, "https://slack.com/api/conversations.open")
         self.assertEqual(payload, {"users": "U1"})
 
-    def test_poll_order_round_robins_the_channel_and_every_dm(self):
+    def test_a_small_watch_list_is_read_whole_every_pass(self):
+        # Round-robin made a DM wait len(watched) * SLACK_POLL seconds before
+        # anyone looked at it, for no benefit at this size.
         self.adapter.dms = {"D1": "U1", "D2": "U2"}
-        seen = [self.adapter.poll_conversations()[0] for _ in range(6)]
-        self.assertEqual(seen, ["C123", "D1", "D2", "C123", "D1", "D2"])
+        self.assertEqual(self.adapter.poll_conversations(), ["C123", "D1", "D2"])
+        self.assertEqual(self.adapter.poll_conversations(), ["C123", "D1", "D2"])
+
+    def test_the_interval_stretches_to_stay_inside_the_rate_limit(self):
+        # Rate is held by slowing the pass rather than reading fewer
+        # conversations, so each one still waits exactly one interval.
+        one = self.adapter.poll_interval(["C123"])
+        self.assertEqual(one, lb.SLACK_POLL)
+        many = ["C123"] + ["D%d" % i for i in range(20)]
+        stretched = self.adapter.poll_interval(many)
+        self.assertGreater(stretched, lb.SLACK_POLL)
+        requests_per_minute = len(many) * (60.0 / stretched)
+        self.assertLessEqual(requests_per_minute, lb.SLACK_TIER3_BUDGET + 0.001)
+
+    def test_every_watched_conversation_waits_one_interval(self):
+        watched = ["C123"] + ["D%d" % i for i in range(5)]
+        interval = self.adapter.poll_interval(watched)
+        # Round-robin would have been len(watched) * interval for each one.
+        self.assertLess(interval, len(watched) * lb.SLACK_POLL)
 
     def test_own_bot_message_is_skipped(self):
         accepted, oldest = self.parse(
@@ -1015,6 +1043,72 @@ class SlackSendTest(unittest.TestCase):
             self.assertLessEqual(len(payload["text"]), lb.SLACK_LIMIT)
             # Every chunk of a threaded reply stays in the thread.
             self.assertEqual(payload["thread_ts"], "1001.000100")
+
+
+class WhatsAppDedupeTest(unittest.TestCase):
+    """Meta documents delivery as at-least-once and retries anything it does
+    not see acknowledged. The bridge answers before the helper finishes, so a
+    redelivery would run the helper twice and reply twice."""
+
+    def setUp(self):
+        cfg = base_config(
+            WHATSAPP_ACCESS_TOKEN="access-token-value",
+            WHATSAPP_PHONE_NUMBER_ID="PN1",
+            WHATSAPP_VERIFY_TOKEN="verify-token-value",
+            WHATSAPP_APP_SECRET="app-secret-value",
+            WHATSAPP_ALLOWED_NUMBERS="15551234567",
+        )
+        self.adapter = lb.WhatsAppAdapter(cfg, queue.Queue())
+        original = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original)
+
+    def body(self, message_id, text="light the field"):
+        return {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "id": message_id,
+                                        "type": "text",
+                                        "from": "15551234567",
+                                        "text": {"body": text},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+
+    def test_extraction_carries_the_message_id(self):
+        self.assertEqual(
+            self.adapter.extract_messages(self.body("wamid.1")),
+            [("wamid.1", "15551234567", "light the field")],
+        )
+
+    def test_the_same_message_is_answered_once(self):
+        self.assertEqual(len(self.adapter.accepted_from(self.body("wamid.1"))), 1)
+        self.assertEqual(self.adapter.accepted_from(self.body("wamid.1")), [])
+
+    def test_a_different_message_still_gets_through(self):
+        self.adapter.accepted_from(self.body("wamid.1"))
+        self.assertEqual(len(self.adapter.accepted_from(self.body("wamid.2"))), 1)
+
+    def test_a_body_with_no_id_is_not_dropped(self):
+        payload = self.body("wamid.3")
+        del payload["entry"][0]["changes"][0]["value"]["messages"][0]["id"]
+        self.assertEqual(len(self.adapter.accepted_from(payload)), 1)
+        self.assertEqual(len(self.adapter.accepted_from(payload)), 1)
+
+    def test_the_seen_set_stays_bounded(self):
+        for i in range(700):
+            self.adapter.remember("wamid.%d" % i)
+        self.assertLessEqual(len(self.adapter.seen), 512)
 
 
 WHATSAPP_SECRET = "app-secret-value"
