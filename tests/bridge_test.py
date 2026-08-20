@@ -338,6 +338,20 @@ class SplitMessageTest(unittest.TestCase):
     def test_empty_text_is_one_empty_chunk(self):
         self.assertEqual(lb.split_message("", 100), [""])
 
+    def test_interior_line_breaks_survive(self):
+        # A relayed list has to arrive as a list. Splitting cuts on newlines,
+        # so the risk is it eating the ones inside a chunk.
+        recipe = "Koftas\n1. Drain the tuna.\n2. Flake it.\n3. Chill it.\n"
+        self.assertEqual(lb.split_message(recipe, 4000), [recipe])
+        self.assertEqual(lb.split_message(recipe, 4000)[0].count("\n"), 4)
+
+    def test_line_breaks_survive_a_split_across_chunks(self):
+        block = "\n".join("%d. step" % n for n in range(1, 21))
+        chunks = lb.split_message(block, 40)
+        self.assertGreater(len(chunks), 1)
+        # Rejoining restores every line: nothing was flattened into a space.
+        self.assertEqual("\n".join(chunks).split("\n"), block.split("\n"))
+
     def test_every_chunk_respects_the_limit(self):
         text = ("word " * 400).strip()
         chunks = lb.split_message(text, 50)

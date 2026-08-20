@@ -294,7 +294,11 @@ token, and subscribe to `messages`. Every POST is checked against
 required rather than optional: without it the tunnel is an open door.
 
 Text messages only, both directions. Replies are split at each provider's
-limit.
+limit, at a line break where there is one nearby, so a list stays a list.
+
+Conversational answers are short by instruction. Content is not: a list, a
+set of steps, or output relayed from another agent is passed through with its
+own line breaks and numbering rather than condensed into a paragraph.
 
 ### What a sender gets
 

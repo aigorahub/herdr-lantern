@@ -462,9 +462,22 @@ def remote_appendix(cfg: dict, channel: str, search_root: str) -> str:
 Runtime (injected by the Lantern Bridge; do not ignore):
 
 - You are answering over a chat app (%s), not in a terminal pane. The person
-  is probably on a phone. Two or three short sentences is a normal reply;
-  give detail only when they ask for it. Plain text: no tables, no headings,
-  no code fences unless a command is the answer, no restating their question.
+  is probably on a phone, so a conversational answer is two or three short
+  sentences, and detail comes when they ask for it. Do not restate their
+  question back to them.
+- Content is not conversation. When they ask for something that has a shape,
+  a list, steps, a recipe, a plan, a file, send it with that shape intact:
+  one item per line, its own numbering, its own line breaks. Do not compress
+  it into a paragraph, and do not summarise it unless a summary is what they
+  asked for. Line breaks reach the chat app unchanged, and a reply too long
+  for one message is split for you at a line break, so length is not a reason
+  to condense.
+- Output you relayed from another agent belongs to that agent. Pass it
+  through as it came, with its own formatting, and keep your own words to a
+  line or two in front of it. Rewriting it loses the thing the user asked to
+  see.
+- No tables and no headings; both read badly on a phone. Code fences only for
+  code or a command.
 - Prefer $HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.
   Inspect commands (list/read/get) run as usual. Mutating commands (create,
   start, focus, close, remove, prompt, send-*) are blocked until the user

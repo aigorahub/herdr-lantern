@@ -32,8 +32,14 @@ All notable changes to Lantern, by Elves are documented here.
   the thread reaches nobody; the line says where to continue instead.
 - Slack polling is round-robin, one conversation per pass, so watching the
   DMs costs the same request rate as watching the channel alone.
-- The remote appendix pushes harder on brevity: two or three short sentences
-  is the normal reply, detail only on request, no restating the question.
+- The remote appendix separates brevity from formatting. A conversational
+  answer is two or three short sentences, but anything with a shape, a list,
+  steps, a recipe, or output relayed from another agent, is passed through
+  with its own line breaks and numbering. The first version of this said only
+  "keep replies short" with "no headings, no tables", and a relayed recipe
+  came back as paragraphs with the numbering run inline, losing the shape the
+  user had asked to see. Length is explicitly not a reason to condense: line
+  breaks reach the chat app unchanged and long replies are split at one.
 
 ## [0.5.1] - 2026-08-19
 
