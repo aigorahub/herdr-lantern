@@ -178,6 +178,12 @@ empty prompt.
 
 ## Use the lantern from Telegram, WhatsApp, or Slack
 
+> Thinking of running this for a team? Read
+> [why Aigora stopped](plans/slack-app-discontinued.md) first. The short
+> version: an allowlisted sender gets a shell on the machine running the
+> bridge, which is a fair trade for one person on their own machine and not
+> one for a team, and chat access to a herd needs that machine awake.
+
 The **Lantern Bridge** is a second pane that answers chat messages with the
 same lantern. Open it with `herdr plugin action invoke aigora.lantern.bridge`,
 or run `sh bridge.sh` from a checkout. Leave it running; it is a daemon.
