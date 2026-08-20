@@ -13,6 +13,13 @@ All notable changes to Lantern, by Elves are documented here.
   extra scope. Until that answers, the channel behaves as it did before and
   the log says why, because a bot that has gone silent is harder to diagnose
   than one that is too eager.
+- Conversation workdirs are re-seeded when the appendix changes. The helper's
+  instruction files were written once and never again, so a rule corrected in
+  a later build reached only conversations created after it: the formatting
+  note below would have gone nowhere near the conversations already getting
+  formatting wrong. The files now carry a version marker, and a file whose
+  marker is missing or older is rewritten. An edit that keeps the marker is
+  kept, and prompt.md in the config directory is never touched.
 - The helper is told each channel's formatting dialect. Ordinary Markdown is
   wrong on all three and differently so: Slack reads `*one asterisk*`,
   Telegram is sent with no parse mode at all, and WhatsApp uses single
