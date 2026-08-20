@@ -1,7 +1,8 @@
 # Plan: Lantern Bridge v2, a router and a connector
 
-**Status: designed, not started.** Hosting is deliberately on the backburner.
-This file exists so the design is not re-derived from scratch later.
+**Status: designed; cloud path chosen; not started.** Build is blocked on the
+four open questions below. Session record and next steps:
+[`plans/bridge-v2-handoff.md`](bridge-v2-handoff.md).
 
 ## Why the current bridge cannot become a team tool
 
@@ -153,4 +154,5 @@ Two of the three open issues are retired rather than fixed:
 
 ## Not in this plan
 
-The hosting itself. Cost and platform are settled; the build is deferred.
+The hosting itself. Cost and platform are settled. The build waits on the
+four questions above; see the handoff for order of work.
