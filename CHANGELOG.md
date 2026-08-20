@@ -4,6 +4,42 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [0.6.0] - 2026-08-20
 
+### Fixed
+
+These came out of a pre-merge review of the Slack work below, and every one of
+them was introduced by it.
+
+- The dedupe set lost a whole conversation at a time. It changed from holding
+  timestamps to holding `(conversation, timestamp)` pairs, but the eviction
+  still sorted the pairs, which sorts by conversation id first. Channel ids
+  start with `C` and DM ids with `D`, so a busy DM evicted every channel entry
+  before touching any DM entry, newest included. That newest entry is the
+  cursor boundary the set exists to protect, so the next poll could answer the
+  same channel message twice. Eviction now sorts on the timestamp.
+- Splitting a long reply ate the shape it was sent with. The chunk boundary
+  did `rstrip()` and `lstrip("\n ")`, so a blank line between steps vanished
+  and an indented continuation line arrived flush left. Exactly one separator
+  character is now removed, which is what the new formatting instruction
+  promises the helper.
+- A DM that opened but could not be read took the channel down with it, once
+  per poll, forever. That is the shape of `im:write` granted without
+  `im:history`. The failure raised out of the poll, and the retry loop logged
+  only the exception class, discarding the error slug that names the cause.
+  Such a DM is now dropped with the slug and the missing scope named, and the
+  channel keeps working.
+- A network blip while the daemon started turned DMs off for the life of the
+  process and reported it as a missing scope. Opening is now retried on a slow
+  timer until at least one DM opens.
+- The threaded footer told people to DM the bot based on whether anyone had a
+  DM open, not whether they did. Someone whose own DM failed to open was sent
+  somewhere nothing is read. The footer now follows the person it is answering.
+- The autostart hook read `BRIDGE_AUTOSTART` anchored at column 0 and matched
+  only lowercase, while the daemon's parser strips the line first. An indented
+  key was therefore valid config that the hook could not see, and the symptom
+  was a key that looks set, no bridge, and nothing logged. The hook now matches
+  the daemon, accepts any case, and says so when the value is set to something
+  it does not understand.
+
 ### Added
 
 - Slack DMs. The bridge now opens and polls each allowlisted member's DM with

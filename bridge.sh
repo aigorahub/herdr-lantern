@@ -53,15 +53,28 @@ if [ "${1:-}" = "--autostart" ]; then
     fi
     [ -n "$auto_config_dir" ] || exit 0
     [ -f "$auto_config_dir/bridge.conf" ] || exit 0
-    auto_value=$(sed -n 's/^BRIDGE_AUTOSTART=//p' "$auto_config_dir/bridge.conf" | sed -n '1p')
+    # Match the daemon's own parser, which strips the line before splitting on
+    # the first '=', so an indented key is valid config. Anchoring at column 0
+    # here made a line the daemon accepts invisible to this hook, and the
+    # symptom was a key that looks set and a bridge that never starts.
+    auto_value=$(sed -n 's/^[[:space:]]*BRIDGE_AUTOSTART[[:space:]]*=//p' \
+        "$auto_config_dir/bridge.conf" | sed -n '1p')
     # The conf writes values quoted; both quote styles count as the bare value.
+    auto_value=$(printf '%s' "$auto_value" | tr -d '[:space:]' | tr 'A-Z' 'a-z')
     auto_value=${auto_value%\"}
     auto_value=${auto_value#\"}
     auto_value=${auto_value%\'}
     auto_value=${auto_value#\'}
     case $auto_value in
     1 | yes | true) ;;
-    *) exit 0 ;;
+    '') exit 0 ;;
+    *)
+        # Set to something, but not something this understands. Silence here
+        # leaves nothing at all to diagnose from.
+        printf 'lantern bridge: BRIDGE_AUTOSTART=%s not understood; not starting. Use 1, yes, or true.\n' \
+            "$auto_value" >&2
+        exit 0
+        ;;
     esac
     set -- --open
 fi

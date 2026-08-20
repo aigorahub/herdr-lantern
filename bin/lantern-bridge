@@ -93,6 +93,9 @@ HELPER_TIMEOUT = 900
 TELEGRAM_POLL = 50
 # Slack has no long poll on this endpoint, so it is a plain interval.
 SLACK_POLL = 3.0
+# How long to wait before asking Slack to open the DMs again, when the last
+# attempt opened none.
+DM_OPEN_RETRY = 60.0
 HTTP_TIMEOUT = 30
 LONG_POLL_TIMEOUT = TELEGRAM_POLL + 15
 
@@ -427,13 +430,18 @@ def split_message(text: str, limit: int) -> list:
             chunks.append(rest[:cut])
             rest = rest[cut:]
             continue
-        chunk = rest[:cut].rstrip()
-        rest = rest[cut:].lstrip("\n ")
-        # A window that held nothing but whitespace up to the break leaves an
-        # empty chunk, and every provider rejects an empty message -- so the
-        # send raises, the dispatch loop logs one "send failed" line, and the
-        # whole reply is lost rather than one blank line of it.
-        if chunk:
+        # Take everything up to the break and drop exactly the one character
+        # that was the break. Stripping more ate the shape the message was
+        # sent for: a blank line between steps disappeared, and an indented
+        # continuation line arrived flush left. The appendix now promises the
+        # helper that line breaks survive, so this has to keep that promise.
+        chunk = rest[:cut]
+        rest = rest[cut + 1:]
+        # A window holding nothing but whitespace up to the break leaves a
+        # blank chunk, and every provider rejects an empty message -- the send
+        # raises, the dispatch loop logs one "send failed" line, and the whole
+        # reply is lost rather than one blank line of it.
+        if chunk.strip():
             chunks.append(chunk)
     if rest:
         chunks.append(rest)
@@ -793,7 +801,10 @@ class SlackAdapter(Adapter):
         self.seen = set()
         # DM conversation id -> allowlisted user id. Filled by open_dms.
         self.dms = {}
-        self._dms_tried = False
+        # Not a boolean: a network blip at daemon start (a laptop resuming, or
+        # Herdr autostarting before DHCP) would otherwise turn DMs off for the
+        # life of the process and report it as a missing scope.
+        self._dms_next_try = 0.0
         self._poll_order = []
 
     def headers(self) -> dict:
@@ -814,14 +825,20 @@ class SlackAdapter(Adapter):
     def dm_open_payload(self, user: str):
         return ("https://slack.com/api/conversations.open", {"users": user})
 
-    def open_dms(self) -> None:
-        """One conversations.open per allowlisted user, once.
+    def open_dms(self, now=None) -> None:
+        """One conversations.open per allowlisted user.
 
         A failure is a log line, not a stop: a token installed before the
         im:history/im:write scopes were added still runs the channel, and the
         line says what to add and that the app needs a reinstall.
+
+        Retried on a slow timer until at least one DM opens, so a blip at
+        startup costs a minute rather than the whole run.
         """
-        self._dms_tried = True
+        now = time.time() if now is None else now
+        if self.dms or now < self._dms_next_try:
+            return
+        self._dms_next_try = now + DM_OPEN_RETRY
         for user in sorted(self.allowed):
             url, payload = self.dm_open_payload(user)
             try:
@@ -844,6 +861,8 @@ class SlackAdapter(Adapter):
                 self.dms[dm] = user
                 self.cursors.setdefault(dm, self.started)
         if self.dms:
+            # Opened at least one, so stop asking.
+            self._dms_next_try = float("inf")
             log("slack: watching %d DM(s) besides the channel" % len(self.dms))
 
     def remember(self, conversation: str, ts: str) -> None:
@@ -851,7 +870,15 @@ class SlackAdapter(Adapter):
         if len(self.seen) > 512:
             # Bounded on purpose: this runs for weeks. Anything this old is
             # far behind its cursor and can never come back.
-            for old in sorted(self.seen)[:256]:
+            #
+            # Prune by timestamp, never by tuple order. Sorting the tuples
+            # themselves sorts by conversation id first, so it would evict one
+            # whole conversation before touching any other: channel ids start
+            # with C and DM ids with D, so busy DMs would wipe the channel's
+            # memory entirely, newest entry included. That newest entry is the
+            # cursor boundary this set exists to protect, and losing it means
+            # answering the same message twice.
+            for old in sorted(self.seen, key=lambda item: item[1])[:256]:
                 self.seen.discard(old)
 
     def parse_history(self, payload: dict, conversation=None):
@@ -892,9 +919,9 @@ class SlackAdapter(Adapter):
             if not isinstance(text, str) or not text.strip():
                 continue
             if conversation == self.channel:
-                reply_to = (conversation, ts)
+                reply_to = (conversation, ts, user)
             else:
-                reply_to = (conversation, None)
+                reply_to = (conversation, None, user)
             accepted.append((user, reply_to, text.strip()))
         return accepted, oldest
 
@@ -910,44 +937,68 @@ class SlackAdapter(Adapter):
             self._poll_order = [self.channel] + sorted(self.dms)
         return [self._poll_order.pop(0)]
 
+    def drop_conversation(self, conversation: str) -> None:
+        self.dms.pop(conversation, None)
+        self.cursors.pop(conversation, None)
+        self._poll_order = [c for c in self._poll_order if c != conversation]
+
     def poll_once(self) -> None:
-        if not self._dms_tried:
-            self.open_dms()
+        self.open_dms()
         for conversation in self.poll_conversations():
             payload = http_json(self.history_url(conversation), headers=self.headers())
             if not payload.get("ok", False):
                 # Slack reports failure in the body with HTTP 200. The error
-                # slug is a fixed vocabulary, never a token.
-                raise RuntimeError(
-                    "slack api error: %s" % payload.get("error", "unknown")
-                )
+                # slug is a fixed vocabulary, never a token, so it is safe to
+                # log and it is the only thing that names the cause.
+                slug = payload.get("error", "unknown")
+                if conversation in self.dms:
+                    # A DM that opens but cannot be read is the shape of
+                    # im:write granted without im:history. Raising here would
+                    # retry it every cycle forever with the slug discarded, and
+                    # take the channel's poll down with it each time. Drop the
+                    # DM, name the reason, keep the channel.
+                    log(
+                        "slack: no longer reading the DM for %s (%s); "
+                        "reading a DM needs the im:history scope and an app "
+                        "reinstall" % (self.dms[conversation], slug)
+                    )
+                    self.drop_conversation(conversation)
+                    continue
+                raise RuntimeError("slack api error: %s" % slug)
             accepted, oldest = self.parse_history(payload, conversation)
             self.cursors[conversation] = oldest
             for user, reply_to, text in accepted:
                 self.offer(user, text, reply_to=reply_to)
         time.sleep(SLACK_POLL)
 
-    def thread_footer(self) -> str:
+    def thread_footer(self, user=None) -> str:
         # The one thing a threaded answer must say: the bridge cannot read
         # this thread, so a reply typed here goes nowhere.
-        if self.dms:
+        #
+        # Whether to point at the DM depends on this person's DM, not on
+        # anyone's. open_dms carries on past a user whose DM will not open, so
+        # telling them to DM would send them somewhere nothing is read.
+        if user is not None and user in self.dms.values():
             return "(I cannot see replies in this thread. DM me to continue.)"
         return "(I cannot see replies in this thread. Post in the channel to continue.)"
 
     def split_reply_to(self, reply_to):
-        """(conversation, thread_ts) whatever shape the queue handed over.
+        """(conversation, thread_ts, user) whatever shape the queue handed over.
 
         A plain string arrives from the failure path in serve(), which sends
         to whatever it was given; treat it as a conversation with no thread.
         """
-        if isinstance(reply_to, tuple) and len(reply_to) == 2:
-            return reply_to
-        return (str(reply_to), None)
+        if isinstance(reply_to, tuple):
+            if len(reply_to) == 3:
+                return reply_to
+            if len(reply_to) == 2:
+                return (reply_to[0], reply_to[1], None)
+        return (str(reply_to), None, None)
 
     def send_payloads(self, reply_to, text: str):
-        conversation, thread_ts = self.split_reply_to(reply_to)
+        conversation, thread_ts, user = self.split_reply_to(reply_to)
         if thread_ts:
-            text = text.rstrip() + "\n\n" + self.thread_footer()
+            text = text.rstrip() + "\n\n" + self.thread_footer(user)
         payloads = []
         for chunk in split_message(text, self.limit):
             body = {"channel": conversation, "text": chunk}

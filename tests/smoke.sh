@@ -1321,6 +1321,39 @@ run_autostart || fail "autostart with the key on should succeed"
 grep -q 'plugin pane open --plugin aigora.lantern --entrypoint bridge' \
     "$AUTOSTART_LOG" || fail "autostart should open the bridge pane"
 
+# An indented key is valid config to the daemon, whose parser strips the line
+# before splitting on '='. A hook that anchors at column 0 makes such a line
+# invisible, and the symptom is a key that looks set and a bridge that never
+# starts, with nothing logged.
+printf '%s\n' '  BRIDGE_AUTOSTART="1"' >"$autostart_dir/config/bridge.conf"
+: >"$AUTOSTART_LOG"
+run_autostart || fail "autostart should accept an indented key"
+grep -q 'plugin pane open' "$AUTOSTART_LOG" ||
+    fail "autostart should open the bridge pane for an indented key"
+
+# Case is the user's business, not the parser's.
+printf '%s\n' 'BRIDGE_AUTOSTART="True"' >"$autostart_dir/config/bridge.conf"
+: >"$AUTOSTART_LOG"
+run_autostart || fail "autostart should accept True"
+grep -q 'plugin pane open' "$AUTOSTART_LOG" ||
+    fail "autostart should open the bridge pane for True"
+
+# Set to something it does not understand: no start, but say why.
+printf '%s\n' 'BRIDGE_AUTOSTART="maybe"' >"$autostart_dir/config/bridge.conf"
+: >"$AUTOSTART_LOG"
+autostart_err=$autostart_dir/err.txt
+HERDR_PLUGIN_ROOT="$root" \
+    HERDR_PLUGIN_CONFIG_DIR="$autostart_dir/config" \
+    HERDR_PLUGIN_STATE_DIR="$autostart_dir/state" \
+    HERDR_BIN_PATH="$autostart_dir/bin/herdr" \
+    sh "$root/bridge.sh" --autostart </dev/null >/dev/null 2>"$autostart_err" ||
+    fail "an unrecognised autostart value should still exit 0"
+if [ -s "$AUTOSTART_LOG" ]; then
+    fail "an unrecognised autostart value must not call herdr"
+fi
+grep -q 'not understood' "$autostart_err" ||
+    fail "an unrecognised autostart value should say so"
+
 # The manifest wires the hook, or none of this ever runs.
 grep -q -- '"--autostart"' "$root/herdr-plugin.toml" ||
     fail "manifest should carry the autostart startup hook"
