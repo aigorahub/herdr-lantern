@@ -272,6 +272,10 @@ your member id (`U…`). The bridge polls that one channel and each allowlisted
 member's DM with the bot, and ignores everything it did not hear from an
 allowlisted human.
 
+In a channel it answers only when you `@Lantern` it. A DM is the whole
+conversation and needs no mention. That is the usual shape for a bot in a
+room with other people in it, and it is what keeps a shared channel usable.
+
 Replies follow the message and the session follows the person. A message in
 the channel is answered in its own thread, so the channel stays readable; a
 DM is answered in the DM. Both places share one conversation per person, so a

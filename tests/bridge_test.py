@@ -471,9 +471,27 @@ class WorkdirTest(unittest.TestCase):
             self.assertIn("HERDR_HELPER_OK=1", body)
             self.assertIn("telegram", body)
             self.assertIn("/home/j", body)
-        (wd / "AGENTS.md").write_text("EDITED", encoding="utf-8")
+        # An edit that keeps the version marker is kept. The marker is a line
+        # in the file, so this is visible to whoever is editing it.
+        kept = "EDITED\n" + lb.appendix_marker() + "\n"
+        (wd / "AGENTS.md").write_text(kept, encoding="utf-8")
         self.assertFalse(lb.seed_workdir(wd, "PROMPT BODY", appendix))
-        self.assertEqual((wd / "AGENTS.md").read_text(encoding="utf-8"), "EDITED")
+        self.assertEqual((wd / "AGENTS.md").read_text(encoding="utf-8"), kept)
+
+    def test_an_edit_that_drops_the_marker_is_replaced(self):
+        # These files are generated. Preserving an unmarked edit forever was
+        # what kept corrected rules from ever reaching a conversation that
+        # already existed. The file people tune by hand is prompt.md in the
+        # config directory, and seeding never touches it.
+        wd = lb.workdir_for(self.state, "telegram", 8)
+        cfg = base_config(BRIDGE_HELPER="claude")
+        appendix = lb.remote_appendix(cfg, "telegram", "/home/j")
+        lb.seed_workdir(wd, "PROMPT BODY", appendix)
+        (wd / "AGENTS.md").write_text("EDITED, no marker", encoding="utf-8")
+        self.assertTrue(lb.seed_workdir(wd, "PROMPT BODY", appendix))
+        body = (wd / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("PROMPT BODY", body)
+        self.assertNotIn("EDITED", body)
 
     def test_session_marker_drives_resume(self):
         wd = lb.workdir_for(self.state, "slack", "C1")
@@ -779,6 +797,118 @@ class SlackParseTest(unittest.TestCase):
         self.assertEqual(accepted, [("U1", ("C123", "1001.000100", "U1"), "hi")])
         self.assertEqual(oldest, "1001.000100")
 
+    def test_the_channel_answers_only_a_mention(self):
+        # A channel has other people in it. Answering everything an
+        # allowlisted person says there is what made the trial noisy.
+        self.adapter.bot_user_id = "UBOT"
+        self.assertEqual(self.parse([slack_message("1001.000100", "U1", "chatting")])[0], [])
+        accepted, _ = self.parse(
+            [slack_message("1002.000100", "U1", "<@UBOT> what is running?")]
+        )
+        self.assertEqual(len(accepted), 1)
+
+    def test_the_mention_is_taken_out_of_the_text(self):
+        self.adapter.bot_user_id = "UBOT"
+        accepted, _ = self.parse(
+            [slack_message("1001.000100", "U1", "<@UBOT> what is running?")]
+        )
+        self.assertEqual(accepted[0][2], "what is running?")
+
+    def test_stripping_the_mention_keeps_the_shape_of_the_message(self):
+        # An earlier version rebuilt the text with " ".join(text.split()),
+        # which flattened every line break and indent: a code fence arrived as
+        # one line with its markers stranded mid-sentence. The appendix this
+        # bridge ships promises the helper that line breaks survive.
+        self.adapter.bot_user_id = "UBOT"
+        body = "<@UBOT> run this:\n```\nline1\n  line2\n```"
+        stripped = self.adapter.strip_mention(body)
+        self.assertEqual(stripped, "run this:\n```\nline1\n  line2\n```")
+        self.assertEqual(stripped.count("\n"), body.count("\n"))
+        self.assertIn("\n  line2", stripped)
+
+    def test_the_labelled_mention_form_counts(self):
+        # Slack writes <@U123|name> in older messages and anything composed
+        # through the API. Missing it left the bot silent on a message that
+        # plainly called it.
+        self.adapter.bot_user_id = "UBOT"
+        self.assertTrue(self.adapter.mentions_me("<@UBOT|lantern> hi"))
+        self.assertEqual(self.adapter.strip_mention("<@UBOT|lantern> hi"), "hi")
+
+    def test_somebody_elses_mention_is_not_mine(self):
+        self.adapter.bot_user_id = "UBOT"
+        for other in ("<@UOTHER> hi", "<!here> hi", "<!subteam^S1|@team> hi"):
+            self.assertFalse(self.adapter.mentions_me(other), other)
+
+    def test_the_fail_open_window_still_hands_over_clean_text(self):
+        # No id yet, so every message is answered; the helper should still not
+        # be handed raw mention markup.
+        self.assertEqual(self.adapter.bot_user_id, "")
+        accepted, _ = self.parse(
+            [slack_message("1001.000100", "U1", "<@UBOT> what is running?")]
+        )
+        self.assertEqual(accepted[0][2], "what is running?")
+        accepted, _ = self.parse([slack_message("1002.000100", "U1", "<@UBOT>")])
+        self.assertEqual(accepted[0][2], "hello")
+
+    def test_the_missing_bot_id_is_reported_once_not_every_minute(self):
+        lines = []
+        original_log = lb.log
+        lb.log = lines.append
+        self.addCleanup(setattr, lb, "log", original_log)
+        original_http = lb.http_json
+        lb.http_json = lambda *a, **k: {"ok": False, "error": "ratelimited"}
+        self.addCleanup(setattr, lb, "http_json", original_http)
+
+        for minute in range(5):
+            self.adapter.resolve_bot_user_id(now=minute * (lb.BOT_ID_RETRY + 1.0))
+        self.assertEqual(len([l for l in lines if "my own user id" in l]), 1)
+
+    def test_a_bare_mention_still_gets_an_answer(self):
+        self.adapter.bot_user_id = "UBOT"
+        accepted, _ = self.parse([slack_message("1001.000100", "U1", "<@UBOT>")])
+        self.assertEqual(accepted[0][2], "hello")
+
+    def test_a_dm_needs_no_mention(self):
+        self.adapter.bot_user_id = "UBOT"
+        self.adapter.dms["D77"] = "U1"
+        self.adapter.cursors["D77"] = "1000.000000"
+        accepted, _ = self.parse(
+            [slack_message("1001.000100", "U1", "no mention here")], conversation="D77"
+        )
+        self.assertEqual(len(accepted), 1)
+
+    def test_the_channel_answers_everything_until_the_bot_id_is_known(self):
+        # A quiet channel is worse than an eager one, and the log says which.
+        self.assertEqual(self.adapter.bot_user_id, "")
+        accepted, _ = self.parse([slack_message("1001.000100", "U1", "chatting")])
+        self.assertEqual(len(accepted), 1)
+
+    def test_the_bot_id_is_asked_for_again_after_a_failure(self):
+        calls = []
+        original = lb.http_json
+
+        def flaky(url, payload=None, headers=None, timeout=None):
+            calls.append(url)
+            if len(calls) == 1:
+                return {"ok": False, "error": "ratelimited"}
+            return {"ok": True, "user_id": "UBOT"}
+
+        lb.http_json = flaky
+        self.addCleanup(setattr, lb, "http_json", original)
+        original_log = lb.log
+        lb.log = lambda _m: None
+        self.addCleanup(setattr, lb, "log", original_log)
+
+        self.adapter.resolve_bot_user_id(now=0.0)
+        self.assertEqual(self.adapter.bot_user_id, "")
+        self.adapter.resolve_bot_user_id(now=1.0)
+        self.assertEqual(len(calls), 1)
+        self.adapter.resolve_bot_user_id(now=lb.BOT_ID_RETRY + 1.0)
+        self.assertEqual(self.adapter.bot_user_id, "UBOT")
+        # Known now, so it stops asking.
+        self.adapter.resolve_bot_user_id(now=lb.BOT_ID_RETRY * 100)
+        self.assertEqual(len(calls), 2)
+
     def test_a_dm_replies_in_the_dm_with_no_thread(self):
         self.adapter.dms["D77"] = "U1"
         self.adapter.cursors["D77"] = "1000.000000"
@@ -1063,6 +1193,73 @@ class SlackParseTest(unittest.TestCase):
             self.adapter.parse_history({"messages": [None, {"ts": "nope"}]}),
             ([], startup),
         )
+
+
+class SeedWorkdirTest(unittest.TestCase):
+    """A conversation keeps its workdir, so a corrected rule has to reach the
+    conversations that already exist."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.workdir = Path(tmp.name) / "workdir"
+
+    def test_a_new_workdir_is_seeded(self):
+        self.assertTrue(lb.seed_workdir(self.workdir, "PROMPT", "\n- a rule\n"))
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            text = (self.workdir / name).read_text(encoding="utf-8")
+            self.assertIn("- a rule", text)
+            self.assertIn(lb.appendix_marker(), text)
+
+    def test_an_unmarked_workdir_from_an_older_build_is_rewritten(self):
+        self.workdir.mkdir(parents=True)
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            (self.workdir / name).write_text("PROMPT\n\nold text\n", encoding="utf-8")
+        self.assertTrue(lb.seed_workdir(self.workdir, "PROMPT", "\n- a new rule\n"))
+        text = (self.workdir / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("- a new rule", text)
+        self.assertNotIn("old text", text)
+
+    def test_a_workdir_at_this_version_is_left_alone(self):
+        lb.seed_workdir(self.workdir, "PROMPT", "\n- a rule\n")
+        before = (self.workdir / "CLAUDE.md").stat().st_mtime_ns
+        self.assertFalse(lb.seed_workdir(self.workdir, "PROMPT", "\n- a rule\n"))
+        self.assertEqual((self.workdir / "CLAUDE.md").stat().st_mtime_ns, before)
+
+    def test_an_older_marker_is_replaced(self):
+        self.workdir.mkdir(parents=True)
+        stale = "PROMPT\n\nold\n" + lb.appendix_marker(lb.APPENDIX_VERSION - 1) + "\n"
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            (self.workdir / name).write_text(stale, encoding="utf-8")
+        self.assertTrue(lb.seed_workdir(self.workdir, "PROMPT", "\n- current\n"))
+        self.assertIn(
+            lb.appendix_marker(),
+            (self.workdir / "AGENTS.md").read_text(encoding="utf-8"),
+        )
+
+
+class FormattingNoteTest(unittest.TestCase):
+    """Ordinary Markdown is wrong on all three channels, differently."""
+
+    def note(self, channel):
+        cfg = base_config(BRIDGE_SPAWN_KIND="claude")
+        return lb.remote_appendix(cfg, channel, "/home/x")
+
+    def test_slack_is_told_its_own_dialect(self):
+        self.assertIn("*one asterisk*", self.note("slack"))
+
+    def test_telegram_is_told_nothing_renders(self):
+        self.assertIn("no parse mode", self.note("telegram"))
+
+    def test_whatsapp_is_told_single_markers(self):
+        self.assertIn("single markers", self.note("whatsapp"))
+
+    def test_every_channel_warns_off_double_asterisks(self):
+        for channel in ("slack", "whatsapp"):
+            self.assertIn("**two", self.note(channel))
+
+    def test_an_unknown_channel_still_gets_a_note(self):
+        self.assertIn("Do not assume any Markdown", self.note("carrier-pigeon"))
 
 
 class SlackSendTest(unittest.TestCase):

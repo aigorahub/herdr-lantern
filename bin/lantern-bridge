@@ -86,6 +86,9 @@ SLACK_LIMIT = 4000
 # How many WhatsApp message ids to remember. Meta retries within minutes,
 # so this only has to outlast a retry window.
 WHATSAPP_SEEN_MAX = 512
+# Bump when the remote appendix changes in a way existing conversations need.
+# seed_workdir rewrites their instruction files when the marker does not match.
+APPENDIX_VERSION = 2
 WHATSAPP_LIMIT = 4096
 
 # A headless turn can legitimately run for minutes; it is still bounded.
@@ -99,6 +102,9 @@ SLACK_POLL = 3.0
 # Slack rates conversations.history at Tier 3, about 50 requests a minute. Kept
 # under that so every watched conversation can be read on every pass.
 SLACK_TIER3_BUDGET = 45.0
+# How long to wait before asking Slack again who this token belongs to, when
+# the last attempt could not say.
+BOT_ID_RETRY = 60.0
 # Slack errors that will not fix themselves, so a DM returning one is retired
 # rather than retried. Everything else, rate limits included, is transient.
 SLACK_PERMANENT_ERRORS = frozenset(
@@ -482,6 +488,42 @@ def workdir_for(state_dir, channel: str, chat_id) -> Path:
     return conversation_dir(state_dir, channel, chat_id) / "workdir"
 
 
+# What survives on the way out, per channel. Ordinary Markdown is wrong on all
+# three: Slack has its own dialect, Telegram is sent without a parse mode on
+# purpose, and WhatsApp uses single markers. An agent writing **bold** puts
+# literal asterisks in front of the user.
+FORMATTING_NOTE = {
+    "slack": (
+        "Slack does not read ordinary Markdown. Bold is *one asterisk*, "
+        "italic is _underscores_, code is `backticks`. Never **two "
+        "asterisks**: they arrive as asterisks."
+    ),
+    "telegram": (
+        "This message is sent as plain text with no parse mode, so no "
+        "Markdown is rendered at all. Asterisks and underscores arrive "
+        "exactly as typed. Use plain words and line breaks."
+    ),
+    "whatsapp": (
+        "WhatsApp uses single markers: *bold*, _italic_, ```monospace```. "
+        "Never **two asterisks**: they arrive as asterisks."
+    ),
+    "default": (
+        "Write plain text. Do not assume any Markdown is rendered."
+    ),
+}
+
+
+# A mention of anyone, at the very start of a message. Used only while this
+# bridge does not yet know its own id.
+ANY_LEADING_MENTION_RE = re.compile(r"^[ \t]*<@[UW][A-Z0-9]+(?:\|[^>]*)?>[ \t]*")
+
+
+def _strip_around(pattern, text: str) -> str:
+    """Drop every match plus the spaces and tabs touching it. Keep newlines."""
+    spaced = re.compile(r"[ \t]*(?:%s)[ \t]*" % pattern.pattern)
+    return spaced.sub(" ", text).strip()
+
+
 def remote_appendix(cfg: dict, channel: str, search_root: str) -> str:
     """What the lantern prompt does not know: there is no pane and no terminal."""
     return """
@@ -505,6 +547,7 @@ Runtime (injected by the Lantern Bridge; do not ignore):
   see.
 - No tables and no headings; both read badly on a phone. Code fences only for
   code or a command.
+- %s
 - Prefer $HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.
   Inspect commands (list/read/get) run as usual. Mutating commands (create,
   start, focus, close, remove, prompt, send-*) are blocked until the user
@@ -525,27 +568,48 @@ Runtime (injected by the Lantern Bridge; do not ignore):
   tab, or a pane unless the user names it.
 """ % (
         channel,
+        FORMATTING_NOTE.get(channel, FORMATTING_NOTE["default"]),
         cfg["BRIDGE_SPAWN_KIND"],
         search_root,
     )
 
 
-def seed_workdir(workdir: Path, prompt_text: str, appendix: str) -> bool:
-    """Write the helper's instruction files once, and only once.
+def appendix_marker(version=None) -> str:
+    version = APPENDIX_VERSION if version is None else version
+    return "<!-- lantern-bridge appendix v%d -->" % version
 
-    Once is the point: the helper edits nothing here, but a rewrite on every
-    turn would churn the mtimes a resumed session watches, and it would undo a
-    user who tuned the file by hand.
+
+def seed_workdir(workdir: Path, prompt_text: str, appendix: str) -> bool:
+    """Write the helper's instruction files, and replace an outdated set.
+
+    Not once and never again. A conversation keeps its workdir between turns,
+    so a rule corrected in a later build would never have reached any
+    conversation that already existed: the per-channel formatting note, for
+    one, would have gone only to conversations created after it shipped, while
+    the ones already getting the formatting wrong kept the old text forever.
+
+    A version marker in the file is what makes that decidable. Same version,
+    leave it alone, so ordinary turns do not churn the mtimes a resumed
+    session watches. Different or absent, write the current text. These files
+    are generated rather than owned by the user; the file people tune by hand
+    is prompt.md in the config directory, and that is never touched here.
     """
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
-    full = prompt_text.rstrip("\n") + appendix
+    marker = appendix_marker()
+    full = prompt_text.rstrip("\n") + appendix + "\n" + marker + "\n"
     seeded = False
     for name in ("AGENTS.md", "CLAUDE.md"):
         target = workdir / name
-        if not target.exists():
-            target.write_text(full, encoding="utf-8")
-            seeded = True
+        if target.exists():
+            try:
+                if marker in target.read_text(encoding="utf-8"):
+                    continue
+            except OSError:
+                # Unreadable is as good a reason to rewrite as outdated.
+                pass
+        target.write_text(full, encoding="utf-8")
+        seeded = True
     return seeded
 
 
@@ -820,6 +884,14 @@ class SlackAdapter(Adapter):
         self.seen = set()
         # DM conversation id -> allowlisted user id. Filled by open_dms.
         self.dms = {}
+        # The bot's own user id, so a channel message can be tested for a
+        # mention. Resolved lazily from auth.test, which needs no scope beyond
+        # a valid token. Until it is known the channel answers everything, the
+        # behaviour before mentions existed: a channel that has gone quiet is
+        # worse than a channel that is too eager, and the log says which.
+        self.bot_user_id = ""
+        self._bot_id_next_try = 0.0
+        self._bot_id_complained = False
         # Not a boolean: a network blip at daemon start (a laptop resuming, or
         # Herdr autostarting before DHCP) would otherwise turn DMs off for the
         # life of the process and report it as a missing scope.
@@ -839,6 +911,72 @@ class SlackAdapter(Adapter):
             }
         )
         return "https://slack.com/api/conversations.history?%s" % query
+
+    def resolve_bot_user_id(self, now=None) -> None:
+        """Ask Slack who this token is. Retried on a slow timer until known."""
+        now = time.time() if now is None else now
+        if self.bot_user_id or now < self._bot_id_next_try:
+            return
+        self._bot_id_next_try = now + BOT_ID_RETRY
+        try:
+            answer = http_json("https://slack.com/api/auth.test", headers=self.headers())
+        except Exception as exc:  # noqa: BLE001 - the channel still works
+            self._complain_about_bot_id(exc.__class__.__name__)
+            return
+        if not answer.get("ok", False):
+            self._complain_about_bot_id(answer.get("error", "unknown"))
+            return
+        user_id = answer.get("user_id")
+        if isinstance(user_id, str) and user_id:
+            self.bot_user_id = user_id
+            self._bot_id_next_try = float("inf")
+            log("slack: answering channel messages that mention me")
+
+    def _complain_about_bot_id(self, reason: str) -> None:
+        """Say it once. Retried every minute, this would fill the pane."""
+        if self._bot_id_complained:
+            return
+        self._bot_id_complained = True
+        log(
+            "slack: could not learn my own user id (%s); answering every "
+            "allowlisted message in the channel until I can" % reason
+        )
+
+    def mention_pattern(self):
+        """My own mention, in both forms Slack emits, or None if unknown.
+
+        Slack writes a mention as <@U123>, and sometimes as <@U123|name>: the
+        labelled form turns up in older messages and in anything composed
+        through the API. Matching only the bare form left the bot silent on a
+        message that plainly called it, which is the failure this whole rule
+        is supposed to avoid.
+        """
+        if not self.bot_user_id:
+            return None
+        return re.compile(r"<@%s(?:\|[^>]*)?>" % re.escape(self.bot_user_id))
+
+    def mentions_me(self, text: str) -> bool:
+        pattern = self.mention_pattern()
+        return bool(pattern and pattern.search(text))
+
+    def strip_mention(self, text: str) -> str:
+        """Take my own mention out, and change nothing else.
+
+        Only the mention and the spaces touching it go. An earlier version
+        rebuilt the message with " ".join(text.split()), which flattened every
+        line break and indent in it: a request carrying a code fence arrived
+        as one line with the fence markers stranded mid-sentence. The appendix
+        this bridge ships promises the helper that line breaks survive, and
+        mangling the question on the way in breaks that promise at the first
+        step.
+        """
+        pattern = self.mention_pattern()
+        if pattern is None:
+            # Before auth.test answers there is no id to match, so take a
+            # leading mention of anybody rather than hand the helper raw
+            # markup. Behaviour then matches the steady state.
+            return ANY_LEADING_MENTION_RE.sub("", text, count=1).strip()
+        return _strip_around(pattern, text)
 
     def dm_open_payload(self, user: str):
         return ("https://slack.com/api/conversations.open", {"users": user})
@@ -936,11 +1074,23 @@ class SlackAdapter(Adapter):
             text = message.get("text")
             if not isinstance(text, str) or not text.strip():
                 continue
+            body = text.strip()
             if conversation == self.channel:
+                # A channel has other people in it, and answering everything
+                # an allowlisted person says there is noise. A DM is the whole
+                # conversation; the channel is for being called on.
+                if self.bot_user_id:
+                    if not self.mentions_me(body):
+                        continue
+                body = self.strip_mention(body)
+                if not body:
+                    # Nothing but the mention. Worth answering, since the
+                    # person plainly wants attention.
+                    body = "hello"
                 reply_to = (conversation, ts, user)
             else:
                 reply_to = (conversation, None, user)
-            accepted.append((user, reply_to, text.strip()))
+            accepted.append((user, reply_to, body))
         return accepted, oldest
 
     def poll_conversations(self):
@@ -974,6 +1124,7 @@ class SlackAdapter(Adapter):
             self._dms_next_try = time.time() + DM_OPEN_RETRY
 
     def poll_once(self) -> None:
+        self.resolve_bot_user_id()
         self.open_dms()
         watched = self.poll_conversations()
         # The sleep is in a finally because it is the rate limit, not a
