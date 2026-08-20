@@ -32,14 +32,19 @@ Go to [api.slack.com/apps](https://api.slack.com/apps) â†’ **Create New App** â†
 **From scratch**. Name it something the channel will recognise (`Lantern` is
 fine) and pick your workspace.
 
-In **OAuth & Permissions**, scroll to **Bot Token Scopes** and add exactly two:
+In **OAuth & Permissions**, scroll to **Bot Token Scopes** and add exactly
+four:
 
 | Scope | Why |
 | --- | --- |
 | `channels:history` | read the messages in the channel it watches |
 | `chat:write` | post its answers back |
+| `im:history` | read your DM with the bot, where a conversation continues |
+| `im:write` | open that DM |
 
-Add nothing else. The bridge uses no other Slack API.
+Add nothing else. The bridge uses no other Slack API. If you added scopes
+after installing the app, reinstall it from this same page; scope changes do
+not take effect until you do.
 
 If you plan to watch a **private** channel, use `groups:history` instead of
 `channels:history`. Everything else is the same.
@@ -165,6 +170,18 @@ the daemon, then send your test message.
 **It answers you and ignores everyone else.** Messages from anyone outside
 `SLACK_ALLOWED_USERS` are dropped, as are the bot's own messages and Slack's
 join/leave notices.
+
+**Channel answers land in a thread; the conversation lives in your DM.** A
+message in the channel is answered in its own thread, so the channel stays
+readable. Do not reply inside the thread: Slack's history API does not return
+thread replies, so the bridge cannot see them, and the threaded answer says
+so. Open the bot's DM instead and carry on there; it is the same conversation,
+because the session follows you rather than the room. The DM is also simply
+the better place to talk to it, phone included.
+
+**No terminal, if you want that.** Once the tokens are in `bridge.conf`
+rather than exported, set `BRIDGE_AUTOSTART="1"` in the same file and the
+Herdr server seats the bridge pane itself on startup.
 
 **Mutating Herdr still needs your confirmation.** Inspect commands run
 normally, but anything that creates, starts, focuses, closes, or prompts is

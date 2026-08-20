@@ -27,8 +27,9 @@ fake_agents=
 argv_dir=
 open_dir=
 bridge_dir=
+autostart_dir=
 elves_tmp=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -1271,5 +1272,60 @@ unset BRIDGE_STUB_LOG
 rm -rf "$bridge_dir"
 bridge_dir=
 printf 'ok: bridge.sh config gate and redacted --check\n'
+
+# --autostart is the [[startup]] hook. It must cost nothing when nothing is
+# configured, and it must not become the daemon itself: it turns into --open,
+# which asks herdr to seat the bridge pane. The stub herdr records the ask.
+autostart_dir=$(mktemp -d)
+mkdir -p "$autostart_dir/config" "$autostart_dir/bin"
+cat >"$autostart_dir/bin/herdr" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$AUTOSTART_LOG"
+if [ "$1 $2 $3" = "plugin pane open" ]; then
+    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","scroll":{"viewport_rows":32},"tab_id":"w1:t9","workspace_id":"w1"}}}}\n'
+fi
+exit 0
+EOF
+chmod +x "$autostart_dir/bin/herdr"
+AUTOSTART_LOG=$autostart_dir/calls.txt
+export AUTOSTART_LOG
+: >"$AUTOSTART_LOG"
+
+run_autostart() {
+    HERDR_PLUGIN_ROOT="$root" \
+        HERDR_PLUGIN_CONFIG_DIR="$autostart_dir/config" \
+        HERDR_PLUGIN_STATE_DIR="$autostart_dir/state" \
+        HERDR_BIN_PATH="$autostart_dir/bin/herdr" \
+        sh "$root/bridge.sh" --autostart </dev/null >/dev/null 2>&1
+}
+
+# No config file at all: exit 0, call nothing, seed nothing.
+run_autostart || fail "autostart with no config should exit 0"
+if [ -s "$AUTOSTART_LOG" ]; then
+    fail "autostart with no config must not call herdr"
+fi
+if [ -f "$autostart_dir/config/bridge.conf" ]; then
+    fail "autostart must never seed bridge.conf"
+fi
+
+# Config present but the key off: still nothing.
+printf '%s\n' 'BRIDGE_AUTOSTART=""' >"$autostart_dir/config/bridge.conf"
+run_autostart || fail "autostart with the key off should exit 0"
+if [ -s "$AUTOSTART_LOG" ]; then
+    fail "autostart with the key off must not call herdr"
+fi
+
+# Key on: it asks herdr to seat the bridge pane, and does not run the daemon.
+printf '%s\n' 'BRIDGE_AUTOSTART="1"' >"$autostart_dir/config/bridge.conf"
+run_autostart || fail "autostart with the key on should succeed"
+grep -q 'plugin pane open --plugin aigora.lantern --entrypoint bridge' \
+    "$AUTOSTART_LOG" || fail "autostart should open the bridge pane"
+
+# The manifest wires the hook, or none of this ever runs.
+grep -q -- '"--autostart"' "$root/herdr-plugin.toml" ||
+    fail "manifest should carry the autostart startup hook"
+rm -rf "$autostart_dir"
+autostart_dir=
+printf 'ok: bridge.sh autostart gate\n'
 
 printf 'ok\n'

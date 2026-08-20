@@ -2,6 +2,35 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.6.0] - 2026-08-20
+
+### Added
+
+- Slack DMs. The bridge now opens and polls each allowlisted member's DM with
+  the bot, besides the one watched channel. Needs the `im:history` and
+  `im:write` scopes and an app reinstall; without them the bridge logs which
+  scope is missing and runs channel-only, as before.
+- `BRIDGE_AUTOSTART`. Set it to `1` in `bridge.conf` and a `[[startup]]` hook
+  has the Herdr server seat the bridge pane itself, so no terminal stays open
+  for the bridge. The hook reads the config file only, exits quietly when the
+  key is off or the file does not exist, and never seeds anything.
+
+### Changed
+
+- Slack replies follow the message and the session follows the person. A
+  channel message is answered in its own thread, so the channel stays
+  readable; a DM is answered in the DM; and both share one conversation per
+  allowlisted member, so a question asked in the channel continues in the DM
+  without starting over. Sessions used to be keyed by the channel, so an
+  existing conversation starts fresh once on upgrade.
+- Threaded answers carry one line saying the bridge cannot read the thread.
+  Slack's history API does not return thread replies, so a reply typed into
+  the thread reaches nobody; the line says where to continue instead.
+- Slack polling is round-robin, one conversation per pass, so watching the
+  DMs costs the same request rate as watching the channel alone.
+- The remote appendix pushes harder on brevity: two or three short sentences
+  is the normal reply, detail only on request, no restating the question.
+
 ## [0.5.1] - 2026-08-19
 
 ### Fixed
