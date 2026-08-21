@@ -224,6 +224,72 @@ helper_normalize_root() {
     printf '%s' "$_helper_root"
 }
 
+helper_manifest_version() {
+    # Prints the version string from a herdr-plugin.toml. Fails when the
+    # file has none.
+    _helper_mv=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$1" 2>/dev/null |
+        sed -n '1p')
+    [ -n "$_helper_mv" ] || return 1
+    printf '%s' "$_helper_mv"
+}
+
+helper_version_gt() {
+    # True when $1 names a strictly newer x.y.z than $2. Each field compares
+    # as a number, so 0.10.0 beats 0.9.9. Anything that is not three numbers
+    # is never newer: a manifest somebody is mid-edit on, or a fetch that
+    # answered with an error page, must not read as an update.
+    _helper_vg_i=1
+    while [ "$_helper_vg_i" -le 3 ]; do
+        _helper_vg_a=$(printf '%s' "$1" | cut -d. -f"$_helper_vg_i")
+        _helper_vg_b=$(printf '%s' "$2" | cut -d. -f"$_helper_vg_i")
+        case $_helper_vg_a in '' | *[!0-9]*) return 1 ;; esac
+        case $_helper_vg_b in '' | *[!0-9]*) return 1 ;; esac
+        [ "$_helper_vg_a" -gt "$_helper_vg_b" ] && return 0
+        [ "$_helper_vg_a" -lt "$_helper_vg_b" ] && return 1
+        _helper_vg_i=$((_helper_vg_i + 1))
+    done
+    return 1
+}
+
+helper_update_snapshot() {
+    # $1 plugin root, $2 output file. One honest line about whether a newer
+    # plugin version is published, for the update offer in prompt.md. The
+    # fetch gets a few seconds and no more, a failure is written as what it
+    # is rather than guessed around, and every branch writes the file, so
+    # last light-up's answer can never be read as this one's.
+    #
+    # The line names which install this is. There is no `herdr plugin
+    # update`: a GitHub install refreshes with `herdr plugin install`, and
+    # running that over a linked checkout would orphan the link, so the
+    # offer the lantern makes has to differ between the two.
+    _helper_up_root=$1
+    _helper_up_out=$2
+    _helper_up_url=${LANTERN_UPDATE_URL:-https://raw.githubusercontent.com/aigorahub/herdr-lantern/main/herdr-plugin.toml}
+    if [ -e "$_helper_up_root/.git" ]; then
+        _helper_up_kind="linked checkout"
+    else
+        _helper_up_kind="GitHub install"
+    fi
+    if ! _helper_up_local=$(helper_manifest_version "$_helper_up_root/herdr-plugin.toml"); then
+        _helper_up_line="update check unavailable: this install's manifest has no version"
+    elif ! command -v curl >/dev/null 2>&1; then
+        _helper_up_line="update check unavailable: curl not found on PATH (this is v$_helper_up_local, $_helper_up_kind)"
+    elif ! _helper_up_toml=$(curl -fsS --max-time 4 "$_helper_up_url" 2>/dev/null); then
+        _helper_up_line="update check unavailable: could not fetch the published manifest (this is v$_helper_up_local, $_helper_up_kind)"
+    else
+        _helper_up_remote=$(printf '%s\n' "$_helper_up_toml" |
+            sed -n 's/^version = "\(.*\)"$/\1/p' | sed -n '1p')
+        if [ -z "$_helper_up_remote" ]; then
+            _helper_up_line="update check unavailable: the published manifest has no version (this is v$_helper_up_local, $_helper_up_kind)"
+        elif helper_version_gt "$_helper_up_remote" "$_helper_up_local"; then
+            _helper_up_line="update available: v$_helper_up_remote is published, this is v$_helper_up_local ($_helper_up_kind)"
+        else
+            _helper_up_line="up to date: v$_helper_up_local ($_helper_up_kind)"
+        fi
+    fi
+    printf '%s\n' "$_helper_up_line" >"$_helper_up_out" 2>/dev/null || true
+}
+
 helper_is_inspect() {
     # True when this herdr argv is read-only inspect.
     case ${1:-} in

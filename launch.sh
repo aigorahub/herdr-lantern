@@ -130,6 +130,21 @@ Runtime (injected by launch.sh; do not ignore):
   it fails when nothing shows the message went in. Read the pane before
   saying sent.
 - Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
+- Seat agents in the smart-auto permission tier: on agent start, pass the
+  kind's own flags after \`--\` — claude and grok \`--permission-mode auto\`,
+  cursor \`--auto-review --trust\`, codex \`-a never -s workspace-write\`; a
+  kind not named here gets no extra args. Never pass bypassPermissions,
+  --yolo, --force, --always-approve, or
+  --dangerously-bypass-approvals-and-sandbox.
+- update.txt in this workdir is this light-up's version check. If it says a
+  newer version is published, offer the update once, in one line; if it says
+  up to date or unavailable, say nothing about it. There is no
+  \`herdr plugin update\`: a GitHub install refreshes with
+  \`herdr plugin install aigorahub/herdr-lantern\`, which mutates the herd
+  and is gated like everything else — ask first, never upgrade silently. A
+  linked checkout is never reinstalled over: say it is behind and leave the
+  pull to the user. After a confirmed install, tell the user to quit this
+  chat and reopen the lantern.
 - After workspace create, if agent start fails, wait two seconds and retry once
   (the new pane may still be coming up to a shell prompt).
 - Search from $search_root plus the usual project roots. You are the lantern,
@@ -181,6 +196,7 @@ else
     snapshot_unavailable "$workdir/elves-floor.txt" \
         "no working python 3 interpreter was found on PATH"
 fi
+helper_update_snapshot "$plugin_root" "$workdir/update.txt"
 
 printf '%s\n' "$full_prompt" >"$workdir/AGENTS.md" ||
     die "could not write AGENTS.md"

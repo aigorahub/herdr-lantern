@@ -32,7 +32,8 @@ deadpane_dir=
 statedir_dir=
 probe_dir=
 elves_tmp=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$deadpane_dir" ] && rm -rf "$deadpane_dir"; [ -n "$statedir_dir" ] && rm -rf "$statedir_dir"; [ -n "$probe_dir" ] && rm -rf "$probe_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"' EXIT
+update_dir=
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$deadpane_dir" ] && rm -rf "$deadpane_dir"; [ -n "$statedir_dir" ] && rm -rf "$statedir_dir"; [ -n "$probe_dir" ] && rm -rf "$probe_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -178,6 +179,26 @@ for gated_verb in prompt send-keys start focus close remove; do
         fail "prompt.md does not name $gated_verb as gated"
     grep -qF "$gated_verb" "$root/launch.sh" ||
         fail "the launch.sh appendix does not name $gated_verb as gated"
+done
+
+# Seated agents start in the smart-auto tier. The per-kind flags have to
+# appear everywhere the lantern is told how to start an agent — the prompt,
+# the pane appendix, and the bridge appendix — and the flags that would hand
+# a seated agent the keys have to be named as never passed in the same three
+# places. (--force is forbidden there too, but launch.sh passes it
+# legitimately for the helper CLI's own dangerous tier, so a grep for it
+# proves nothing.)
+for seat_file in prompt.md launch.sh bin/lantern-bridge; do
+    for seat_args in '--permission-mode auto' '--auto-review --trust' \
+        '-a never -s workspace-write'; do
+        grep -qF -- "$seat_args" "$root/$seat_file" ||
+            fail "$seat_file does not pass $seat_args on agent start"
+    done
+    for reckless in bypassPermissions --yolo --always-approve \
+        --dangerously-bypass-approvals-and-sandbox; do
+        grep -qF -- "$reckless" "$root/$seat_file" ||
+            fail "$seat_file does not forbid $reckless for seated agents"
+    done
 done
 # hsh carried a HERDR_REAL branch to dodge the wrapper, and launch.sh unsets
 # HERDR_REAL before it execs the agent, so inside the pane that branch never
@@ -918,13 +939,16 @@ for stub_bin in agent devin claude codex grok herdr; do
 done
 
 run_launch() {
-    # $1 is the helper.conf body. Prints the stub's ARGV line.
+    # $1 is the helper.conf body. Prints the stub's ARGV line. The update
+    # URL points at a file that does not exist so no launch here waits on
+    # the network; the fetch fails at once and the snapshot says so.
     printf '%s\n' "$1" >"$argv_dir/config/helper.conf"
     rm -rf "$argv_dir/state"
     mkdir -p "$argv_dir/state"
     env -i \
         HOME="$argv_home" \
         PATH="/usr/bin:/bin" \
+        LANTERN_UPDATE_URL="file:///nonexistent-lantern-update" \
         HERDR_PLUGIN_ROOT="$root" \
         HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
         HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
@@ -1013,6 +1037,7 @@ printf '%s\n' 'HELPER_AGENT="claude"' 'HELPER_CWD="~"' \
 env -i \
     HOME="$argv_home" \
     PATH="/usr/bin:/bin" \
+    LANTERN_UPDATE_URL="file:///nonexistent-lantern-update" \
     HERDR_PLUGIN_ROOT="$root" \
     HERDR_PLUGIN_CONFIG_DIR="$argv_dir/config" \
     HERDR_PLUGIN_STATE_DIR="$argv_dir/state" \
@@ -1026,10 +1051,103 @@ for stale_file in goals-floor elves-floor; do
     grep -q 'snapshot unavailable' "$stale_workdir/$stale_file.txt" ||
         fail "$stale_file.txt should say why it could not be refreshed"
 done
+# The version check writes its file on the same rule: a fetch that failed is
+# said out loud rather than last run's answer surviving in place.
+grep -q 'update check unavailable' "$stale_workdir/update.txt" ||
+    fail "launch.sh should write update.txt even when the check fails"
 printf 'ok: launch.sh replaces a snapshot it cannot refresh\n'
 
 rm -rf "$argv_dir"
 argv_dir=
+
+# The update offer starts from one honest line in update.txt, and these are
+# its rules: versions compare numerically per field, a dev checkout ahead of
+# main is never offered a downgrade, a linked checkout is told apart from a
+# GitHub install (there is no `herdr plugin update`, and reinstalling over a
+# link would orphan it), and a fetch that failed says so.
+helper_version_gt 0.7.0 0.6.9 || fail "0.7.0 should be newer than 0.6.9"
+helper_version_gt 0.10.0 0.9.9 ||
+    fail "0.10.0 should be newer than 0.9.9 (numeric, not lexicographic)"
+helper_version_gt 1.0.0 0.99.99 || fail "1.0.0 should be newer than 0.99.99"
+if helper_version_gt 0.6.0 0.6.0; then
+    fail "equal versions are not an update"
+fi
+if helper_version_gt 0.6.0 0.7.0; then
+    fail "an older version is not an update"
+fi
+if helper_version_gt main 0.6.0; then
+    fail "a non-numeric version is never an update"
+fi
+
+update_dir=$(mktemp -d)
+mkdir -p "$update_dir/root" "$update_dir/bin"
+printf '%s\n' 'version = "0.7.0"' >"$update_dir/root/herdr-plugin.toml"
+# A curl that answers from a fixture, or fails the way a dead network does.
+cat >"$update_dir/bin/curl" <<'EOF'
+#!/bin/sh
+[ -n "${FAKE_MANIFEST:-}" ] || exit 22
+cat "$FAKE_MANIFEST"
+EOF
+chmod +x "$update_dir/bin/curl"
+export FAKE_MANIFEST=
+
+run_update_snapshot() {
+    (
+        PATH="$update_dir/bin:$PATH"
+        export PATH
+        helper_update_snapshot "$update_dir/root" "$update_dir/update.txt"
+    )
+    cat "$update_dir/update.txt"
+}
+
+printf '%s\n' 'version = "0.8.0"' >"$update_dir/manifest.toml"
+FAKE_MANIFEST=$update_dir/manifest.toml
+update_out=$(run_update_snapshot)
+[ "$update_out" = 'update available: v0.8.0 is published, this is v0.7.0 (GitHub install)' ] ||
+    fail "update snapshot for a newer publish (got $update_out)"
+
+mkdir -p "$update_dir/root/.git"
+update_out=$(run_update_snapshot)
+case $update_out in
+*'(linked checkout)') ;;
+*) fail "a root with .git should be named a linked checkout (got $update_out)" ;;
+esac
+rm -rf "$update_dir/root/.git"
+
+printf '%s\n' 'version = "0.7.0"' >"$update_dir/manifest.toml"
+update_out=$(run_update_snapshot)
+[ "$update_out" = 'up to date: v0.7.0 (GitHub install)' ] ||
+    fail "update snapshot for the same version (got $update_out)"
+
+printf '%s\n' 'version = "0.6.0"' >"$update_dir/manifest.toml"
+update_out=$(run_update_snapshot)
+[ "$update_out" = 'up to date: v0.7.0 (GitHub install)' ] ||
+    fail "an older publish is not an update (got $update_out)"
+
+FAKE_MANIFEST=
+update_out=$(run_update_snapshot)
+case $update_out in
+'update check unavailable:'*) ;;
+*) fail "a failed fetch should say unavailable (got $update_out)" ;;
+esac
+unset FAKE_MANIFEST
+rm -rf "$update_dir"
+update_dir=
+
+# The wiring: launch.sh writes the snapshot at light-up, and prompt.md turns
+# it into an offer that asks — naming the install command that refreshes a
+# GitHub install and the linked checkout it must never reinstall over.
+grep -q 'helper_update_snapshot "\$plugin_root" "\$workdir/update.txt"' \
+    "$root/launch.sh" ||
+    fail "launch.sh should write the update snapshot at light-up"
+for update_word in 'update.txt' 'plugin install aigorahub/herdr-lantern' \
+    'linked checkout'; do
+    grep -qF -- "$update_word" "$root/prompt.md" ||
+        fail "prompt.md update offer does not mention $update_word"
+    grep -qF -- "$update_word" "$root/launch.sh" ||
+        fail "the launch.sh appendix update note does not mention $update_word"
+done
+printf 'ok: update snapshot and offer wiring\n'
 
 # bridge.sh end to end. Same stub-home trick as above: the bridge helper is
 # claude or codex, and both exist on plenty of machines, so the config names

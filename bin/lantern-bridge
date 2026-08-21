@@ -88,7 +88,7 @@ SLACK_LIMIT = 4000
 WHATSAPP_SEEN_MAX = 512
 # Bump when the remote appendix changes in a way existing conversations need.
 # seed_workdir rewrites their instruction files when the marker does not match.
-APPENDIX_VERSION = 2
+APPENDIX_VERSION = 3
 WHATSAPP_LIMIT = 4096
 
 # A headless turn can legitimately run for minutes; it is still bounded.
@@ -558,6 +558,12 @@ Runtime (injected by the Lantern Bridge; do not ignore):
   only place to ask.
 - Never call /opt/homebrew/bin/herdr or another absolute herdr path.
 - Default --kind for agent start is %s unless the user names one.
+- Seat agents in the smart-auto permission tier: on agent start, pass the
+  kind's own flags after `--` — claude and grok `--permission-mode auto`,
+  cursor `--auto-review --trust`, codex `-a never -s workspace-write`; a
+  kind not named here gets no extra args. Never pass bypassPermissions,
+  --yolo, --force, --always-approve, or
+  --dangerously-bypass-approvals-and-sandbox.
 - Search from %s plus the usual project roots. You are the lantern, not an
   elf; do not edit files in this workdir.
 - The floor.txt, goals-floor.txt, and elves-floor.txt snapshots the lantern
