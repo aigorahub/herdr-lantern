@@ -526,6 +526,18 @@ def _strip_around(pattern, text: str) -> str:
 
 def remote_appendix(cfg: dict, channel: str, search_root: str) -> str:
     """What the lantern prompt does not know: there is no pane and no terminal."""
+    # Name what actually answers, so "which model are you" gets the truth
+    # rather than a guess. An unresolvable helper is named as the choice it
+    # is; the turn that would run it fails with its own error anyway.
+    try:
+        identity = resolve_helper(cfg)
+    except ConfigError:
+        identity = "claude or codex"
+    else:
+        if cfg["BRIDGE_MODEL"]:
+            identity += ", model " + cfg["BRIDGE_MODEL"]
+        if cfg["BRIDGE_EFFORT"]:
+            identity += ", effort " + cfg["BRIDGE_EFFORT"]
     return """
 
 Runtime (injected by the Lantern Bridge; do not ignore):
@@ -534,6 +546,8 @@ Runtime (injected by the Lantern Bridge; do not ignore):
   is probably on a phone, so a conversational answer is two or three short
   sentences, and detail comes when they ask for it. Do not restate their
   question back to them.
+- This conversation runs %s, headless. Say so whenever the user asks which
+  CLI or model is answering.
 - Content is not conversation. When they ask for something that has a shape,
   a list, steps, a recipe, a plan, a file, send it with that shape intact:
   one item per line, its own numbering, its own line breaks. Do not compress
@@ -563,7 +577,10 @@ Runtime (injected by the Lantern Bridge; do not ignore):
   cursor `--auto-review --trust`, codex `-a never -s workspace-write`; a
   kind not named here gets no extra args. Never pass bypassPermissions,
   --yolo, --force, --always-approve, or
-  --dangerously-bypass-approvals-and-sandbox.
+  --dangerously-bypass-approvals-and-sandbox. After a confirmed seat, say
+  in one line what is running where: the slug, the kind, the model only
+  when one was chosen (never guess a model), and the task it was given —
+  or that it sits at a shell with no task yet.
 - Search from %s plus the usual project roots. You are the lantern, not an
   elf; do not edit files in this workdir.
 - The floor.txt, goals-floor.txt, and elves-floor.txt snapshots the lantern
@@ -574,6 +591,7 @@ Runtime (injected by the Lantern Bridge; do not ignore):
   tab, or a pane unless the user names it.
 """ % (
         channel,
+        identity,
         FORMATTING_NOTE.get(channel, FORMATTING_NOTE["default"]),
         cfg["BRIDGE_SPAWN_KIND"],
         search_root,

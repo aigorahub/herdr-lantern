@@ -380,8 +380,11 @@ reset_open() {
     : >"$STUB_LOG"
 }
 run_open() {
+    # OPEN_CONF_DIR is empty for most cases: open.sh treats a missing config
+    # directory as "no conf" and the tab label stays plain home.
     HERDR_REAL="$open_dir/herdr" \
         HERDR_PLUGIN_STATE_DIR="$open_state" \
+        HERDR_PLUGIN_CONFIG_DIR="${OPEN_CONF_DIR:-}" \
         HERDR_PLUGIN_ROOT="$root" \
         sh "$root/open.sh" >/dev/null 2>&1
 }
@@ -518,6 +521,30 @@ if [ -s "$STUB_LOG" ]; then
     fail "locked open should call nothing"
 fi
 rmdir "$open_state/open.lock"
+
+# The chat tab names what it runs. With a readable helper.conf the seat
+# renames the tab to carry the CLI and model; every case above ran with no
+# config directory and asserted the plain home label.
+reset_open
+mkdir -p "$open_dir/conf"
+printf '%s\n' 'HELPER_AGENT="claude"' 'HELPER_MODEL="opus"' \
+    'HELPER_EFFORT="high"' >"$open_dir/conf/helper.conf"
+OPEN_CONF_DIR=$open_dir/conf
+export OPEN_CONF_DIR
+run_open || fail "open with a helper.conf should succeed"
+logged 'tab rename w9:t2 home · claude · opus · high' ||
+    fail "the chat tab should say which CLI and model it runs"
+
+# A conf the parser refuses must not break the open, and must not label the
+# tab with a guess.
+reset_open
+printf '%s\n' 'EVIL=1' >"$open_dir/conf/helper.conf"
+run_open || fail "open with a bad conf should still succeed"
+logged 'tab rename w9:t2 home' || fail "a bad conf should leave the tab home"
+if grep -qF 'tab rename w9:t2 home ·' "$STUB_LOG"; then
+    fail "a bad conf must not invent a chat identity"
+fi
+OPEN_CONF_DIR=
 
 # helper_detect_agent picks the first of agent, devin, claude, codex, grok on
 # PATH. This used to assert that one of them was installed on the machine
@@ -1055,6 +1082,10 @@ done
 # said out loud rather than last run's answer surviving in place.
 grep -q 'update check unavailable' "$stale_workdir/update.txt" ||
     fail "launch.sh should write update.txt even when the check fails"
+# And the rendered appendix names what this chat runs, so the light-up line
+# can say which CLI and model is answering.
+grep -q 'This chat runs claude' "$stale_workdir/CLAUDE.md" ||
+    fail "the rendered appendix should name what the chat runs"
 printf 'ok: launch.sh replaces a snapshot it cannot refresh\n'
 
 rm -rf "$argv_dir"
@@ -1148,6 +1179,41 @@ for update_word in 'update.txt' 'plugin install aigorahub/herdr-lantern' \
         fail "the launch.sh appendix update note does not mention $update_word"
 done
 printf 'ok: update snapshot and offer wiring\n'
+
+# The chat says what it runs, in the tab and in its first line. The identity
+# mirrors launch.sh rather than echoing the conf: Cursor agent's empty model
+# is the documented default, Devin's model belongs to Devin's own config,
+# and effort only reaches the CLIs launch.sh passes it to.
+ident=$(helper_chat_identity claude opus high)
+[ "$ident" = 'claude · opus · high' ] || fail "identity claude (got $ident)"
+ident=$(helper_chat_identity claude '' '')
+[ "$ident" = claude ] || fail "identity bare claude (got $ident)"
+ident=$(helper_chat_identity agent '' '')
+[ "$ident" = "cursor agent · $(helper_cursor_default_model)" ] ||
+    fail "identity cursor default model (got $ident)"
+ident=$(helper_chat_identity cursor m high)
+[ "$ident" = 'cursor agent · m' ] ||
+    fail "identity cursor should ignore effort (got $ident)"
+ident=$(helper_chat_identity devin opus '')
+[ "$ident" = devin ] || fail "identity devin claims no model (got $ident)"
+ident=$(helper_chat_identity codex gpt-x high)
+[ "$ident" = 'codex · gpt-x · high' ] || fail "identity codex (got $ident)"
+grep -qF 'This chat runs $chat_identity' "$root/launch.sh" ||
+    fail "the launch.sh appendix should name what the chat runs"
+grep -q 'helper_cursor_default_model' "$root/launch.sh" ||
+    fail "launch.sh should take the cursor default model from lib.sh"
+grep -qF 'This conversation runs' "$root/bin/lantern-bridge" ||
+    fail "the bridge appendix should name what answers"
+# And what is supposed to be happening where: after a confirmed seat, each
+# instruction surface has the lantern say slug, kind, model-only-if-chosen,
+# and the task.
+for seat_file in prompt.md launch.sh bin/lantern-bridge; do
+    grep -qF 'what is running where' "$root/$seat_file" ||
+        fail "$seat_file does not have the lantern announce a seat"
+done
+grep -qF 'tab rename' "$root/prompt.md" ||
+    fail "prompt.md should rename a seated agent's tab"
+printf 'ok: the chat and its seats say what they run\n'
 
 # bridge.sh end to end. Same stub-home trick as above: the bridge helper is
 # claude or codex, and both exist on plenty of machines, so the config names

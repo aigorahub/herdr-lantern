@@ -112,6 +112,11 @@ extra flags. The flags that skip approvals altogether (bypassPermissions,
 `--yolo`, `--force`, `--always-approve`,
 `--dangerously-bypass-approvals-and-sandbox`) are never passed.
 
+After a confirmed seat the lantern renames the agent's tab to
+`<slug> · <kind>` and says in one line what is running where: the slug, the
+kind, the model only when one was chosen — never guessed — and the task the
+agent was given, or that it has none yet.
+
 How to use it (GitHub Pages, after this lands on `main`):
 [aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).
 Team setup notes: [howto.html](howto.html). Changelog: [CHANGELOG.md](CHANGELOG.md).
@@ -164,7 +169,10 @@ Close the leftover tab with `herdr pane close <pane_id>` if that happens.
 ## Where it sits
 
 The first open creates a workspace labelled **🔥 lantern** at your home
-directory and seats the chat there as a tab named **home**. It does not
+directory and seats the chat there as a tab named **home** — suffixed with
+what the chat runs when `helper.conf` is readable, `home · claude · opus`
+say, so the sidebar says which CLI and model is answering. The chat's first
+line names the same. It does not
 drop a tab into whatever workspace you are in, and it closes the empty
 shell tab the new workspace comes with, so the workspace holds the chat
 alone. The lantern in the sidebar is how you find it at a glance.

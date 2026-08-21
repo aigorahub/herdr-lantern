@@ -134,6 +134,48 @@ helper_detect_agent() {
     return 1
 }
 
+helper_cursor_default_model() {
+    # The one model default the plugin owns: Cursor agent with an empty
+    # HELPER_MODEL. launch.sh builds the argv from this and the chat
+    # identity names it, so it lives here once.
+    printf 'cursor-grok-4.6-high-fast'
+}
+
+helper_chat_identity() {
+    # $1 HELPER_AGENT, $2 HELPER_MODEL, $3 HELPER_EFFORT. Prints what the
+    # chat actually runs — "claude · opus · high" — for the tab label and
+    # the light-up line. It mirrors launch.sh rather than echoing the conf:
+    # Cursor agent's empty model means the documented default, Devin's
+    # model lives in Devin's own config so none is claimed for it, and
+    # effort only reaches the CLIs launch.sh passes it to.
+    _helper_ci_agent=$1
+    _helper_ci_model=${2:-}
+    _helper_ci_effort=${3:-}
+    case $_helper_ci_agent in
+    agent | cursor)
+        _helper_ci='cursor agent'
+        [ -n "$_helper_ci_model" ] ||
+            _helper_ci_model=$(helper_cursor_default_model)
+        ;;
+    devin)
+        _helper_ci=devin
+        _helper_ci_model=
+        ;;
+    *) _helper_ci=$_helper_ci_agent ;;
+    esac
+    case $_helper_ci_agent in
+    claude | codex | grok) ;;
+    *) _helper_ci_effort= ;;
+    esac
+    if [ -n "$_helper_ci_model" ]; then
+        _helper_ci="$_helper_ci · $_helper_ci_model"
+    fi
+    if [ -n "$_helper_ci_effort" ]; then
+        _helper_ci="$_helper_ci · $_helper_ci_effort"
+    fi
+    printf '%s' "$_helper_ci"
+}
+
 helper_detect_python() {
     # Prints a working Python 3 command, or fails.
     #

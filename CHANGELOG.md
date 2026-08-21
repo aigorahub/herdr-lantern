@@ -21,6 +21,19 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Changed
 
+- The lantern says what is running where. The chat tab is named
+  `home · <cli> · <model>` when `helper.conf` is readable (plain `home`
+  otherwise, never a guess), the light-up line names the CLI and model
+  answering, and the bridge appendix names its helper the same way, so
+  "which model are you" gets the truth over chat too. After a confirmed
+  seat the lantern renames the agent's tab to `<slug> · <kind>` — the
+  rename rides in the plan the user confirms, gated like the rest — and
+  says in one line what is running where: the slug, the kind, the model
+  only when one was chosen, and the task the agent was given, or that it
+  sits at a shell with none yet. The identity mirrors `launch.sh` rather
+  than echoing the conf: Cursor agent's empty model means the documented
+  default, Devin's model lives in Devin's own config so none is claimed
+  for it, and effort is shown only for the CLIs that take the flag.
 - Agents the lantern seats start in the smart-auto permission tier rather
   than each kind's bare default. `agent start` passes the kind's own flags
   after `--`: Claude Code and Grok `--permission-mode auto`, Cursor `agent`

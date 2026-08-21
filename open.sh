@@ -24,6 +24,29 @@ workspace_label='🔥 lantern'
 tab_label=home
 pane_title=Lantern
 
+# The tab also names what the chat runs — "home · claude · opus" — so the
+# sidebar answers "which CLI and model is this" without opening the tab.
+# The conf is read the way launch.sh reads it, detection order included;
+# with no readable conf the tab stays plain home rather than guessing.
+if [ -f "${HERDR_PLUGIN_CONFIG_DIR:-}/helper.conf" ]; then
+    HELPER_AGENT=
+    HELPER_MODEL=
+    HELPER_EFFORT=
+    HELPER_CWD=
+    HELPER_SPAWN_KIND=
+    HELPER_PERMISSION=
+    HELPER_EXTRA_ARGS=
+    if helper_parse_conf "$HERDR_PLUGIN_CONFIG_DIR/helper.conf" 2>/dev/null; then
+        if [ -z "$HELPER_AGENT" ]; then
+            helper_extend_user_path
+            HELPER_AGENT=$(helper_detect_agent) || HELPER_AGENT=
+        fi
+        if [ -n "$HELPER_AGENT" ]; then
+            tab_label="home · $(helper_chat_identity "$HELPER_AGENT" "$HELPER_MODEL" "$HELPER_EFFORT")"
+        fi
+    fi
+fi
+
 die() {
     printf 'lantern: %s\n' "$1" >&2
     exit 1

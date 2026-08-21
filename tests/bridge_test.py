@@ -507,6 +507,17 @@ class WorkdirTest(unittest.TestCase):
         self.assertIn("HERDR_HELPER_OK=1", text)
         self.assertIn("chat", text)
 
+    def test_appendix_names_what_answers(self):
+        # "Which model are you" has to get the truth, so the appendix names
+        # the helper, the model, and the effort this config runs.
+        cfg = base_config(
+            BRIDGE_HELPER="codex", BRIDGE_MODEL="gpt-x", BRIDGE_EFFORT="high"
+        )
+        text = lb.remote_appendix(cfg, "telegram", "/root")
+        self.assertIn(
+            "This conversation runs codex, model gpt-x, effort high", text
+        )
+
 
 class RunHelperTest(unittest.TestCase):
     """The session marker decides whether the next turn passes --continue."""
