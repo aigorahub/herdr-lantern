@@ -2,29 +2,61 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [Unreleased]
+## [0.8.0] - 2026-08-21
+
+### Removed
+
+- The Lantern Bridge, whole. The Telegram, WhatsApp, and Slack channels are
+  gone: `bridge.sh`, `bin/lantern-bridge`, `bridge.conf.example`, the bridge
+  pane, action, and autostart hook in the manifest, the Slack trial guide,
+  the bridge suites in the tests, and every bridge section in the README and
+  the published pages. The reasoning is recorded in
+  `plans/slack-app-discontinued.md`: an allowlisted sender gets a shell on
+  the machine running the bridge, which is a fair trade for one person on
+  their own machine and not one for a team, and chat access to a herd needs
+  that machine awake. The unreleased bridge changes that were queued for
+  this release — mention-only Slack channels, per-channel formatting
+  dialects, appendix re-seeding — go with it, unshipped.
+
+### Added
+
+- The lantern checks for a newer published version at light-up and offers
+  the update. `launch.sh` writes one line to `update.txt` in the workdir —
+  update available, up to date, or why it could not tell — from one
+  background fetch of the published manifest with a few seconds' budget,
+  behind a synchronous honest placeholder, so a slow network costs the
+  light-up nothing and an early read sees "unavailable" rather than a
+  guess. The offer is a question,
+  never a silent upgrade: there is no `herdr plugin update`, a GitHub
+  install refreshes with `herdr plugin install aigorahub/herdr-lantern`,
+  and that command sits behind the mutate gate like every other. A linked
+  checkout is told it is behind and never reinstalled over — reinstalling
+  would orphan the link, and the checkout may hold work in progress.
+  Versions compare numerically per field, so 0.10.0 beats 0.9.9 and a dev
+  checkout ahead of `main` is not offered a downgrade.
 
 ### Changed
 
-- The bridge answers a Slack channel only when the message mentions it. A
-  channel has other people in it, and answering everything an allowlisted
-  person says there is noise; a DM is still the whole conversation and needs
-  no mention. The bot's own user id comes from `auth.test`, which needs no
-  extra scope. Until that answers, the channel behaves as it did before and
-  the log says why, because a bot that has gone silent is harder to diagnose
-  than one that is too eager.
-- Conversation workdirs are re-seeded when the appendix changes. The helper's
-  instruction files were written once and never again, so a rule corrected in
-  a later build reached only conversations created after it: the formatting
-  note below would have gone nowhere near the conversations already getting
-  formatting wrong. The files now carry a version marker, and a file whose
-  marker is missing or older is rewritten. An edit that keeps the marker is
-  kept, and prompt.md in the config directory is never touched.
-- The helper is told each channel's formatting dialect. Ordinary Markdown is
-  wrong on all three and differently so: Slack reads `*one asterisk*`,
-  Telegram is sent with no parse mode at all, and WhatsApp uses single
-  markers. An agent writing `**bold**` was putting literal asterisks in front
-  of the reader.
+- The lantern says what is running where. The chat tab is named
+  `home · <cli> · <model>` when `helper.conf` is readable (plain `home`
+  otherwise, never a guess), and the light-up line names the CLI and model
+  answering. After a confirmed seat the lantern renames the agent's tab to
+  `<slug> · <kind>` — the rename rides in the plan the user confirms,
+  gated like the rest — and
+  says in one line what is running where: the slug, the kind, the model
+  only when one was chosen, and the task the agent was given, or that it
+  sits at a shell with none yet. The identity mirrors `launch.sh` rather
+  than echoing the conf: Cursor agent's empty model means the documented
+  default, Devin's model lives in Devin's own config so none is claimed
+  for it, and effort is shown only for the CLIs that take the flag.
+- Agents the lantern seats start in the smart-auto permission tier rather
+  than each kind's bare default. `agent start` passes the kind's own flags
+  after `--`: Claude Code and Grok `--permission-mode auto`, Cursor `agent`
+  `--auto-review --trust`, Codex `-a never -s workspace-write`; a kind
+  without a listed tier gets no extra args. The flags that skip approvals
+  altogether — bypassPermissions, `--yolo`, `--force`, `--always-approve`,
+  `--dangerously-bypass-approvals-and-sandbox` — are named as never passed.
+  The rule lives in `prompt.md` and the pane appendix.
 
 ## [0.6.0] - 2026-08-20
 

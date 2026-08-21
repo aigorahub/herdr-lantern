@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.6.0</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.8.0</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -245,6 +245,7 @@
       </tbody>
     </table>
     <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the lantern chat.</p>
+    <p class="note">Agents the lantern seats start in the smart-auto permission tier — each kind gets its own flags after <code>--</code> on <code>agent start</code>, and the flags that skip approvals altogether are never passed. After a confirmed seat it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and says in one line what is running where.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
@@ -276,13 +277,16 @@ HELPER_EXTRA_ARGS=""</pre>
     </ol>
     <p class="note">Close the chat by quitting the helper CLI. Escape stays inside the CLI. For Cursor <code>agent</code>: <kbd>ctrl+c</kbd> (twice if a turn is running), or <kbd>ctrl+d</kbd> on an empty prompt. Script and config edits do not need a Herdr restart — reopen the lantern.</p>
     <p class="note">Quit the chat before you upgrade, relink, or reinstall the plugin. <code>herdr plugin install</code> and <code>herdr plugin link</code> drop Herdr’s record of a running lantern pane, so that tab stops answering to <code>herdr plugin pane focus</code> and the next open seats a fresh chat beside it. Close the leftover tab with <code>herdr pane close &lt;pane_id&gt;</code>.</p>
+    <p class="note">The lantern checks for a newer published version at light-up and offers the update — it asks first, never upgrades silently. There is no <code>herdr plugin update</code>; a GitHub install refreshes by running the install command again. A linked checkout is only told it is behind; pull it yourself.</p>
 
     <h2>Where it sits</h2>
     <ol class="steps">
       <li>
         <div>
           The first open creates a workspace labelled <code>🔥 lantern</code> at your home directory
-          and seats the chat there as a tab named <code>home</code>. It is not dropped into the
+          and seats the chat there as a tab named <code>home</code> — suffixed with what the chat
+          runs, e.g. <code>home · claude · opus</code>,
+          and the chat's first line names the same. It is not dropped into the
           workspace you happen to be in, and the empty shell tab of the new workspace is closed, so
           the chat sits alone. The lantern in the sidebar is how you spot it.
         </div>
@@ -302,12 +306,6 @@ HELPER_EXTRA_ARGS=""</pre>
       </li>
     </ol>
     <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, the tab closes, and the lantern workspace closes with it if that chat was the only tab. Herdr reuses workspace and pane ids after a restart, so Lantern checks the remembered ids before it trusts them: keep the <code>🔥 lantern</code> label if you want that workspace reused after the chat closes.</p>
-
-    <h2>Use it from your phone</h2>
-    <p>The Lantern Bridge is a second pane that answers Telegram, WhatsApp, and Slack with the same lantern. Open it with <code>herdr plugin action invoke aigora.lantern.bridge</code> and leave it running, or <code>sh bridge.sh</code> from a checkout.</p>
-    <p>Fill in <code>bridge.conf</code> in the same config directory as <code>helper.conf</code>. A channel turns on when its credential is set, and refuses to start until its allowlist names who may talk to it. Tokens can stay in the environment: every key falls back to a variable of the same name. <code>sh bridge.sh --check</code> validates a config without touching the network.</p>
-    <p>Slack is the easiest trial (it polls; nothing has to be reachable). Telegram long-polls. WhatsApp is a localhost webhook behind a tunnel, and every POST is checked against <code>X-Hub-Signature-256</code> before it is parsed. Setup per channel, including what an allowlisted sender actually gets, is in the <a href="https://github.com/aigorahub/herdr-lantern#use-the-lantern-from-telegram-whatsapp-or-slack">README</a>. Slack walkthrough: <a href="https://github.com/aigorahub/herdr-lantern/blob/main/docs/slack-trial.md">docs/slack-trial.md</a>.</p>
-    <p class="note">Mutating <code>herdr</code> is still blocked until you confirm, and the confirmation is a chat message. Put only your own ids on the allowlists.</p>
 
     <h2>What to say</h2>
     <ul class="says">

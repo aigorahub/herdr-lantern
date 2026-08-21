@@ -103,6 +103,13 @@ auto | accept-edits | smart | dangerous) ;;
 *) die "HELPER_PERMISSION must be auto, accept-edits, smart, or dangerous" ;;
 esac
 
+# The identity follows what actually runs: a --model in HELPER_EXTRA_ARGS
+# lands after the built flags and the later flag wins, so it is the model
+# the label and the light-up line must name.
+chat_identity=$(helper_chat_identity "$HELPER_AGENT" \
+    "$(helper_effective_model "$HELPER_MODEL" "$HELPER_EXTRA_ARGS")" \
+    "$HELPER_EFFORT")
+
 state_dir=${HERDR_PLUGIN_STATE_DIR:-$config_dir/state}
 workdir=$state_dir/workdir
 mkdir -p "$workdir/.windsurf/rules" || die "could not create helper workdir"
@@ -111,6 +118,10 @@ search_root=$(helper_normalize_root "${HELPER_CWD:-~}")
 [ -d "$search_root" ] || die "helper search directory does not exist: $search_root"
 
 prompt=$(cat "$prompt_file")
+# macOS /bin/sh is bash 3.2, and its $(...) scanner pairs ASCII quote
+# characters even inside this heredoc, so an odd number of ' below breaks
+# the parse at the end of the file. Prose apostrophes in the appendix are
+# the typographic ’ for that reason.
 appendix=$(
     cat <<EOF
 
@@ -129,7 +140,31 @@ Runtime (injected by launch.sh; do not ignore):
   (Cursor often types into the follow-up field without submitting), and
   it fails when nothing shows the message went in. Read the pane before
   saying sent.
+- This chat runs $chat_identity. Name that in your light-up line — it is
+  how the user tells which CLI and model is answering — and repeat it
+  whenever they ask.
 - Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
+- Seat agents in the smart-auto permission tier: on agent start, pass the
+  kind’s own flags after \`--\` — claude and grok \`--permission-mode auto\`,
+  cursor \`--auto-review --trust\`, codex \`-a never -s workspace-write\`; a
+  kind not named here gets no extra args. Never pass bypassPermissions,
+  --yolo, --force, --always-approve, or
+  --dangerously-bypass-approvals-and-sandbox. After a confirmed seat, say
+  in one line what is running where: the slug, the kind, the model only
+  when one was chosen (never guess a model), and the task it was given —
+  or that it sits at a shell with no task yet. Rename the agent’s tab to
+  \`<slug> · <kind>\` as part of the seat plan you confirm
+  (\`herdr tab rename\`, tab_id from the workspace create JSON), so the
+  sidebar says who is in it.
+- update.txt in this workdir is this light-up’s version check. If it says a
+  newer version is published, offer the update once, in one line; if it says
+  up to date or unavailable, say nothing about it. There is no
+  \`herdr plugin update\`: a GitHub install refreshes with
+  \`herdr plugin install aigorahub/herdr-lantern\`, which mutates the herd
+  and is gated like everything else — ask first, never upgrade silently. A
+  linked checkout is never reinstalled over: say it is behind and leave the
+  pull to the user. After a confirmed install, tell the user to quit this
+  chat and reopen the lantern.
 - After workspace create, if agent start fails, wait two seconds and retry once
   (the new pane may still be coming up to a shell prompt).
 - Search from $search_root plus the usual project roots. You are the lantern,
@@ -181,6 +216,14 @@ else
     snapshot_unavailable "$workdir/elves-floor.txt" \
         "no working python 3 interpreter was found on PATH"
 fi
+# The fetch gets a few seconds, and none of them are the user's: an honest
+# placeholder goes down synchronously, then the check rewrites the file
+# from the background while the agent starts. A light-up that reads before
+# the rewrite sees the unavailable line and says nothing about updates,
+# which is exactly what a slow network looks like anyway.
+printf 'update check unavailable: the check had not finished by light-up\n' \
+    >"$workdir/update.txt" 2>/dev/null || true
+helper_update_snapshot "$plugin_root" "$workdir/update.txt" &
 
 printf '%s\n' "$full_prompt" >"$workdir/AGENTS.md" ||
     die "could not write AGENTS.md"
@@ -196,7 +239,7 @@ mkdir -p "$workdir/.cursor/rules" || die "could not create cursor rules dir"
     die "could not write cursor rule file"
 
 if [ "$helper_bin" = "agent" ] && [ -z "$HELPER_MODEL" ]; then
-    HELPER_MODEL=cursor-grok-4.6-high-fast
+    HELPER_MODEL=$(helper_cursor_default_model)
 fi
 
 set -- "$helper_bin"
@@ -207,7 +250,9 @@ if [ -n "$HELPER_MODEL" ]; then
         set -- "$@" --model "$HELPER_MODEL"
     fi
 fi
-if [ -n "$HELPER_EFFORT" ]; then
+if [ -n "$HELPER_EFFORT" ] && helper_agent_takes_effort "$HELPER_AGENT"; then
+    # Membership lives in helper_agent_takes_effort, shared with the chat
+    # identity; this case only maps each CLI to its own flag spelling.
     case $HELPER_AGENT in
     codex) set -- "$@" --config "model_reasoning_effort=\"$HELPER_EFFORT\"" ;;
     claude) set -- "$@" --effort "$HELPER_EFFORT" ;;
