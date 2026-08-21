@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.7.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.8.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -204,179 +204,6 @@ until then; Escape stays inside the CLI.
 For Cursor `agent`: **Ctrl+C** (twice if a turn is running), or **Ctrl+D** on an
 empty prompt.
 
-
-## Use the lantern from Telegram, WhatsApp, or Slack
-
-> Thinking of running this for a team? Read
-> [why Aigora stopped](plans/slack-app-discontinued.md) first. The short
-> version: an allowlisted sender gets a shell on the machine running the
-> bridge, which is a fair trade for one person on their own machine and not
-> one for a team, and chat access to a herd needs that machine awake.
-
-The **Lantern Bridge** is a second pane that answers chat messages with the
-same lantern. Open it with `herdr plugin action invoke aigora.lantern.bridge`,
-or run `sh bridge.sh` from a checkout. Leave it running; it is a daemon.
-
-No terminal has to stay open for it. The pane lives inside the Herdr server,
-and `BRIDGE_AUTOSTART="1"` in `bridge.conf` makes the server seat that pane
-itself on startup, so the bridge is simply up whenever Herdr is. Autostart
-reads the config file only, so the tokens must live in `bridge.conf` (it is
-created `0600`) rather than in an exported variable, which no longer exists
-by the time the server boots.
-
-One bridge runs at a time. Invoking the action again focuses the pane that is
-already open, and a second daemon on the same state directory refuses to start
-and names the lock file — two pollers on one token would answer every message
-twice.
-
-It does not read the lantern chat. Every conversation gets its own workdir
-under the plugin state directory, seeded with the same `prompt.md` plus a
-remote appendix, and a headless helper runs there. Mutating `herdr` is still
-blocked until you confirm, and the confirmation is a chat message.
-
-The bridge helper is `claude` or `codex` only. Those are the two with a
-headless mode that also resumes a conversation.
-
-```bash
-$EDITOR "$(herdr plugin config-dir aigora.lantern)/bridge.conf"
-```
-
-Every key falls back to an environment variable of the same name when the line
-is empty, so tokens can stay out of the file.
-
-| Key | What it is |
-| --- | --- |
-| `BRIDGE_AUTOSTART` | `1`, `yes`, or `true`: the Herdr server opens the bridge pane on startup |
-| `BRIDGE_HELPER` | `claude` or `codex`; empty = first of those on `PATH` |
-| `BRIDGE_MODEL` | optional `--model` |
-| `BRIDGE_EFFORT` | `claude --effort`, `codex model_reasoning_effort` |
-| `BRIDGE_CWD` | search root mentioned to the helper (default `~`) |
-| `BRIDGE_SPAWN_KIND` | default `--kind` for `herdr agent start` |
-| `BRIDGE_EXTRA_ARGS` | extra unquoted helper CLI tokens; permission and sandbox flags are refused |
-| `TELEGRAM_BOT_TOKEN` | token from @BotFather |
-| `TELEGRAM_ALLOWED_CHATS` | comma-separated numeric ids of **people**: each one a private chat, or a user id |
-| `SLACK_BOT_TOKEN` | `xoxb-` token |
-| `SLACK_CHANNEL` | the one channel id the bridge watches |
-| `SLACK_ALLOWED_USERS` | comma-separated member ids (`U…`) |
-| `WHATSAPP_ACCESS_TOKEN` | Cloud API access token |
-| `WHATSAPP_PHONE_NUMBER_ID` | Cloud API phone number id |
-| `WHATSAPP_VERIFY_TOKEN` | string you also type into Meta's webhook form |
-| `WHATSAPP_APP_SECRET` | app secret; required, it signs every webhook |
-| `WHATSAPP_ALLOWED_NUMBERS` | comma-separated E.164 senders |
-| `WHATSAPP_WEBHOOK_HOST` | bind host, default `127.0.0.1` |
-| `WHATSAPP_WEBHOOK_PORT` | bind port, default `8787` |
-
-**A channel turns on when its credential is set, and refuses to start until
-its allowlist names who may talk to it.** With no channels configured at all
-the bridge exits and points at `bridge.conf.example`. Check a config without
-touching the network:
-
-```bash
-sh bridge.sh --check
-```
-
-**Telegram.** Talk to [@BotFather](https://t.me/BotFather), `/newbot`, keep the
-token. Message your bot once, then read your chat id out of
-`https://api.telegram.org/bot<TOKEN>/getUpdates`. Put that id in
-`TELEGRAM_ALLOWED_CHATS`. The bridge long-polls, so nothing has to be
-reachable from outside.
-
-The id you took from your own private chat is your user id, and that is what
-the allowlist is for: **a chat id here is a person, not a room.** A group or
-supergroup id would name a room, and the bridge will not answer one — putting
-it here would authorize every member of the group, present and future, to run
-the commands described under [What a sender gets](#what-a-sender-gets). To use
-the bridge in a group, allowlist the user ids of the people who may drive it;
-their messages are answered there and everyone else's are dropped.
-
-**Slack.** Create an app at api.slack.com, add the bot scopes
-`channels:history`, `chat:write`, `im:history`, and `im:write`, install it to
-the workspace, and invite the bot to the channel (`/invite @yourbot`). For the
-DM half, also switch on **App Home** → **Show Tabs** → **Messages Tab** and its
-checkbox: without it Slack will not let anyone send the app a direct message,
-whatever the scopes say. That is a setting, not a scope, so it needs no
-reinstall; the scopes do.
-`SLACK_CHANNEL` is that channel's id (`C…`), and `SLACK_ALLOWED_USERS` holds
-your member id (`U…`). The bridge polls that one channel and each allowlisted
-member's DM with the bot, and ignores everything it did not hear from an
-allowlisted human.
-
-In a channel it answers only when you `@Lantern` it. A DM is the whole
-conversation and needs no mention. That is the usual shape for a bot in a
-room with other people in it, and it is what keeps a shared channel usable.
-
-Replies follow the message and the session follows the person. A message in
-the channel is answered in its own thread, so the channel stays readable; a
-DM is answered in the DM. Both places share one conversation per person, so a
-question asked in the channel can be continued in the DM without starting
-over. Threads are reply-only: Slack's history API does not return thread
-replies, so the bridge cannot see anything typed inside one, and the threaded
-answer says so. Without the two `im:` scopes the bridge logs which scope is
-missing and runs channel-only.
-
-Step by step, including where to find both ids and what to do when it does
-not answer: [docs/slack-trial.md](docs/slack-trial.md).
-
-**WhatsApp.** Meta Cloud API only. Create a Meta app with the WhatsApp
-product, note the phone number id, the access token, and the app secret. The
-bridge binds localhost, and Meta needs a public HTTPS URL, so put a tunnel in
-front of it:
-
-```bash
-cloudflared tunnel --url http://127.0.0.1:8787
-```
-
-Give Meta that URL as the callback, with `WHATSAPP_VERIFY_TOKEN` as the verify
-token, and subscribe to `messages`. Every POST is checked against
-`X-Hub-Signature-256` before it is parsed; a body that does not verify gets a
-401 and is never read as a message. That is why `WHATSAPP_APP_SECRET` is
-required rather than optional: without it the tunnel is an open door.
-
-Text messages only, both directions. Replies are split at each provider's
-limit, at a line break where there is one nearby, so a list stays a list.
-
-Conversational answers are short by instruction. Content is not: a list, a
-set of steps, or output relayed from another agent is passed through with its
-own line breaks and numbering rather than condensed into a paragraph.
-
-### What a sender gets
-
-**An allowlisted sender gets a shell on this machine.** The headless helper
-runs as the user who started the bridge. Claude is started with
-`--allowed-tools "Bash,Read,Glob,Grep,LS"` and no sandbox flag. Codex is
-started as `codex exec` with no extra permission flags, so it uses that
-CLI's own defaults. `Bash` (when the helper has it) is an ordinary shell:
-it can read, write, and delete anything that account can, and reach the
-network. The `bin/herdr` wrapper gates mutating **`herdr`
-subcommands** — create, start, focus, close, prompt, `send-*` — and nothing
-else. It is not a sandbox, and it does not stand between a message and the
-rest of your files.
-
-So the allowlists are the whole security boundary. An id on one is the same
-trust as handing that person your keyboard. Treat every one of them that way:
-
-- Put only your own ids on the allowlists to start with.
-- A Telegram chat id is a person's private chat. A group id is not accepted;
-  see the Telegram notes above.
-- Slack allowlists member ids, WhatsApp allowlists sender numbers. Neither
-  channel is authorized by the room.
-- `BRIDGE_EXTRA_ARGS` is appended after the bridge's own flags and a later
-  flag wins, so the tokens that would switch the tool list or the sandbox off
-  are refused by name. `sh bridge.sh --check` prints a loud line whenever any
-  extra args are set at all.
-
-Two things the daemon does not protect against, said plainly:
-
-- Message text is never logged, but while a turn runs it is an argument to the
-  helper process, so any other account on this machine can read it out of
-  `ps auxww` for up to fifteen minutes. Tokens and secrets are never argv and
-  never logged.
-- `bridge.conf` is created `0600`, because five of its keys are secrets. If
-  you loosened that mode, or you keep the secrets in your environment on a
-  shared machine, they are readable by whoever can read that.
-
-The bridge is built for a machine you are the only user of.
-
 ## Windows
 
 Herdr ships for Windows, and so does this plugin. It runs the same POSIX shell
@@ -463,6 +290,10 @@ Devin’s own approval UI; the herdr wrapper still requires `HERDR_HELPER_OK=1`
 for mutating commands.
 
 That wrapper gates mutating `herdr` subcommands only. It is not a sandbox: the
-helper CLI it fronts has whatever tools you gave it, as you. For the bridge,
-where the person at the other end is not necessarily sitting here, read
-[What a sender gets](#what-a-sender-gets) before you fill in an allowlist.
+helper CLI it fronts has whatever tools you gave it, as you.
+
+Earlier releases shipped the Lantern Bridge, which answered Telegram,
+WhatsApp, and Slack with the same lantern. It was removed in 0.8.0: an
+allowlisted sender got a shell on the machine running it, a fair trade for
+one person on their own machine and not one for a team. The reasoning is
+recorded in [plans/slack-app-discontinued.md](plans/slack-app-discontinued.md).

@@ -1,14 +1,9 @@
 id = "aigora.lantern"
 name = "Lantern, by Elves"
-version = "0.7.0"
+version = "0.8.0"
 min_herdr_version = "0.7.5"
 description = "From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field."
 platforms = ["linux", "macos", "windows"]
-
-[[startup]]
-# One-shot: after the server is up, seat the bridge pane when the owner set
-# BRIDGE_AUTOSTART="1" in bridge.conf. Exits quietly otherwise.
-command = ["sh", "bridge.sh", "--autostart"]
 
 [[panes]]
 id = "helper"
@@ -16,20 +11,8 @@ title = "Lantern"
 placement = "tab"
 command = ["sh", "launch.sh"]
 
-[[panes]]
-id = "bridge"
-title = "Lantern Bridge"
-placement = "tab"
-command = ["sh", "bridge.sh"]
-
 [[actions]]
 id = "open"
 title = "Open lantern"
 description = "Open the lantern chat in its own workspace"
 command = ["sh", "open.sh"]
-
-[[actions]]
-id = "bridge"
-title = "Open lantern bridge"
-description = "Relay Telegram, WhatsApp, and Slack messages to the lantern"
-command = ["sh", "bridge.sh", "--open"]

@@ -242,7 +242,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.7.0 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.8.0 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -390,34 +390,6 @@ No Elves install required. If there are no
         <li>“Make a worktree on herdr for branch helper-tests.”<span><code>herdr worktree create</code>, not a second workspace on the main checkout.</span></li>
         <li>“How’s the night shift?”<span>If Elves session files are around, it reads that floor. It does not cobble or land.</span></li>
       </ul>
-
-      <h2>Use it from your phone</h2>
-      <p>The Lantern Bridge is a second pane that answers Telegram, WhatsApp, and Slack with the same lantern. It does not read the lantern chat: every conversation gets its own workdir, and a headless <code>claude</code> or <code>codex</code> answers there.</p>
-      <ol class="steps">
-        <li>
-          <div>
-            Open it and leave it running:
-            <pre>herdr plugin action invoke aigora.lantern.bridge</pre>
-            Or from a checkout: <code>sh bridge.sh</code>. Invoking the action again focuses the pane that is already open. A second daemon on the same state directory is refused by name.
-          </div>
-        </li>
-        <li>
-          <div>
-            Fill in <code>bridge.conf</code> in the plugin config directory. A channel turns on when its credential is set, and refuses to start until its allowlist names who may talk to it.
-            <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/bridge.conf"</pre>
-            Every key falls back to an environment variable of the same name, so tokens can stay out of the file.
-          </div>
-        </li>
-        <li>
-          <div>
-            Check the config without touching the network:
-            <pre>sh bridge.sh --check</pre>
-          </div>
-        </li>
-      </ol>
-      <p>Slack is the easiest trial: it polls, so nothing on your machine has to be reachable from outside. Create an app with the bot scopes <code>channels:history</code> and <code>chat:write</code>, invite it, put the channel id (<code>C…</code>) and your member id (<code>U…</code>) in the file, and export the <code>xoxb-</code> token in the same shell that runs the daemon. Step by step: <a href="https://github.com/aigorahub/herdr-lantern/blob/main/docs/slack-trial.md">docs/slack-trial.md</a>.</p>
-      <p>Telegram long-polls the same way: a chat id on the allowlist is a person, not a room. WhatsApp is a localhost webhook behind a tunnel; every POST is checked against <code>X-Hub-Signature-256</code> before it is parsed, which is why the app secret is required. Setup per channel is in the <a href="https://github.com/aigorahub/herdr-lantern#use-the-lantern-from-telegram-whatsapp-or-slack">README</a>.</p>
-      <p class="note"><strong>An allowlisted sender gets a shell on this machine.</strong> Put only your own ids on the lists. Mutating <code>herdr</code> still waits for your confirmation, as a chat message.</p>
 
       <h2>Pick your helper CLI</h2>
       <p>The lantern chat is one CLI. That is yours. It is not a shared team model. <code>HELPER_SPAWN_KIND</code> is separate: the default <code>--kind</code> when Lantern starts an agent for your work (usually <code>claude</code>).</p>

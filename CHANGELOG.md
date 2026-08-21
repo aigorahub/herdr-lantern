@@ -2,7 +2,21 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [0.7.0] - 2026-08-21
+## [0.8.0] - 2026-08-21
+
+### Removed
+
+- The Lantern Bridge, whole. The Telegram, WhatsApp, and Slack channels are
+  gone: `bridge.sh`, `bin/lantern-bridge`, `bridge.conf.example`, the bridge
+  pane, action, and autostart hook in the manifest, the Slack trial guide,
+  the bridge suites in the tests, and every bridge section in the README and
+  the published pages. The reasoning is recorded in
+  `plans/slack-app-discontinued.md`: an allowlisted sender gets a shell on
+  the machine running the bridge, which is a fair trade for one person on
+  their own machine and not one for a team, and chat access to a herd needs
+  that machine awake. The unreleased bridge changes that were queued for
+  this release — mention-only Slack channels, per-channel formatting
+  dialects, appendix re-seeding — go with it, unshipped.
 
 ### Added
 
@@ -23,11 +37,10 @@ All notable changes to Lantern, by Elves are documented here.
 
 - The lantern says what is running where. The chat tab is named
   `home · <cli> · <model>` when `helper.conf` is readable (plain `home`
-  otherwise, never a guess), the light-up line names the CLI and model
-  answering, and the bridge appendix names its helper the same way, so
-  "which model are you" gets the truth over chat too. After a confirmed
-  seat the lantern renames the agent's tab to `<slug> · <kind>` — the
-  rename rides in the plan the user confirms, gated like the rest — and
+  otherwise, never a guess), and the light-up line names the CLI and model
+  answering. After a confirmed seat the lantern renames the agent's tab to
+  `<slug> · <kind>` — the rename rides in the plan the user confirms,
+  gated like the rest — and
   says in one line what is running where: the slug, the kind, the model
   only when one was chosen, and the task the agent was given, or that it
   sits at a shell with none yet. The identity mirrors `launch.sh` rather
@@ -41,28 +54,7 @@ All notable changes to Lantern, by Elves are documented here.
   without a listed tier gets no extra args. The flags that skip approvals
   altogether — bypassPermissions, `--yolo`, `--force`, `--always-approve`,
   `--dangerously-bypass-approvals-and-sandbox` — are named as never passed.
-  The rule lives in `prompt.md`, the pane appendix, and the bridge
-  appendix, whose version marker is bumped so existing conversations
-  re-seed.
-- The bridge answers a Slack channel only when the message mentions it. A
-  channel has other people in it, and answering everything an allowlisted
-  person says there is noise; a DM is still the whole conversation and needs
-  no mention. The bot's own user id comes from `auth.test`, which needs no
-  extra scope. Until that answers, the channel behaves as it did before and
-  the log says why, because a bot that has gone silent is harder to diagnose
-  than one that is too eager.
-- Conversation workdirs are re-seeded when the appendix changes. The helper's
-  instruction files were written once and never again, so a rule corrected in
-  a later build reached only conversations created after it: the formatting
-  note below would have gone nowhere near the conversations already getting
-  formatting wrong. The files now carry a version marker, and a file whose
-  marker is missing or older is rewritten. An edit that keeps the marker is
-  kept, and prompt.md in the config directory is never touched.
-- The helper is told each channel's formatting dialect. Ordinary Markdown is
-  wrong on all three and differently so: Slack reads `*one asterisk*`,
-  Telegram is sent with no parse mode at all, and WhatsApp uses single
-  markers. An agent writing `**bold**` was putting literal asterisks in front
-  of the reader.
+  The rule lives in `prompt.md` and the pane appendix.
 
 ## [0.6.0] - 2026-08-20
 

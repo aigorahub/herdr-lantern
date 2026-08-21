@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh bridge.sh lib.sh bin/herdr hsh tests/smoke.sh; do
+for f in launch.sh open.sh lib.sh bin/herdr hsh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -26,14 +26,9 @@ fake_py=
 fake_agents=
 argv_dir=
 open_dir=
-bridge_dir=
-autostart_dir=
-deadpane_dir=
-statedir_dir=
-probe_dir=
 elves_tmp=
 update_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$bridge_dir" ] && rm -rf "$bridge_dir"; [ -n "$autostart_dir" ] && rm -rf "$autostart_dir"; [ -n "$deadpane_dir" ] && rm -rf "$deadpane_dir"; [ -n "$statedir_dir" ] && rm -rf "$statedir_dir"; [ -n "$probe_dir" ] && rm -rf "$probe_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -147,14 +142,12 @@ case $front_real in
 esac
 grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/launch.sh" ||
     fail "launch.sh should force the wrapper to the front of PATH"
-grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/bridge.sh" ||
-    fail "bridge.sh should force the wrapper to the front of PATH"
 rm -rf "$resolve_dir"
 
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
 # WSL launcher in WindowsApps, so that call would start Linux. Herdr runs these
 # files with `sh`, and nothing here needs more than that.
-if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" "$root/bridge.sh" \
+if grep -vE '^[[:space:]]*#' "$root/launch.sh" "$root/open.sh" \
     "$root/lib.sh" "$root/bin/herdr" |
     grep -qE '(^|[^A-Za-z_/-])bash([^A-Za-z_]|$)'; then
     fail "plugin shell code must not invoke bare bash"
@@ -171,9 +164,6 @@ grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 if grep -q 'HERDR_HELPER_OK=1 herdr' "$root/prompt.md"; then
     fail "prompt.md should not hand out a prefixed herdr command to paste"
 fi
-if grep -q 'HERDR_HELPER_OK=1 herdr' "$root/bin/lantern-bridge"; then
-    fail "lantern-bridge should not hand out a prefixed herdr command to paste"
-fi
 for gated_verb in prompt send-keys start focus close remove; do
     grep -qF "$gated_verb" "$root/prompt.md" ||
         fail "prompt.md does not name $gated_verb as gated"
@@ -182,13 +172,12 @@ for gated_verb in prompt send-keys start focus close remove; do
 done
 
 # Seated agents start in the smart-auto tier. The per-kind flags have to
-# appear everywhere the lantern is told how to start an agent — the prompt,
-# the pane appendix, and the bridge appendix — and the flags that would hand
-# a seated agent the keys have to be named as never passed in the same three
-# places. (--force is forbidden there too, but launch.sh passes it
-# legitimately for the helper CLI's own dangerous tier, so a grep for it
-# proves nothing.)
-for seat_file in prompt.md launch.sh bin/lantern-bridge; do
+# appear everywhere the lantern is told how to start an agent — the prompt
+# and the pane appendix — and the flags that would hand a seated agent the
+# keys have to be named as never passed in the same two places. (--force is
+# forbidden there too, but launch.sh passes it legitimately for the helper
+# CLI's own dangerous tier, so a grep for it proves nothing.)
+for seat_file in prompt.md launch.sh; do
     for seat_args in '--permission-mode auto' '--auto-review --trust' \
         '-a never -s workspace-write'; do
         grep -qF -- "$seat_args" "$root/$seat_file" ||
@@ -218,12 +207,33 @@ for snapshot in floor.txt goals-floor.txt elves-floor.txt; do
 done
 
 grep -q '^placement = "tab"$' "$root/herdr-plugin.toml" || fail "pane placement is tab"
-grep -q '^title = "Lantern Bridge"$' "$root/herdr-plugin.toml" ||
-    fail "manifest should declare the bridge pane"
-grep -q '^command = \["sh", "bridge.sh"\]$' "$root/herdr-plugin.toml" ||
-    fail "the bridge pane should run bridge.sh"
-grep -q '^command = \["sh", "bridge.sh", "--open"\]$' "$root/herdr-plugin.toml" ||
-    fail "the bridge action should open the bridge pane"
+
+# The bridge was removed in 0.8.0. The manifest must not offer Herdr a pane,
+# action, or startup hook whose script no longer exists, and no shipped
+# surface may keep selling the channels: prompt.md and launch.sh feed a live
+# agent, and the pages and README are what a new user reads. The README's
+# Trust section keeps one clearly historical note (and CHANGELOG.md is
+# history throughout), so the prose words are checked everywhere but there;
+# the config and command tokens are checked everywhere.
+if grep -qi 'bridge' "$root/herdr-plugin.toml"; then
+    fail "the manifest still declares bridge plumbing"
+fi
+for bridge_token in bridge.sh bridge.conf BRIDGE_ lantern-bridge \
+    aigora.lantern.bridge slack-trial; do
+    for bridge_file in README.md howto.html docs/index.html prompt.md \
+        launch.sh open.sh lib.sh herdr-plugin.toml; do
+        if grep -qF -- "$bridge_token" "$root/$bridge_file"; then
+            fail "$bridge_file still carries $bridge_token"
+        fi
+    done
+done
+for bridge_word in 'Lantern Bridge' Telegram WhatsApp Slack; do
+    for bridge_file in howto.html docs/index.html prompt.md launch.sh; do
+        if grep -qiF -- "$bridge_word" "$root/$bridge_file"; then
+            fail "$bridge_file still mentions $bridge_word"
+        fi
+    done
+done
 
 # One version, every file that prints it. A manifest bump nobody echoed is how
 # a marketplace listing and a README start disagreeing — and howto.html and
@@ -241,18 +251,8 @@ for version_page in howto.html docs/index.html; do
         grep -qvF "v$version"; then
         fail "$version_page still carries a version that is not v$version"
     fi
-    grep -qF "Lantern Bridge" "$root/$version_page" ||
-        fail "$version_page does not name the Lantern Bridge"
-    grep -qF "bridge.conf" "$root/$version_page" ||
-        fail "$version_page does not name bridge.conf"
 done
 
-# Every key the example file offers has to be documented, or people fill in a
-# key the README never explains.
-for bridge_key in $(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$root/bridge.conf.example"); do
-    grep -qF "$bridge_key" "$root/README.md" ||
-        fail "README does not document $bridge_key"
-done
 if grep -qE '^(width|height) =' "$root/herdr-plugin.toml"; then
     fail "pane still sizes a popup"
 fi
@@ -868,17 +868,8 @@ rm -rf "$elves_tmp"
 elves_tmp=
 
 # shellcheck disable=SC2086
-$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" \
-    "$root/bin/lantern-bridge" || fail "py_compile"
-
-# The unit suite's own output is the diagnosis. Swallowing it and saying "run
-# it directly" is advice nobody can take on a CI runner, which is exactly where
-# a platform-specific failure shows up first.
-# shellcheck disable=SC2086
-if ! $smoke_python "$root/tests/bridge_test.py" >"$tmp" 2>&1; then
-    cat "$tmp" >&2
-    fail "tests/bridge_test.py"
-fi
+$smoke_python -m py_compile "$root/bin/elves-floor" "$root/bin/goals-floor" ||
+    fail "py_compile"
 
 grep -q 'helper_detect_python' "$root/launch.sh" ||
     fail "launch.sh should use the detected interpreter"
@@ -1202,508 +1193,15 @@ grep -qF 'This chat runs $chat_identity' "$root/launch.sh" ||
     fail "the launch.sh appendix should name what the chat runs"
 grep -q 'helper_cursor_default_model' "$root/launch.sh" ||
     fail "launch.sh should take the cursor default model from lib.sh"
-grep -qF 'This conversation runs' "$root/bin/lantern-bridge" ||
-    fail "the bridge appendix should name what answers"
 # And what is supposed to be happening where: after a confirmed seat, each
 # instruction surface has the lantern say slug, kind, model-only-if-chosen,
 # and the task.
-for seat_file in prompt.md launch.sh bin/lantern-bridge; do
+for seat_file in prompt.md launch.sh; do
     grep -qF 'what is running where' "$root/$seat_file" ||
         fail "$seat_file does not have the lantern announce a seat"
 done
 grep -qF 'tab rename' "$root/prompt.md" ||
     fail "prompt.md should rename a seated agent's tab"
 printf 'ok: the chat and its seats say what they run\n'
-
-# bridge.sh end to end. Same stub-home trick as above: the bridge helper is
-# claude or codex, and both exist on plenty of machines, so the config names
-# one explicitly and nothing here ever runs it.
-bridge_dir=$(mktemp -d)
-mkdir -p "$bridge_dir/config" "$bridge_dir/state"
-# The interpreter has to be reachable from the scrubbed environment below.
-# launch.sh treats a missing Python as "no snapshot" and carries on, but the
-# bridge is a Python daemon and dies without one -- and on Windows the
-# interpreter is under C:\hostedtoolcache, which /usr/bin:/bin does not
-# contain. Without this the bridge fails for the wrong reason, still exits
-# non-zero, and every case below asserts against the wrong error.
-bridge_path=/usr/bin:/bin
-bridge_py_bin=${smoke_python%% *}
-if bridge_py_path=$(command -v "$bridge_py_bin" 2>/dev/null); then
-    bridge_path="$(dirname "$bridge_py_path"):$bridge_path"
-fi
-
-run_bridge() {
-    # $1 is the bridge.sh argument; the rest are KEY=value pairs for its
-    # environment. Every config key falls back to the environment, so a test
-    # never has to write a token to disk. Prints stdout and stderr together.
-    _bridge_arg=$1
-    shift
-    env -i \
-        HOME="$bridge_dir" \
-        PATH="$bridge_path" \
-        HERDR_PLUGIN_ROOT="$root" \
-        HERDR_PLUGIN_CONFIG_DIR="$bridge_dir/config" \
-        HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
-        "$@" \
-        sh "$root/bridge.sh" "$_bridge_arg" </dev/null 2>&1
-}
-
-bridge_fail() {
-    # Every case below turns on the content of $bridge_out, and a bridge that
-    # died for an unrelated reason exits non-zero exactly like one that
-    # refused on purpose. Print what actually came back. Guessing at it from
-    # the assertion name has already cost this suite several CI rounds, all
-    # of them on the platform nobody develops on.
-    printf 'bridge --check said:\n%s\n' "$bridge_out" >&2
-    fail "$1"
-}
-
-# No credentials at all: refuse, and say which file and which example.
-bridge_out=$(run_bridge --check) && bridge_fail "bridge with no channels should fail"
-# What this asserts is that the refusal names the config file, and the only
-# portable way to say that is to match the tail of the path.
-#
-# The whole path cannot be compared. Python here is a native Windows program,
-# so MSYS rewrites the --conf argument on the way to it and Path() prints it
-# back with backslashes; and cygpath answers with the 8.3 short form of a
-# temporary directory (C:\Users\RUNNER~1\...) where Python has the long one
-# (C:\Users\runneradmin\...). Two spellings of one path, neither wrong.
-#
-# Match the refusal line itself. `check()` prints an unconditional
-# "config: <path>" header, so a bare path match passed whether or not the
-# refusal ever named a file to fill in.
-printf '%s\n' "$bridge_out" |
-    grep -qE 'no channels configured:.*config[/\\]bridge\.conf' ||
-    bridge_fail "the refusal should name the config file it wants filled in"
-printf '%s\n' "$bridge_out" | grep -q 'bridge.conf.example' ||
-    bridge_fail "bridge should name the example file"
-[ -f "$bridge_dir/config/bridge.conf" ] || bridge_fail "bridge should seed bridge.conf"
-[ -f "$bridge_dir/config/prompt.md" ] || bridge_fail "bridge should seed prompt.md"
-
-# bridge.conf is the documented home of five secrets, and cp would leave it
-# world-readable. Windows ignores the permission bits, so probe with a file of
-# our own rather than fail on a platform that cannot express the mode -- the
-# same shape as the unlockable state dir case above.
-mode_probe=$bridge_dir/mode.probe
-: >"$mode_probe"
-chmod 600 "$mode_probe"
-case $(ls -l "$mode_probe" | cut -c1-10) in
--rw-------)
-    case $(ls -l "$bridge_dir/config/bridge.conf" | cut -c1-10) in
-    -rw-------) ;;
-    *) bridge_fail "bridge.conf should be seeded 0600; it holds five secrets" ;;
-    esac
-    ;;
-*)
-    printf 'SKIP: platform ignores file permission bits (bridge.conf mode)\n'
-    ;;
-esac
-rm -f "$mode_probe"
-
-# Credentials without an allowlist: still a refusal, naming the key to set.
-bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
-    TELEGRAM_BOT_TOKEN=secret-token-value) &&
-    bridge_fail "bridge with no allowlist should fail"
-printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_ALLOWED_CHATS' ||
-    bridge_fail "bridge should name the empty allowlist key"
-
-# WhatsApp is the one channel that can be reached from outside this machine, so
-# the signature secret and the allowlist are both refusals, not warnings.
-bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
-    WHATSAPP_ACCESS_TOKEN=access-token-value \
-    WHATSAPP_PHONE_NUMBER_ID=PN1 \
-    WHATSAPP_VERIFY_TOKEN=verify-token-value \
-    WHATSAPP_ALLOWED_NUMBERS=15551234567) &&
-    bridge_fail "whatsapp without an app secret should fail"
-printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_APP_SECRET' ||
-    bridge_fail "whatsapp should name the missing app secret"
-
-bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
-    WHATSAPP_ACCESS_TOKEN=access-token-value \
-    WHATSAPP_PHONE_NUMBER_ID=PN1 \
-    WHATSAPP_VERIFY_TOKEN=verify-token-value \
-    WHATSAPP_APP_SECRET=app-secret-value) &&
-    bridge_fail "whatsapp without an allowlist should fail"
-printf '%s\n' "$bridge_out" | grep -q 'WHATSAPP_ALLOWED_NUMBERS' ||
-    bridge_fail "whatsapp should name the missing allowlist"
-if printf '%s\n' "$bridge_out" | grep -q 'app-secret-value'; then
-    bridge_fail "bridge leaked the whatsapp app secret"
-fi
-
-# Armed: a redacted summary and a real argv, no network, exit 0.
-bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
-    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242) ||
-    bridge_fail "bridge --check with a full telegram config should pass"
-printf '%s\n' "$bridge_out" | grep -q 'channels: telegram' ||
-    bridge_fail "bridge --check should report the enabled channel"
-printf '%s\n' "$bridge_out" | grep -q -- '--output-format text' ||
-    bridge_fail "bridge --check should print the helper argv"
-if printf '%s\n' "$bridge_out" | grep -q 'secret-token-value'; then
-    bridge_fail "bridge --check leaked a token"
-fi
-printf '%s\n' "$bridge_out" | grep -q 'TELEGRAM_BOT_TOKEN *(set,' ||
-    bridge_fail "bridge --check should report the token as redacted"
-
-# BRIDGE_EXTRA_ARGS lands after the bridge's own --allowed-tools and a later
-# flag wins, so the flags that would undo the permission model are refused by
-# name rather than printed without comment.
-bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
-    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
-    BRIDGE_EXTRA_ARGS=--dangerously-skip-permissions) &&
-    bridge_fail "extra args that skip the permission prompt should fail"
-printf '%s\n' "$bridge_out" | grep -q 'BRIDGE_EXTRA_ARGS' ||
-    bridge_fail "the refusal should name BRIDGE_EXTRA_ARGS"
-
-# An ordinary extra arg still passes, and --check says out loud that it is set.
-bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
-    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
-    BRIDGE_EXTRA_ARGS=--verbose) ||
-    bridge_fail "an ordinary extra arg should still pass"
-printf '%s\n' "$bridge_out" | grep -q '!! BRIDGE_EXTRA_ARGS' ||
-    bridge_fail "bridge --check should say when extra args are set"
-
-# The environment is the path the docs recommend for secrets, so it gets the
-# same reject set the file gets.
-bridge_out=$(run_bridge --check BRIDGE_HELPER=claude \
-    TELEGRAM_BOT_TOKEN=secret-token-value TELEGRAM_ALLOWED_CHATS=4242 \
-    'BRIDGE_MODEL=opus; rm -rf /') &&
-    bridge_fail "a shell-shaped value from the environment should fail"
-printf '%s\n' "$bridge_out" | grep -q 'BRIDGE_MODEL' ||
-    bridge_fail "the refusal should name the key it came from"
-printf '%s\n' "$bridge_out" | grep -q 'environment' ||
-    bridge_fail "the refusal should name the environment as the source"
-
-# The example file and the parser have to agree, or a fresh install refuses to
-# start on its own seeded config.
-grep -q 'bridge.conf.example' "$root/bridge.sh" || fail "bridge.sh should seed from the example"
-
-# The action cannot become the daemon itself, so it asks Herdr to seat the
-# pane. Check the call it makes against a stub herdr.
-printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*"' >"$bridge_dir/herdr"
-chmod +x "$bridge_dir/herdr"
-bridge_out=$(HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
-    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
-    sh "$root/bridge.sh" --open </dev/null) || fail "bridge --open should succeed"
-[ "$bridge_out" = "plugin pane open --plugin aigora.lantern --entrypoint bridge --placement tab" ] ||
-    fail "bridge --open should seat the bridge pane (got $bridge_out)"
-
-# Two bridges on one config is not a duplicate window: two pollers on one
-# token answer every message twice. A second --open must focus the pane that
-# is already there, not open another. This stub answers like Herdr does.
-cat >"$bridge_dir/herdr" <<'BRIDGE_STUB'
-#!/bin/sh
-printf '%s\n' "$*" >>"$BRIDGE_STUB_LOG"
-case "$1 $2" in
-"plugin pane")
-    case "$3" in
-    open) printf '{"pane_id":"p42","tab_id":"t1","workspace_id":"w1"}\n' ;;
-    focus) printf 'focused\n' ;;
-    esac
-    ;;
-"pane get")
-    printf '{"pane_id":"p42","label":"Lantern Bridge","workspace_id":"w1"}\n'
-    ;;
-esac
-exit 0
-BRIDGE_STUB
-chmod +x "$bridge_dir/herdr"
-rm -rf "$bridge_dir/state/bridge"
-BRIDGE_STUB_LOG="$bridge_dir/open.log"
-: >"$BRIDGE_STUB_LOG"
-export BRIDGE_STUB_LOG
-HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
-    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
-    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
-    fail "bridge --open should succeed"
-[ "$(cat "$bridge_dir/state/bridge/pane.id" 2>/dev/null)" = "p42" ] ||
-    fail "bridge --open should remember the pane it opened"
-HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
-    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
-    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
-    fail "a second bridge --open should succeed"
-[ "$(grep -c 'plugin pane open' "$BRIDGE_STUB_LOG")" = "1" ] ||
-    fail "a second bridge --open opened a second bridge pane"
-grep -q 'plugin pane focus p42' "$BRIDGE_STUB_LOG" ||
-    fail "a second bridge --open should focus the pane already running"
-
-# A remembered id that no longer carries the bridge label is stale: Herdr
-# reuses pane ids, so it must be reopened rather than focused.
-printf 'p42\n' >"$bridge_dir/state/bridge/pane.id"
-: >"$BRIDGE_STUB_LOG"
-cat >"$bridge_dir/herdr" <<'BRIDGE_STUB'
-#!/bin/sh
-printf '%s\n' "$*" >>"$BRIDGE_STUB_LOG"
-case "$1 $2" in
-"plugin pane")
-    case "$3" in
-    open) printf '{"pane_id":"p77","tab_id":"t2","workspace_id":"w2"}\n' ;;
-    esac
-    ;;
-"pane get")
-    printf '{"pane_id":"p42","label":"Somebody Else","workspace_id":"w1"}\n'
-    ;;
-esac
-exit 0
-BRIDGE_STUB
-chmod +x "$bridge_dir/herdr"
-HERDR_PLUGIN_ROOT="$root" HERDR_BIN_PATH="$bridge_dir/herdr" \
-    HERDR_PLUGIN_STATE_DIR="$bridge_dir/state" \
-    sh "$root/bridge.sh" --open </dev/null >/dev/null ||
-    fail "bridge --open should reopen after a stale pane id"
-grep -q 'plugin pane open' "$BRIDGE_STUB_LOG" ||
-    fail "a stale pane id should be reopened, not focused"
-[ "$(cat "$bridge_dir/state/bridge/pane.id" 2>/dev/null)" = "p77" ] ||
-    fail "bridge --open should remember the pane it reopened"
-unset BRIDGE_STUB_LOG
-
-rm -rf "$bridge_dir"
-bridge_dir=
-printf 'ok: bridge.sh config gate and redacted --check\n'
-
-# --autostart is the [[startup]] hook. It must cost nothing when nothing is
-# configured, and it must not become the daemon itself: it turns into --open,
-# which asks herdr to seat the bridge pane. The stub herdr records the ask.
-autostart_dir=$(mktemp -d)
-mkdir -p "$autostart_dir/config" "$autostart_dir/bin"
-cat >"$autostart_dir/bin/herdr" <<'EOF'
-#!/bin/sh
-printf '%s\n' "$*" >>"$AUTOSTART_LOG"
-if [ "$1 $2 $3" = "plugin pane open" ]; then
-    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","scroll":{"viewport_rows":32},"tab_id":"w1:t9","workspace_id":"w1"}}}}\n'
-fi
-exit 0
-EOF
-chmod +x "$autostart_dir/bin/herdr"
-AUTOSTART_LOG=$autostart_dir/calls.txt
-export AUTOSTART_LOG
-: >"$AUTOSTART_LOG"
-
-run_autostart() {
-    HERDR_PLUGIN_ROOT="$root" \
-        HERDR_PLUGIN_CONFIG_DIR="$autostart_dir/config" \
-        HERDR_PLUGIN_STATE_DIR="$autostart_dir/state" \
-        HERDR_BIN_PATH="$autostart_dir/bin/herdr" \
-        sh "$root/bridge.sh" --autostart </dev/null >/dev/null 2>&1
-}
-
-# No config file at all: exit 0, call nothing, seed nothing.
-run_autostart || fail "autostart with no config should exit 0"
-if [ -s "$AUTOSTART_LOG" ]; then
-    fail "autostart with no config must not call herdr"
-fi
-if [ -f "$autostart_dir/config/bridge.conf" ]; then
-    fail "autostart must never seed bridge.conf"
-fi
-
-# Config present but the key off: still nothing.
-printf '%s\n' 'BRIDGE_AUTOSTART=""' >"$autostart_dir/config/bridge.conf"
-run_autostart || fail "autostart with the key off should exit 0"
-if [ -s "$AUTOSTART_LOG" ]; then
-    fail "autostart with the key off must not call herdr"
-fi
-
-# Key on: it asks herdr to seat the bridge pane, and does not run the daemon.
-printf '%s\n' 'BRIDGE_AUTOSTART="1"' >"$autostart_dir/config/bridge.conf"
-run_autostart || fail "autostart with the key on should succeed"
-grep -q 'plugin pane open --plugin aigora.lantern --entrypoint bridge' \
-    "$AUTOSTART_LOG" || fail "autostart should open the bridge pane"
-
-# An indented key is valid config to the daemon, whose parser strips the line
-# before splitting on '='. A hook that anchors at column 0 makes such a line
-# invisible, and the symptom is a key that looks set and a bridge that never
-# starts, with nothing logged.
-printf '%s\n' '  BRIDGE_AUTOSTART="1"' >"$autostart_dir/config/bridge.conf"
-: >"$AUTOSTART_LOG"
-run_autostart || fail "autostart should accept an indented key"
-grep -q 'plugin pane open' "$AUTOSTART_LOG" ||
-    fail "autostart should open the bridge pane for an indented key"
-
-# Case is the user's business, not the parser's.
-printf '%s\n' 'BRIDGE_AUTOSTART="True"' >"$autostart_dir/config/bridge.conf"
-: >"$AUTOSTART_LOG"
-run_autostart || fail "autostart should accept True"
-grep -q 'plugin pane open' "$AUTOSTART_LOG" ||
-    fail "autostart should open the bridge pane for True"
-
-# Set to something it does not understand: no start, but say why.
-printf '%s\n' 'BRIDGE_AUTOSTART="maybe"' >"$autostart_dir/config/bridge.conf"
-: >"$AUTOSTART_LOG"
-autostart_err=$autostart_dir/err.txt
-HERDR_PLUGIN_ROOT="$root" \
-    HERDR_PLUGIN_CONFIG_DIR="$autostart_dir/config" \
-    HERDR_PLUGIN_STATE_DIR="$autostart_dir/state" \
-    HERDR_BIN_PATH="$autostart_dir/bin/herdr" \
-    sh "$root/bridge.sh" --autostart </dev/null >/dev/null 2>"$autostart_err" ||
-    fail "an unrecognised autostart value should still exit 0"
-if [ -s "$AUTOSTART_LOG" ]; then
-    fail "an unrecognised autostart value must not call herdr"
-fi
-grep -q 'not understood' "$autostart_err" ||
-    fail "an unrecognised autostart value should say so"
-
-# The manifest wires the hook, or none of this ever runs.
-grep -q -- '"--autostart"' "$root/herdr-plugin.toml" ||
-    fail "manifest should carry the autostart startup hook"
-rm -rf "$autostart_dir"
-autostart_dir=
-printf 'ok: bridge.sh autostart gate\n'
-
-# A remembered bridge pane is only worth focusing while a daemon is alive in
-# it. The pane keeps its title after its daemon dies, so the title check alone
-# focused a dead window forever and started nothing, with no sign from outside
-# that anything was wrong. The lock is the one thing only a live daemon holds,
-# and a startup grace window keeps a second press during startup from seating
-# a duplicate.
-deadpane_dir=$(mktemp -d)
-mkdir -p "$deadpane_dir/state/bridge" "$deadpane_dir/bin" "$deadpane_dir/config"
-cat >"$deadpane_dir/bin/herdr" <<'EOF'
-#!/bin/sh
-printf '%s\n' "$*" >>"$DEADPANE_LOG"
-case "$1 $2 $3" in
-"pane get"*)
-    printf '{"result":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p2","workspace_id":"w1"}}}\n'
-    ;;
-"workspace get"*)
-    printf '{"result":{"workspace":{"label":"x","workspace_id":"w1"}}}\n'
-    ;;
-"plugin pane open"*)
-    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","workspace_id":"w1"}}}}\n'
-    ;;
-esac
-exit 0
-EOF
-chmod +x "$deadpane_dir/bin/herdr"
-printf 'w1:p2\n' >"$deadpane_dir/state/bridge/pane.id"
-# Older than the startup grace window, so this is a dead pane rather than one
-# still coming up.
-touch -t 202001010000 "$deadpane_dir/state/bridge/pane.id"
-DEADPANE_LOG=$deadpane_dir/calls.txt
-export DEADPANE_LOG
-: >"$DEADPANE_LOG"
-
-HERDR_PLUGIN_ROOT="$root" \
-    HERDR_PLUGIN_CONFIG_DIR="$deadpane_dir/config" \
-    HERDR_PLUGIN_STATE_DIR="$deadpane_dir/state" \
-    HERDR_BIN_PATH="$deadpane_dir/bin/herdr" \
-    sh "$root/bridge.sh" --open </dev/null >/dev/null 2>&1 ||
-    fail "open with a dead bridge pane should still succeed"
-grep -q 'plugin pane open' "$DEADPANE_LOG" ||
-    fail "open should seat a fresh pane when no daemon holds the lock"
-if grep -q 'plugin pane focus' "$DEADPANE_LOG"; then
-    fail "open must not focus a pane whose daemon is gone"
-fi
-grep -q 'pane close w1:p2' "$DEADPANE_LOG" ||
-    fail "open should close the husk rather than leave it for the user"
-
-# The probe itself: nothing holds this lock.
-# shellcheck disable=SC2086
-if $smoke_python "$root/bin/lantern-bridge" --daemon-running \
-    --state "$deadpane_dir/state" >/dev/null 2>&1; then
-    fail "--daemon-running should report nothing running here"
-fi
-rm -rf "$deadpane_dir"
-deadpane_dir=
-printf 'ok: a dead bridge pane is replaced, not focused\n'
-
-# --open has to look for the lock where the daemon takes it. With no
-# HERDR_PLUGIN_STATE_DIR the daemon uses $config_dir/state, so an --open that
-# fell back to the checkout probed a lock nobody holds, always answered
-# "nothing running", closed the live pane past the grace window, and started a
-# second bridge that died on the first one's lock. Reading pane.id survived
-# that only because it was written under the same wrong directory.
-statedir_dir=$(mktemp -d)
-mkdir -p "$statedir_dir/config/state/bridge" "$statedir_dir/bin"
-cat >"$statedir_dir/bin/herdr" <<'EOF'
-#!/bin/sh
-printf '%s\n' "$*" >>"$STATEDIR_LOG"
-case "$1 $2 $3" in
-"pane get"*)
-    printf '{"result":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p2","workspace_id":"w1"}}}\n'
-    ;;
-"workspace get"*)
-    printf '{"result":{"workspace":{"label":"x","workspace_id":"w1"}}}\n'
-    ;;
-"plugin pane open"*)
-    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","workspace_id":"w1"}}}}\n'
-    ;;
-esac
-exit 0
-EOF
-chmod +x "$statedir_dir/bin/herdr"
-# The pane id lives under the config directory, where the daemon would put it.
-# Nothing is written into the checkout.
-printf 'w1:p2\n' >"$statedir_dir/config/state/bridge/pane.id"
-touch -t 202001010000 "$statedir_dir/config/state/bridge/pane.id"
-STATEDIR_LOG=$statedir_dir/calls.txt
-export STATEDIR_LOG
-: >"$STATEDIR_LOG"
-
-HERDR_PLUGIN_ROOT="$root" \
-    HERDR_PLUGIN_CONFIG_DIR="$statedir_dir/config" \
-    HERDR_BIN_PATH="$statedir_dir/bin/herdr" \
-    sh "$root/bridge.sh" --open </dev/null >/dev/null 2>&1 ||
-    fail "open without HERDR_PLUGIN_STATE_DIR should still succeed"
-grep -q 'pane close w1:p2' "$STATEDIR_LOG" ||
-    fail "open should read the state directory under the config dir, not the checkout"
-if [ -e "$root/state" ]; then
-    fail "open must not create a state directory inside the checkout"
-fi
-rm -rf "$statedir_dir"
-statedir_dir=
-
-# A probe that cannot answer must not be read as "nothing running". The wrong
-# answers are not symmetrical: a false "running" leaves a dead pane focused, a
-# false "not running" closes a live pane and seats a second daemon.
-probe_dir=$(mktemp -d)
-mkdir -p "$probe_dir/state/bridge" "$probe_dir/bin" "$probe_dir/config" "$probe_dir/py"
-cat >"$probe_dir/bin/herdr" <<'EOF'
-#!/bin/sh
-printf '%s\n' "$*" >>"$PROBE_LOG"
-case "$1 $2 $3" in
-"pane get"*)
-    printf '{"result":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p2","workspace_id":"w1"}}}\n'
-    ;;
-"workspace get"*)
-    printf '{"result":{"workspace":{"label":"x","workspace_id":"w1"}}}\n'
-    ;;
-"plugin pane open"*)
-    printf '{"result":{"plugin_pane":{"pane":{"label":"Lantern Bridge","pane_id":"w1:p9","workspace_id":"w1"}}}}\n'
-    ;;
-esac
-exit 0
-EOF
-chmod +x "$probe_dir/bin/herdr"
-# Passes helper_detect_python's version check, then fails the probe with 2.
-cat >"$probe_dir/py/python3" <<'EOF'
-#!/bin/sh
-case "$*" in
-*version_info*) exit 0 ;;
-*--daemon-running*) exit 2 ;;
-esac
-exit 0
-EOF
-chmod +x "$probe_dir/py/python3"
-printf 'w1:p2\n' >"$probe_dir/state/bridge/pane.id"
-touch -t 202001010000 "$probe_dir/state/bridge/pane.id"
-PROBE_LOG=$probe_dir/calls.txt
-export PROBE_LOG
-: >"$PROBE_LOG"
-
-probe_err=$probe_dir/err.txt
-PATH="$probe_dir/py:$PATH" \
-    HERDR_PLUGIN_ROOT="$root" \
-    HERDR_PLUGIN_CONFIG_DIR="$probe_dir/config" \
-    HERDR_PLUGIN_STATE_DIR="$probe_dir/state" \
-    HERDR_BIN_PATH="$probe_dir/bin/herdr" \
-    sh "$root/bridge.sh" --open </dev/null >/dev/null 2>"$probe_err" ||
-    fail "open should survive a probe that cannot answer"
-if grep -q 'pane close' "$PROBE_LOG"; then
-    fail "a probe that cannot answer must not close a pane"
-fi
-grep -q 'could not tell whether a bridge is already running' "$probe_err" ||
-    fail "a probe that cannot answer should say so"
-rm -rf "$probe_dir"
-probe_dir=
-printf 'ok: --open finds the daemon lock, and never guesses\n'
 
 printf 'ok\n'
