@@ -2,10 +2,35 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [Unreleased]
+## [0.7.0] - 2026-08-21
+
+### Added
+
+- The lantern checks for a newer published version at light-up and offers
+  the update. `launch.sh` writes one line to `update.txt` in the workdir —
+  update available, up to date, or why it could not tell — from one fetch
+  of the published manifest with a few seconds' budget, so an offline
+  machine loses a few seconds and nothing else. The offer is a question,
+  never a silent upgrade: there is no `herdr plugin update`, a GitHub
+  install refreshes with `herdr plugin install aigorahub/herdr-lantern`,
+  and that command sits behind the mutate gate like every other. A linked
+  checkout is told it is behind and never reinstalled over — reinstalling
+  would orphan the link, and the checkout may hold work in progress.
+  Versions compare numerically per field, so 0.10.0 beats 0.9.9 and a dev
+  checkout ahead of `main` is not offered a downgrade.
 
 ### Changed
 
+- Agents the lantern seats start in the smart-auto permission tier rather
+  than each kind's bare default. `agent start` passes the kind's own flags
+  after `--`: Claude Code and Grok `--permission-mode auto`, Cursor `agent`
+  `--auto-review --trust`, Codex `-a never -s workspace-write`; a kind
+  without a listed tier gets no extra args. The flags that skip approvals
+  altogether — bypassPermissions, `--yolo`, `--force`, `--always-approve`,
+  `--dangerously-bypass-approvals-and-sandbox` — are named as never passed.
+  The rule lives in `prompt.md`, the pane appendix, and the bridge
+  appendix, whose version marker is bumped so existing conversations
+  re-seed.
 - The bridge answers a Slack channel only when the message mentions it. A
   channel has other people in it, and answering everything an allowlisted
   person says there is noise; a DM is still the whole conversation and needs

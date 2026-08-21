@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.6.0</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.7.0</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -276,6 +276,7 @@ HELPER_EXTRA_ARGS=""</pre>
     </ol>
     <p class="note">Close the chat by quitting the helper CLI. Escape stays inside the CLI. For Cursor <code>agent</code>: <kbd>ctrl+c</kbd> (twice if a turn is running), or <kbd>ctrl+d</kbd> on an empty prompt. Script and config edits do not need a Herdr restart — reopen the lantern.</p>
     <p class="note">Quit the chat before you upgrade, relink, or reinstall the plugin. <code>herdr plugin install</code> and <code>herdr plugin link</code> drop Herdr’s record of a running lantern pane, so that tab stops answering to <code>herdr plugin pane focus</code> and the next open seats a fresh chat beside it. Close the leftover tab with <code>herdr pane close &lt;pane_id&gt;</code>.</p>
+    <p class="note">The lantern checks for a newer published version at light-up and offers the update — it asks first, never upgrades silently. There is no <code>herdr plugin update</code>; a GitHub install refreshes by running the install command again. A linked checkout is only told it is behind; pull it yourself.</p>
 
     <h2>Where it sits</h2>
     <ol class="steps">

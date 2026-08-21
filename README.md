@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.6.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.7.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -35,6 +35,19 @@ herdr plugin link /path/to/herdr-lantern
 ```
 
 Do not run link and GitHub install at the same time for the same plugin id.
+
+### Updates
+
+At light-up the lantern checks whether a newer version is published and, if
+one is, offers the update. It asks first and never upgrades itself silently.
+There is no `herdr plugin update`; a GitHub install refreshes by running the
+install command above again, and from inside the chat that goes through the
+same mutate gate as everything else. A linked checkout is never reinstalled
+over — the lantern says the checkout is behind and leaves the `git pull` to
+you. After an update, quit the chat and reopen the lantern; the note under
+[Open it](#open-it) about a leftover tab applies. The check is one fetch of
+the published manifest with a few seconds' budget; offline, the lantern says
+nothing about updates.
 
 ## Pick your helper CLI
 
@@ -90,6 +103,14 @@ shift?” It does not cobble or land.
 Mutating `herdr` commands (create, start, focus, close, …) go through
 `bin/herdr`. After you confirm a path or target, the helper reruns with
 `HERDR_HELPER_OK=1`.
+
+Agents the lantern seats for you start in the smart-auto permission tier:
+`agent start` passes each kind's own flags after `--` — Claude Code and Grok
+get `--permission-mode auto`, Cursor `agent` gets `--auto-review --trust`,
+Codex gets `-a never -s workspace-write`; kinds without a listed tier get no
+extra flags. The flags that skip approvals altogether (bypassPermissions,
+`--yolo`, `--force`, `--always-approve`,
+`--dangerously-bypass-approvals-and-sandbox`) are never passed.
 
 How to use it (GitHub Pages, after this lands on `main`):
 [aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).
