@@ -307,11 +307,17 @@ helper_update_snapshot() {
     _helper_up_root=$1
     _helper_up_out=$2
     _helper_up_url=${LANTERN_UPDATE_URL:-https://raw.githubusercontent.com/aigorahub/herdr-lantern/main/herdr-plugin.toml}
-    if [ -e "$_helper_up_root/.git" ]; then
-        _helper_up_kind="linked checkout"
-    else
-        _helper_up_kind="GitHub install"
-    fi
+    # Which install this is decides the offer, and the wrong answer is not
+    # symmetrical: reinstalling over a link orphans it, while calling an
+    # install a checkout only costs the shortcut. A .git proves nothing —
+    # Herdr clones GitHub installs, so they carry one too. The reliable
+    # signal is where Herdr keeps them: its own plugins/github directory.
+    # Anything anywhere else gets the cautious answer. The root arrives in
+    # POSIX form (launch.sh normalises it), so the slashes are forward.
+    case $_helper_up_root in
+    */plugins/github/*) _helper_up_kind="GitHub install" ;;
+    *) _helper_up_kind="linked checkout" ;;
+    esac
     if ! _helper_up_local=$(helper_manifest_version "$_helper_up_root/herdr-plugin.toml"); then
         _helper_up_line="update check unavailable: this install's manifest has no version"
     elif ! command -v curl >/dev/null 2>&1; then

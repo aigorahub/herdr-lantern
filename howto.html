@@ -245,6 +245,7 @@
       </tbody>
     </table>
     <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the lantern chat.</p>
+    <p class="note">Agents the lantern seats start in the smart-auto permission tier — each kind gets its own flags after <code>--</code> on <code>agent start</code>, and the flags that skip approvals altogether are never passed. After a confirmed seat it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and says in one line what is running where.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>

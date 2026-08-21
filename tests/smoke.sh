@@ -1102,8 +1102,12 @@ if helper_version_gt main 0.6.0; then
 fi
 
 update_dir=$(mktemp -d)
-mkdir -p "$update_dir/root" "$update_dir/bin"
-printf '%s\n' 'version = "0.7.0"' >"$update_dir/root/herdr-plugin.toml"
+# The root sits where Herdr keeps GitHub installs, because that path is the
+# install-kind signal: Herdr clones GitHub installs, so a .git proves
+# nothing, and the real install on a real machine carries one.
+mkdir -p "$update_dir/plugins/github/aigora.lantern-abc123" "$update_dir/bin"
+update_root=$update_dir/plugins/github/aigora.lantern-abc123
+printf '%s\n' 'version = "0.7.0"' >"$update_root/herdr-plugin.toml"
 # A curl that answers from a fixture, or fails the way a dead network does.
 cat >"$update_dir/bin/curl" <<'EOF'
 #!/bin/sh
@@ -1114,40 +1118,55 @@ chmod +x "$update_dir/bin/curl"
 export FAKE_MANIFEST=
 
 run_update_snapshot() {
+    # $1 is the plugin root to classify and check.
     (
         PATH="$update_dir/bin:$PATH"
         export PATH
-        helper_update_snapshot "$update_dir/root" "$update_dir/update.txt"
+        helper_update_snapshot "$1" "$update_dir/update.txt"
     )
     cat "$update_dir/update.txt"
 }
 
 printf '%s\n' 'version = "0.8.0"' >"$update_dir/manifest.toml"
 FAKE_MANIFEST=$update_dir/manifest.toml
-update_out=$(run_update_snapshot)
+update_out=$(run_update_snapshot "$update_root")
 [ "$update_out" = 'update available: v0.8.0 is published, this is v0.7.0 (GitHub install)' ] ||
     fail "update snapshot for a newer publish (got $update_out)"
 
-mkdir -p "$update_dir/root/.git"
-update_out=$(run_update_snapshot)
+# The confirmed real-world layout: Herdr's GitHub install carries a .git.
+# It must still be named a GitHub install, or the one refresh path that
+# works for it is never offered.
+mkdir -p "$update_root/.git"
+update_out=$(run_update_snapshot "$update_root")
+case $update_out in
+*'(GitHub install)') ;;
+*) fail "a cloned GitHub install must not be called a checkout (got $update_out)" ;;
+esac
+rm -rf "$update_root/.git"
+
+# A root outside Herdr's managed directory is somebody's checkout, with or
+# without a .git: offering plugin install over a linked plugin would
+# conflict with the link, so the cautious answer is the only safe one.
+mkdir -p "$update_dir/checkout"
+cp "$update_root/herdr-plugin.toml" "$update_dir/checkout/"
+update_out=$(run_update_snapshot "$update_dir/checkout")
 case $update_out in
 *'(linked checkout)') ;;
-*) fail "a root with .git should be named a linked checkout (got $update_out)" ;;
+*) fail "a root outside plugins/github is a linked checkout (got $update_out)" ;;
 esac
-rm -rf "$update_dir/root/.git"
 
 printf '%s\n' 'version = "0.7.0"' >"$update_dir/manifest.toml"
-update_out=$(run_update_snapshot)
+update_out=$(run_update_snapshot "$update_root")
 [ "$update_out" = 'up to date: v0.7.0 (GitHub install)' ] ||
     fail "update snapshot for the same version (got $update_out)"
 
 printf '%s\n' 'version = "0.6.0"' >"$update_dir/manifest.toml"
-update_out=$(run_update_snapshot)
+update_out=$(run_update_snapshot "$update_root")
 [ "$update_out" = 'up to date: v0.7.0 (GitHub install)' ] ||
     fail "an older publish is not an update (got $update_out)"
 
 FAKE_MANIFEST=
-update_out=$(run_update_snapshot)
+update_out=$(run_update_snapshot "$update_root")
 case $update_out in
 'update check unavailable:'*) ;;
 *) fail "a failed fetch should say unavailable (got $update_out)" ;;
