@@ -544,6 +544,40 @@ logged 'tab rename w9:t2 home' || fail "a bad conf should leave the tab home"
 if grep -qF 'tab rename w9:t2 home ·' "$STUB_LOG"; then
     fail "a bad conf must not invent a chat identity"
 fi
+
+# An agent launch.sh would refuse is never labelled: the pane will only
+# show launch.sh's error, and a sidebar advertising a CLI that never ran
+# is the confusion the label exists to prevent.
+reset_open
+printf '%s\n' 'HELPER_AGENT="gemini"' >"$open_dir/conf/helper.conf"
+run_open || fail "open with an unsupported agent should still succeed"
+logged 'tab rename w9:t2 home' ||
+    fail "an unsupported agent should leave the tab home"
+if grep -qF 'tab rename w9:t2 home ·' "$STUB_LOG"; then
+    fail "an agent launch.sh refuses must not be labelled"
+fi
+
+# The very first open runs before launch.sh has seeded helper.conf. The
+# label falls back to the same PATH detection launch.sh will use, so the
+# tab still says what the chat will run. The stub sits in $HOME/.grok/bin
+# because helper_extend_user_path prepends that last, ahead of any real
+# Homebrew CLI — and detection prefers the name `agent` first either way,
+# so the label is the same wherever the name resolves.
+reset_open
+rm -f "$open_dir/conf/helper.conf"
+first_home=$open_dir/first-home
+mkdir -p "$first_home/.grok/bin"
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$first_home/.grok/bin/agent"
+chmod +x "$first_home/.grok/bin/agent"
+env HOME="$first_home" PATH="/usr/bin:/bin" \
+    HERDR_REAL="$open_dir/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$open_state" \
+    HERDR_PLUGIN_CONFIG_DIR="$open_dir/conf" \
+    HERDR_PLUGIN_ROOT="$root" \
+    sh "$root/open.sh" >/dev/null 2>&1 ||
+    fail "a first open without a seeded conf should succeed"
+logged "tab rename w9:t2 home · cursor agent · $(helper_cursor_default_model)" ||
+    fail "a first open should label from the same detection launch.sh uses"
 OPEN_CONF_DIR=
 
 # helper_detect_agent picks the first of agent, devin, claude, codex, grok on
@@ -1100,6 +1134,21 @@ fi
 if helper_version_gt main 0.6.0; then
     fail "a non-numeric version is never an update"
 fi
+# Short and long versions are refused whole, before any field compares.
+# "0.9" used to beat "0.8.0" on its second field, with the missing third
+# never looked at — a manifest mid-edit read as an update.
+if helper_version_gt 0.9 0.8.0; then
+    fail "a two-field version is never an update"
+fi
+if helper_version_gt 9 0.8.0; then
+    fail "a one-field version is never an update"
+fi
+if helper_version_gt 1.2.3.4 1.2.3; then
+    fail "a four-field version is never an update"
+fi
+if helper_version_gt 0.9.0 0.8; then
+    fail "a two-field installed version never reads as behind"
+fi
 
 update_dir=$(mktemp -d)
 # The root sits where Herdr keeps GitHub installs, because that path is the
@@ -1208,6 +1257,23 @@ ident=$(helper_chat_identity devin opus '')
 [ "$ident" = devin ] || fail "identity devin claims no model (got $ident)"
 ident=$(helper_chat_identity codex gpt-x high)
 [ "$ident" = 'codex · gpt-x · high' ] || fail "identity codex (got $ident)"
+
+# A --model in the extra args lands after the built flags and the later
+# flag wins, so it is the model the identity must name.
+[ "$(helper_effective_model opus '--verbose --model sonnet-x')" = sonnet-x ] ||
+    fail "effective model should follow a --model in the extra args"
+[ "$(helper_effective_model opus '--model=sonnet-x --verbose')" = sonnet-x ] ||
+    fail "effective model should follow a --model= in the extra args"
+[ "$(helper_effective_model opus '--verbose --foo')" = opus ] ||
+    fail "extra args without --model keep the conf model"
+[ -z "$(helper_effective_model '' '')" ] ||
+    fail "no model anywhere is no model"
+grep -q 'helper_effective_model' "$root/launch.sh" ||
+    fail "launch.sh identity should use the effective model"
+grep -q 'helper_effective_model' "$root/open.sh" ||
+    fail "open.sh tab label should use the effective model"
+grep -q 'helper_agent_takes_effort' "$root/launch.sh" ||
+    fail "launch.sh effort flags should share the lib.sh membership"
 grep -qF 'This chat runs $chat_identity' "$root/launch.sh" ||
     fail "the launch.sh appendix should name what the chat runs"
 grep -q 'helper_cursor_default_model' "$root/launch.sh" ||

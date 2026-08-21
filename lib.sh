@@ -163,10 +163,7 @@ helper_chat_identity() {
         ;;
     *) _helper_ci=$_helper_ci_agent ;;
     esac
-    case $_helper_ci_agent in
-    claude | codex | grok) ;;
-    *) _helper_ci_effort= ;;
-    esac
+    helper_agent_takes_effort "$_helper_ci_agent" || _helper_ci_effort=
     if [ -n "$_helper_ci_model" ]; then
         _helper_ci="$_helper_ci · $_helper_ci_model"
     fi
@@ -267,25 +264,78 @@ helper_normalize_root() {
 }
 
 helper_manifest_version() {
-    # Prints the version string from a herdr-plugin.toml. Fails when the
-    # file has none.
-    _helper_mv=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$1" 2>/dev/null |
-        sed -n '1p')
+    # Prints the version string from a herdr-plugin.toml read on stdin.
+    # Fails when there is none. One extraction for the local file and the
+    # fetched manifest alike, so the line format lives in exactly one place.
+    _helper_mv=$(sed -n 's/^version = "\(.*\)"$/\1/p' | sed -n '1p')
     [ -n "$_helper_mv" ] || return 1
     printf '%s' "$_helper_mv"
 }
 
+helper_agent_takes_effort() {
+    # True for the CLIs launch.sh passes an effort flag to. The identity
+    # string consults the same membership, so the label can never claim an
+    # effort the CLI was not given.
+    case $1 in
+    claude | codex | grok) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+helper_effective_model() {
+    # $1 HELPER_MODEL, $2 HELPER_EXTRA_ARGS. Prints the model that will
+    # actually run: launch.sh appends the extra args after its own flags,
+    # a later flag wins in these CLIs, so a --model there overrides the
+    # conf field, and the identity has to follow the winner.
+    _helper_em=$1
+    _helper_em_prev=
+    set -f
+    for _helper_em_tok in $2; do
+        if [ "$_helper_em_prev" = --model ]; then
+            _helper_em=$_helper_em_tok
+        fi
+        case $_helper_em_tok in
+        --model=*) _helper_em=${_helper_em_tok#--model=} ;;
+        esac
+        _helper_em_prev=$_helper_em_tok
+    done
+    set +f
+    printf '%s' "$_helper_em"
+}
+
+helper_version_is_xyz() {
+    # True when $1 is exactly three dot-separated numbers. The dot count
+    # is checked as a shape first, because cut passes a line through whole
+    # when its delimiter is absent — a bare "9" would otherwise read as
+    # field one, two, and three.
+    case $1 in
+    *.*.*.*) return 1 ;;
+    *.*.*) ;;
+    *) return 1 ;;
+    esac
+    _helper_vx_i=1
+    while [ "$_helper_vx_i" -le 3 ]; do
+        case $(printf '%s' "$1" | cut -d. -f"$_helper_vx_i") in
+        '' | *[!0-9]*) return 1 ;;
+        esac
+        _helper_vx_i=$((_helper_vx_i + 1))
+    done
+    return 0
+}
+
 helper_version_gt() {
     # True when $1 names a strictly newer x.y.z than $2. Each field compares
-    # as a number, so 0.10.0 beats 0.9.9. Anything that is not three numbers
-    # is never newer: a manifest somebody is mid-edit on, or a fetch that
-    # answered with an error page, must not read as an update.
+    # as a number, so 0.10.0 beats 0.9.9. Anything that is not exactly three
+    # numbers is never newer — checked in full before any field compares, or
+    # "0.9" would beat "0.8.0" on its second field with the missing third
+    # never looked at: a manifest somebody is mid-edit on, or a truncated
+    # fetch, must not read as an update.
+    helper_version_is_xyz "$1" || return 1
+    helper_version_is_xyz "$2" || return 1
     _helper_vg_i=1
     while [ "$_helper_vg_i" -le 3 ]; do
         _helper_vg_a=$(printf '%s' "$1" | cut -d. -f"$_helper_vg_i")
         _helper_vg_b=$(printf '%s' "$2" | cut -d. -f"$_helper_vg_i")
-        case $_helper_vg_a in '' | *[!0-9]*) return 1 ;; esac
-        case $_helper_vg_b in '' | *[!0-9]*) return 1 ;; esac
         [ "$_helper_vg_a" -gt "$_helper_vg_b" ] && return 0
         [ "$_helper_vg_a" -lt "$_helper_vg_b" ] && return 1
         _helper_vg_i=$((_helper_vg_i + 1))
@@ -318,7 +368,8 @@ helper_update_snapshot() {
     */plugins/github/*) _helper_up_kind="GitHub install" ;;
     *) _helper_up_kind="linked checkout" ;;
     esac
-    if ! _helper_up_local=$(helper_manifest_version "$_helper_up_root/herdr-plugin.toml"); then
+    if ! _helper_up_local=$(cat "$_helper_up_root/herdr-plugin.toml" 2>/dev/null |
+        helper_manifest_version); then
         _helper_up_line="update check unavailable: this install's manifest has no version"
     elif ! command -v curl >/dev/null 2>&1; then
         _helper_up_line="update check unavailable: curl not found on PATH (this is v$_helper_up_local, $_helper_up_kind)"
@@ -326,7 +377,7 @@ helper_update_snapshot() {
         _helper_up_line="update check unavailable: could not fetch the published manifest (this is v$_helper_up_local, $_helper_up_kind)"
     else
         _helper_up_remote=$(printf '%s\n' "$_helper_up_toml" |
-            sed -n 's/^version = "\(.*\)"$/\1/p' | sed -n '1p')
+            helper_manifest_version) || _helper_up_remote=
         if [ -z "$_helper_up_remote" ]; then
             _helper_up_line="update check unavailable: the published manifest has no version (this is v$_helper_up_local, $_helper_up_kind)"
         elif helper_version_gt "$_helper_up_remote" "$_helper_up_local"; then

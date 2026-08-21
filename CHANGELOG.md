@@ -22,9 +22,11 @@ All notable changes to Lantern, by Elves are documented here.
 
 - The lantern checks for a newer published version at light-up and offers
   the update. `launch.sh` writes one line to `update.txt` in the workdir —
-  update available, up to date, or why it could not tell — from one fetch
-  of the published manifest with a few seconds' budget, so an offline
-  machine loses a few seconds and nothing else. The offer is a question,
+  update available, up to date, or why it could not tell — from one
+  background fetch of the published manifest with a few seconds' budget,
+  behind a synchronous honest placeholder, so a slow network costs the
+  light-up nothing and an early read sees "unavailable" rather than a
+  guess. The offer is a question,
   never a silent upgrade: there is no `herdr plugin update`, a GitHub
   install refreshes with `herdr plugin install aigorahub/herdr-lantern`,
   and that command sits behind the mutate gate like every other. A linked

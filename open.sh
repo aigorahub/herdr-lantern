@@ -24,29 +24,6 @@ workspace_label='🔥 lantern'
 tab_label=home
 pane_title=Lantern
 
-# The tab also names what the chat runs — "home · claude · opus" — so the
-# sidebar answers "which CLI and model is this" without opening the tab.
-# The conf is read the way launch.sh reads it, detection order included;
-# with no readable conf the tab stays plain home rather than guessing.
-if [ -f "${HERDR_PLUGIN_CONFIG_DIR:-}/helper.conf" ]; then
-    HELPER_AGENT=
-    HELPER_MODEL=
-    HELPER_EFFORT=
-    HELPER_CWD=
-    HELPER_SPAWN_KIND=
-    HELPER_PERMISSION=
-    HELPER_EXTRA_ARGS=
-    if helper_parse_conf "$HERDR_PLUGIN_CONFIG_DIR/helper.conf" 2>/dev/null; then
-        if [ -z "$HELPER_AGENT" ]; then
-            helper_extend_user_path
-            HELPER_AGENT=$(helper_detect_agent) || HELPER_AGENT=
-        fi
-        if [ -n "$HELPER_AGENT" ]; then
-            tab_label="home · $(helper_chat_identity "$HELPER_AGENT" "$HELPER_MODEL" "$HELPER_EFFORT")"
-        fi
-    fi
-fi
-
 die() {
     printf 'lantern: %s\n' "$1" >&2
     exit 1
@@ -181,6 +158,46 @@ printf '%s\n' "$workspace" >"$workspace_file" || true
 if [ -n "$pane" ]; then
     printf '%s\n' "$pane" >"$pane_file" || true
 fi
+
+# The tab also names what the chat runs — "home · claude · opus" — so the
+# sidebar answers "which CLI and model is this" without opening the tab.
+# Computed here, at seat time, when it can be honest: the conf is read the
+# way launch.sh reads it, a missing conf (the very first open runs before
+# launch.sh has seeded one) falls back to the same PATH detection
+# launch.sh will use, an agent launch.sh would refuse is never labelled,
+# and a --model in the extra args wins the way it wins on the argv. A conf
+# the parser refuses leaves the tab plain home rather than guessing. This
+# sits after herdr was resolved, so extending PATH for detection cannot
+# change which herdr this open drives. A focused, already-running chat
+# keeps the label it was seated with.
+if [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ]; then
+    HELPER_AGENT=
+    HELPER_MODEL=
+    HELPER_EFFORT=
+    HELPER_CWD=
+    HELPER_SPAWN_KIND=
+    HELPER_PERMISSION=
+    HELPER_EXTRA_ARGS=
+    conf_ok=1
+    if [ -f "$HERDR_PLUGIN_CONFIG_DIR/helper.conf" ]; then
+        helper_parse_conf "$HERDR_PLUGIN_CONFIG_DIR/helper.conf" 2>/dev/null ||
+            conf_ok=
+    fi
+    if [ -n "$conf_ok" ] && [ -z "$HELPER_AGENT" ]; then
+        helper_extend_user_path
+        HELPER_AGENT=$(helper_detect_agent) || HELPER_AGENT=
+    fi
+    if [ -n "$conf_ok" ]; then
+        case $HELPER_AGENT in
+        codex | claude | grok | devin | agent | cursor)
+            tab_label="home · $(helper_chat_identity "$HELPER_AGENT" \
+                "$(helper_effective_model "$HELPER_MODEL" "$HELPER_EXTRA_ARGS")" \
+                "$HELPER_EFFORT")"
+            ;;
+        esac
+    fi
+fi
+
 if [ -n "$tab" ]; then
     "$herdr" tab rename "$tab" "$tab_label" >/dev/null 2>&1 || true
 fi

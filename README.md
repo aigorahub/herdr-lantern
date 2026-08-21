@@ -45,9 +45,10 @@ install command above again, and from inside the chat that goes through the
 same mutate gate as everything else. A linked checkout is never reinstalled
 over — the lantern says the checkout is behind and leaves the `git pull` to
 you. After an update, quit the chat and reopen the lantern; the note under
-[Open it](#open-it) about a leftover tab applies. The check is one fetch of
-the published manifest with a few seconds' budget; offline, the lantern says
-nothing about updates.
+[Open it](#open-it) about a leftover tab applies. The check is one
+background fetch of the published manifest with a few seconds' budget, so it
+never delays the light-up; offline, or before the fetch lands, the lantern
+says nothing about updates.
 
 ## Pick your helper CLI
 
@@ -170,9 +171,8 @@ Close the leftover tab with `herdr pane close <pane_id>` if that happens.
 
 The first open creates a workspace labelled **🔥 lantern** at your home
 directory and seats the chat there as a tab named **home** — suffixed with
-what the chat runs when `helper.conf` is readable, `home · claude · opus`
-say, so the sidebar says which CLI and model is answering. The chat's first
-line names the same. It does not
+what the chat runs, `home · claude · opus` say, so the sidebar says which
+CLI and model is answering. The chat's first line names the same. It does not
 drop a tab into whatever workspace you are in, and it closes the empty
 shell tab the new workspace comes with, so the workspace holds the chat
 alone. The lantern in the sidebar is how you find it at a glance.

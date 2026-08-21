@@ -103,7 +103,12 @@ auto | accept-edits | smart | dangerous) ;;
 *) die "HELPER_PERMISSION must be auto, accept-edits, smart, or dangerous" ;;
 esac
 
-chat_identity=$(helper_chat_identity "$HELPER_AGENT" "$HELPER_MODEL" "$HELPER_EFFORT")
+# The identity follows what actually runs: a --model in HELPER_EXTRA_ARGS
+# lands after the built flags and the later flag wins, so it is the model
+# the label and the light-up line must name.
+chat_identity=$(helper_chat_identity "$HELPER_AGENT" \
+    "$(helper_effective_model "$HELPER_MODEL" "$HELPER_EXTRA_ARGS")" \
+    "$HELPER_EFFORT")
 
 state_dir=${HERDR_PLUGIN_STATE_DIR:-$config_dir/state}
 workdir=$state_dir/workdir
@@ -211,7 +216,14 @@ else
     snapshot_unavailable "$workdir/elves-floor.txt" \
         "no working python 3 interpreter was found on PATH"
 fi
-helper_update_snapshot "$plugin_root" "$workdir/update.txt"
+# The fetch gets a few seconds, and none of them are the user's: an honest
+# placeholder goes down synchronously, then the check rewrites the file
+# from the background while the agent starts. A light-up that reads before
+# the rewrite sees the unavailable line and says nothing about updates,
+# which is exactly what a slow network looks like anyway.
+printf 'update check unavailable: the check had not finished by light-up\n' \
+    >"$workdir/update.txt" 2>/dev/null || true
+helper_update_snapshot "$plugin_root" "$workdir/update.txt" &
 
 printf '%s\n' "$full_prompt" >"$workdir/AGENTS.md" ||
     die "could not write AGENTS.md"
@@ -238,7 +250,9 @@ if [ -n "$HELPER_MODEL" ]; then
         set -- "$@" --model "$HELPER_MODEL"
     fi
 fi
-if [ -n "$HELPER_EFFORT" ]; then
+if [ -n "$HELPER_EFFORT" ] && helper_agent_takes_effort "$HELPER_AGENT"; then
+    # Membership lives in helper_agent_takes_effort, shared with the chat
+    # identity; this case only maps each CLI to its own flag spelling.
     case $HELPER_AGENT in
     codex) set -- "$@" --config "model_reasoning_effort=\"$HELPER_EFFORT\"" ;;
     claude) set -- "$@" --effort "$HELPER_EFFORT" ;;
