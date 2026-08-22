@@ -38,13 +38,13 @@ changes behind the existing confirmation gate.
 
 **Acceptance criteria:**
 
-- [ ] B1-A1: The phrase `5.6 sol high fast` resolves to the live Codex Sol model, high reasoning, and the live Fast service tier as separate argv values.
-- [ ] B1-A2: Bare `Grok` routes to Cursor with a live Cursor Grok model, `Grok Build` routes to the Grok CLI, and plain `Cursor` keeps the live Sol default.
-- [ ] B1-A3: Named pull request review requests resolve the repository and pull request, then route to the requested real review surface without editing the product repository.
-- [ ] B1-A4: Every supported seat uses smart-auto permissions, and dangerous bypass flags stay forbidden unless the user explicitly requests yolo.
-- [ ] B1-A5: Model availability checks fail closed on catalog, command, timeout, or parse failure, and the exhausted Fable case reports its reset and proposes live Opus xhigh.
-- [ ] B1-A6: `sh tests/smoke.sh` passes, the pull request checks pass on Linux, macOS, and Windows, and `git diff --check` passes.
-- [ ] B1-A7: README, prompt appendix, changelog, and plugin version describe the released behavior and version.
+- [x] B1-A1: The phrase `5.6 sol high fast` resolves to the live Codex Sol model, high reasoning, and the live Fast service tier as separate argv values.
+- [x] B1-A2: Bare `Grok` routes to Cursor with a live Cursor Grok model, `Grok Build` routes to the Grok CLI, and plain `Cursor` keeps the live Sol default.
+- [x] B1-A3: Named pull request review requests resolve the repository and pull request, then route to the requested real review surface without editing the product repository.
+- [x] B1-A4: Every supported seat uses smart-auto permissions, and dangerous bypass flags stay forbidden unless the user explicitly requests yolo.
+- [x] B1-A5: Model availability checks fail closed on catalog, command, timeout, or parse failure, and the exhausted Fable case reports its reset and proposes live Opus xhigh.
+- [x] B1-A6: `sh tests/smoke.sh` passes, the pull request checks pass on Linux, macOS, and Windows, and `git diff --check` passes.
+- [x] B1-A7: README, prompt appendix, changelog, and plugin version describe the released behavior and version.
 
 **Docs likely touched:** README, prompt, launch appendix, changelog, and this plan.
 
@@ -64,9 +64,9 @@ changes behind the existing confirmation gate.
 
 ## Master acceptance
 
-- [ ] M-A1: Lantern gives a short, correct field report and can route every documented herd task without editing a product repository.
-- [ ] M-A2: Fugu and host reviews have no unresolved blocking finding at the final product tip.
-- [ ] M-A3: The release version and GitHub release describe the tested routing and availability behavior.
+- [x] M-A1: Lantern gives a short, correct field report and can route every documented herd task without editing a product repository.
+- [x] M-A2: Fugu and host reviews have no unresolved blocking finding at the final product tip.
+- [x] M-A3: Version 0.9.0 and the release notes describe the tested routing and availability behavior and are ready for GitHub publication.
 
 ## Non-negotiables
 

@@ -4,49 +4,49 @@
       "acceptance": [
         {
           "criterion": "The phrase `5.6 sol high fast` resolves to the live Codex Sol model, high reasoning, and the live Fast service tier as separate argv values.",
-          "evidence": "",
+          "evidence": "Live `bin/model-route codex '5.6 sol high fast'` returned model `gpt-5.6-sol`, effort `high`, and service tier `priority`. `sh tests/smoke.sh` verified the separate argv values.",
           "id": "B1-A1",
-          "met": false
+          "met": true
         },
         {
           "criterion": "Bare `Grok` routes to Cursor with a live Cursor Grok model, `Grok Build` routes to the Grok CLI, and plain `Cursor` keeps the live Sol default.",
-          "evidence": "",
+          "evidence": "Live routes returned Cursor `gpt-5.6-sol-high-fast` for plain Cursor, Cursor `cursor-grok-4.6-high-fast` for bare Grok, and Grok Build `grok-4.6` for Grok Build. Smoke tests verified each route.",
           "id": "B1-A2",
-          "met": false
+          "met": true
         },
         {
           "criterion": "Named pull request review requests resolve the repository and pull request, then route to the requested real review surface without editing the product repository.",
-          "evidence": "",
+          "evidence": "`prompt.md` resolves the repository and pull request before preflight or herd mutation. It uses Codex review when available and verified Cursor or Grok review prompts otherwise. Smoke tests cover named pull request routes and the product edit ban.",
           "id": "B1-A3",
-          "met": false
+          "met": true
         },
         {
           "criterion": "Every supported seat uses smart-auto permissions, and dangerous bypass flags stay forbidden unless the user explicitly requests yolo.",
-          "evidence": "",
+          "evidence": "`prompt.md`, `launch.sh`, and `README.md` define Claude auto, Cursor auto-review and trust, and Codex never plus workspace-write. Smoke tests reject dangerous bypass flags as defaults and keep explicit yolo behind exact confirmation.",
           "id": "B1-A4",
-          "met": false
+          "met": true
         },
         {
           "criterion": "Model availability checks fail closed on catalog, command, timeout, or parse failure, and the exhausted Fable case reports its reset and proposes live Opus xhigh.",
-          "evidence": "",
+          "evidence": "Smoke tests cover command, timeout, parse, catalog miss, and Claude quota failures. Live Claude usage rejected Fable at 100 percent, reported the Aug 23 reset, and proposed live Opus xhigh. Invalid Claude model and effort values also failed closed.",
           "id": "B1-A5",
-          "met": false
+          "met": true
         },
         {
           "criterion": "`sh tests/smoke.sh` passes, the pull request checks pass on Linux, macOS, and Windows, and `git diff --check` passes.",
-          "evidence": "",
+          "evidence": "`sh tests/smoke.sh`, Python byte compilation, and `git diff --check` passed. GitHub run 32582899456 passed Ubuntu, macOS, Windows, and both Socket checks at commit 35e238119994cc505a23e699236cb0544bb39ac5.",
           "id": "B1-A6",
-          "met": false
+          "met": true
         },
         {
           "criterion": "README, prompt appendix, changelog, and plugin version describe the released behavior and version.",
-          "evidence": "",
+          "evidence": "`README.md`, `prompt.md`, `launch.sh`, `CHANGELOG.md`, `docs/index.html`, `howto.html`, and `herdr-plugin.toml` describe the behavior and version 0.9.0.",
           "id": "B1-A7",
-          "met": false
+          "met": true
         }
       ],
       "id": "B1",
-      "status": "pending"
+      "status": "complete"
     }
   ],
   "branch": "feat/lantern-routing-table",
@@ -54,7 +54,7 @@
     "default_for_session": true
   },
   "continuation_guard": {
-    "next_required_action": "Commit and push the reviewed revision, then wait for all pull request checks.",
+    "next_required_action": "Commit and push exact-tip acceptance evidence. Then run the strict landing check and cleanup.",
     "stop_allowed": false
   },
   "execution_log_path": ".elves-execution-log.md",
@@ -62,28 +62,28 @@
   "master_acceptance": [
     {
       "criterion": "Lantern gives a short, correct field report and can route every documented herd task without editing a product repository.",
-      "evidence": "",
+      "evidence": "The routing table and one-line reports cover all documented herd tasks. Prompt rules and smoke tests forbid product repository edits, merge, and land-pr.",
       "id": "M-A1",
-      "met": false
+      "met": true
     },
     {
       "criterion": "Fugu and host reviews have no unresolved blocking finding at the final product tip.",
-      "evidence": "",
+      "evidence": "Fugu found five issues. The host review confirmed them and found two related issues. Commit 35e2381 fixed all seven. The host delta review found no unresolved blocker.",
       "id": "M-A2",
-      "met": false
+      "met": true
     },
     {
-      "criterion": "The release version and GitHub release describe the tested routing and availability behavior.",
-      "evidence": "",
+      "criterion": "Version 0.9.0 and the release notes describe the tested routing and availability behavior and are ready for GitHub publication.",
+      "evidence": "`herdr-plugin.toml` sets version 0.9.0. `CHANGELOG.md`, README, prompt appendix, docs site, and how-to page contain matching release notes ready for GitHub publication.",
       "id": "M-A3",
-      "met": false
+      "met": true
     }
   ],
   "plan_path": "plans/lantern-routing-table.md",
   "risk": "standard",
   "run_id": "lantern-routing-preflight-2026-08-22",
   "start_head": "b7fb32605a5a0d3961038913ed619093f6f27742",
-  "status": "validating",
+  "status": "complete",
   "survival_guide_path": ".elves-survival-guide.md",
   "trust_mode": "trusted"
 }
