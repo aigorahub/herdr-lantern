@@ -435,8 +435,40 @@ helper_argv_has_flag() {
     return 1
 }
 
+helper_argv_option_value() {
+    # Print the value of --flag from an argv list. Stops at -- so agent
+    # args cannot supply a fake kind or pane. Accepts --flag value and
+    # --flag=value.
+    _helper_opt=$1
+    shift
+    while [ $# -gt 0 ]; do
+        [ "$1" = -- ] && return 1
+        if [ "$1" = "$_helper_opt" ]; then
+            [ -n "${2:-}" ] || return 1
+            printf '%s' "$2"
+            return 0
+        fi
+        case $1 in
+        "$_helper_opt"=*)
+            printf '%s' "${1#"$_helper_opt"=}"
+            return 0
+            ;;
+        esac
+        shift
+    done
+    return 1
+}
+
 helper_is_agent_prompt() {
     [ "${1:-}" = agent ] && [ "${2:-}" = prompt ] && [ -n "${3:-}" ] && [ -n "${4:-}" ]
+}
+
+helper_is_agent_start() {
+    [ "${1:-}" = agent ] && [ "${2:-}" = start ] && [ -n "${3:-}" ] || return 1
+    case $3 in
+    -*) return 1 ;;
+    esac
+    return 0
 }
 
 helper_pane_holds_text() {
@@ -490,6 +522,208 @@ helper_relay_agent_prompt() {
         return 1
     fi
     return 0
+}
+
+helper_codex_flat_pane() {
+    printf '%s\n' "$1" | tr '\n\r' '  '
+}
+
+helper_codex_pane_is_later_prompt() {
+    # True when the pane is a later permission prompt, not a first-run gate.
+    _helper_flat=$(helper_codex_flat_pane "$1")
+    case $_helper_flat in
+    *"Allow command[?]"* | *"allow command[?]"* | \
+        *"press enter to confirm or esc to cancel"*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+helper_codex_pane_has_trust() {
+    helper_codex_pane_is_later_prompt "$1" && return 1
+    _helper_flat=$(helper_codex_flat_pane "$1")
+    case $_helper_flat in
+    *"Do you trust the contents of this directory"* | *"Yes, continue"*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+helper_codex_pane_has_yn() {
+    helper_codex_pane_is_later_prompt "$1" && return 1
+    _helper_flat=$(helper_codex_flat_pane "$1")
+    case $_helper_flat in
+    *'[y/n]'* | *'yes (y)'* | *'Yes (y)'*) ;;
+    *) return 1 ;;
+    esac
+    case $_helper_flat in
+    *[Nn]ew\ chat* | *[Nn]ew-chat* | *[Nn]ew\ conversation* | \
+        *[Rr]esume\ this\ session*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+helper_codex_startup_key() {
+    # Prints Enter or y when pane text ($1) is a Codex first-run gate.
+    # Trust wins when both are visible on the first key. Later permission
+    # prompts are not a match.
+    helper_codex_pane_is_later_prompt "$1" && return 1
+    helper_codex_pane_has_trust "$1" && {
+        printf 'Enter'
+        return 0
+    }
+    helper_codex_pane_has_yn "$1" && {
+        printf 'y'
+        return 0
+    }
+    return 1
+}
+
+helper_codex_is_ready() {
+    # True when agent get JSON ($1) says the seat can take prompts.
+    # Unfocused new seats report done rather than idle, so both count.
+    case $1 in
+    *"\"interactive_ready\":true"*) ;;
+    *) return 1 ;;
+    esac
+    case $1 in
+    *"\"agent_status\":\"idle\""* | *"\"agent_status\":\"done\""*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+helper_codex_seat_ok() {
+    # True when agent get JSON ($1) is still the Codex seat in pane ($2).
+    _helper_got_pane=$(printf '%s' "$1" | helper_json_value pane_id)
+    [ "$_helper_got_pane" = "$2" ] || return 1
+    _helper_got_agent=$(printf '%s' "$1" | helper_json_value agent)
+    [ "$_helper_got_agent" = codex ] || return 1
+    return 0
+}
+
+helper_relay_agent_start() {
+    # Codex first-run survival. Herdr returns agent_not_ready as soon as
+    # detection reports blocked during startup, so a directory-trust or
+    # new-chat confirm kills the seat. Trust and a new-chat confirm can
+    # appear in sequence, and a [y/n] prompt may still need Enter after
+    # y. This stays on that same named pane and sends only those keys.
+    # Any other failure, another kind, or another agent's pane is left
+    # alone.
+    _helper_real=$1
+    shift
+    _helper_name=$3
+    _helper_kind=$(helper_argv_option_value --kind "$@") || _helper_kind=
+    _helper_pane=$(helper_argv_option_value --pane "$@") || _helper_pane=
+    _helper_errf=$(mktemp) || {
+        "$_helper_real" "$@"
+        return $?
+    }
+    "$_helper_real" "$@" 2>"$_helper_errf"
+    _helper_status=$?
+    _helper_err=$(cat "$_helper_errf")
+    cat "$_helper_errf" >&2
+    rm -f "$_helper_errf"
+    [ "$_helper_status" -eq 0 ] && return 0
+    [ "$_helper_kind" = codex ] || return $_helper_status
+    [ -n "$_helper_name" ] && [ -n "$_helper_pane" ] || return $_helper_status
+    case $_helper_err in
+    *agent_not_ready* | *"blocked during startup"*) ;;
+    *) return $_helper_status ;;
+    esac
+    _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+        return $_helper_status
+    helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return $_helper_status
+    _helper_sent=0
+    _helper_miss=0
+    _helper_post_miss=0
+    _helper_did_trust=0
+    _helper_did_y=0
+    _helper_did_yn_enter=0
+    while [ "$_helper_sent" -lt 3 ]; do
+        _helper_before=$("$_helper_real" agent read "$_helper_name" --lines 60 2>/dev/null) ||
+            _helper_before=
+        if helper_codex_pane_is_later_prompt "$_helper_before"; then
+            [ "$_helper_sent" -gt 0 ] && break
+            return $_helper_status
+        fi
+        _helper_key=
+        if helper_codex_pane_has_yn "$_helper_before" &&
+            [ "$_helper_did_y" -eq 1 ] && [ "$_helper_did_yn_enter" -eq 0 ]; then
+            _helper_key=Enter
+        elif helper_codex_pane_has_yn "$_helper_before" &&
+            [ "$_helper_did_y" -eq 0 ] &&
+            { [ "$_helper_did_trust" -eq 1 ] ||
+                ! helper_codex_pane_has_trust "$_helper_before"; }; then
+            _helper_key=y
+        elif helper_codex_pane_has_trust "$_helper_before" &&
+            [ "$_helper_did_trust" -eq 0 ]; then
+            _helper_key=Enter
+        elif helper_codex_pane_has_yn "$_helper_before" &&
+            [ "$_helper_did_y" -eq 0 ]; then
+            _helper_key=y
+        fi
+        if [ -z "$_helper_key" ]; then
+            _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+                _helper_got=
+            helper_codex_seat_ok "$_helper_got" "$_helper_pane" || {
+                [ "$_helper_sent" -gt 0 ] && break
+                return $_helper_status
+            }
+            helper_codex_is_ready "$_helper_got" && return 0
+            if [ "$_helper_sent" -gt 0 ]; then
+                _helper_post_miss=$((_helper_post_miss + 1))
+                [ "$_helper_post_miss" -ge 3 ] && break
+                "$_helper_real" agent wait "$_helper_name" --until idle --until done \
+                    --timeout 2000 >/dev/null 2>&1 || true
+                continue
+            fi
+            _helper_miss=$((_helper_miss + 1))
+            [ "$_helper_miss" -ge 2 ] && return $_helper_status
+            # Herdr already called it blocked; the dialog may still be
+            # painting. --until idle times out while it stays blocked.
+            "$_helper_real" agent wait "$_helper_name" --until idle --until done \
+                --timeout 2000 >/dev/null 2>&1 || true
+            continue
+        fi
+        _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+            return $_helper_status
+        helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return $_helper_status
+        "$_helper_real" agent send-keys "$_helper_name" "$_helper_key" || return $?
+        _helper_sent=$((_helper_sent + 1))
+        _helper_post_miss=0
+        if [ "$_helper_key" = y ]; then
+            _helper_did_y=1
+        elif [ "$_helper_did_y" -eq 1 ]; then
+            _helper_did_yn_enter=1
+        else
+            _helper_did_trust=1
+        fi
+        if "$_helper_real" agent wait "$_helper_name" --until idle --until done \
+            --timeout 5000; then
+            _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+                _helper_got=
+            helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return 1
+            helper_codex_is_ready "$_helper_got" && return 0
+        fi
+    done
+    [ "$_helper_sent" -gt 0 ] || return $_helper_status
+    "$_helper_real" agent wait "$_helper_name" --until idle --until done \
+        --timeout 120000 ||
+        return $?
+    _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) || {
+        printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
+        return 1
+    }
+    helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return 1
+    helper_codex_is_ready "$_helper_got" && return 0
+    printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
+    return 1
 }
 
 helper_json_value() {

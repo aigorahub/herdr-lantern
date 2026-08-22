@@ -2,6 +2,20 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.4] - 2026-08-22
+
+### Fixed
+
+- Codex seats that stop on the first-run directory trust dialog or a
+  new-chat `[y/n]` confirm no longer die as `agent_not_ready`. The herdr
+  wrapper reads that named pane, sends Enter or y, and waits until the
+  seat is idle or done and `interactive_ready`. Trust and a new-chat
+  confirm in sequence are both dismissed. Leftover trust text does not
+  replace y. Generic permission `[y/n]` prompts are not auto-answered.
+  The occupant must still be Codex in that pane. Other start failures,
+  other agents, and later permission prompts are unchanged.
+- The plugin version is 0.9.4.
+
 ## [0.9.3] - 2026-08-22
 
 ### Fixed
