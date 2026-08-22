@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.3] - 2026-08-22
+
+### Fixed
+
+- Claude model-preflight no longer fails when `claude /usage` prints
+  `Current session: 0% used` with no reset time. A usage line is valid
+  without a reset. A missing all-models bucket is not a failed check. Real
+  100% exhaustion and the substitute list are unchanged. Cursor, Grok, and
+  Codex still only need the requested model in their live catalog.
+- The plugin version is 0.9.3.
+
 ## [0.9.2] - 2026-08-22
 
 ### Changed

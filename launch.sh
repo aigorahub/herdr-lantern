@@ -209,9 +209,10 @@ Runtime (injected by launch.sh; do not ignore):
   \`\$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]\`. Run it
   before asking the user to confirm a seat. Do not create, start, or prompt
   when it fails. A missing command, timeout, or unparseable check stops the
-  route. If the model is unavailable, report its bucket and reset time when
-  known. Name the one live substitute from the result and ask the user to
-  confirm it. Never switch models in silence.
+  route. A usage line with no reset time is still valid. A harness with no
+  quota command is not a failed check. If the model is unavailable, report
+  its bucket and reset time when known. Name the one live substitute from
+  the result and ask the user to confirm it. Never switch models in silence.
 - Model routing requires a working Python 3 command. The wrappers try
   \`python3\`, \`python\`, and Windows \`py -3\`. A missing interpreter stops
   the route before any herd change.
