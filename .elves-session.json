@@ -1,0 +1,89 @@
+{
+  "batches": [
+    {
+      "acceptance": [
+        {
+          "criterion": "The phrase `5.6 sol high fast` resolves to the live Codex Sol model, high reasoning, and the live Fast service tier as separate argv values.",
+          "evidence": "",
+          "id": "B1-A1",
+          "met": false
+        },
+        {
+          "criterion": "Bare `Grok` routes to Cursor with a live Cursor Grok model, `Grok Build` routes to the Grok CLI, and plain `Cursor` keeps the live Sol default.",
+          "evidence": "",
+          "id": "B1-A2",
+          "met": false
+        },
+        {
+          "criterion": "Named pull request review requests resolve the repository and pull request, then route to the requested real review surface without editing the product repository.",
+          "evidence": "",
+          "id": "B1-A3",
+          "met": false
+        },
+        {
+          "criterion": "Every supported seat uses smart-auto permissions, and dangerous bypass flags stay forbidden unless the user explicitly requests yolo.",
+          "evidence": "",
+          "id": "B1-A4",
+          "met": false
+        },
+        {
+          "criterion": "Model availability checks fail closed on catalog, command, timeout, or parse failure, and the exhausted Fable case reports its reset and proposes live Opus xhigh.",
+          "evidence": "",
+          "id": "B1-A5",
+          "met": false
+        },
+        {
+          "criterion": "`sh tests/smoke.sh` passes, the pull request checks pass on Linux, macOS, and Windows, and `git diff --check` passes.",
+          "evidence": "",
+          "id": "B1-A6",
+          "met": false
+        },
+        {
+          "criterion": "README, prompt appendix, changelog, and plugin version describe the released behavior and version.",
+          "evidence": "",
+          "id": "B1-A7",
+          "met": false
+        }
+      ],
+      "id": "B1",
+      "status": "pending"
+    }
+  ],
+  "branch": "feat/lantern-routing-table",
+  "cobbler": {
+    "default_for_session": true
+  },
+  "continuation_guard": {
+    "next_required_action": "Run the Fugu review and the independent host review.",
+    "stop_allowed": false
+  },
+  "execution_log_path": ".elves-execution-log.md",
+  "landing_outcome": "complete_and_merge",
+  "master_acceptance": [
+    {
+      "criterion": "Lantern gives a short, correct field report and can route every documented herd task without editing a product repository.",
+      "evidence": "",
+      "id": "M-A1",
+      "met": false
+    },
+    {
+      "criterion": "Fugu and host reviews have no unresolved blocking finding at the final product tip.",
+      "evidence": "",
+      "id": "M-A2",
+      "met": false
+    },
+    {
+      "criterion": "The release version and GitHub release describe the tested routing and availability behavior.",
+      "evidence": "",
+      "id": "M-A3",
+      "met": false
+    }
+  ],
+  "plan_path": "plans/lantern-routing-table.md",
+  "risk": "standard",
+  "run_id": "lantern-routing-preflight-2026-08-22",
+  "start_head": "b7fb32605a5a0d3961038913ed619093f6f27742",
+  "status": "reviewing",
+  "survival_guide_path": ".elves-survival-guide.md",
+  "trust_mode": "trusted"
+}
