@@ -113,10 +113,17 @@ extra flags. The flags that skip approvals altogether (bypassPermissions,
 `--yolo`, `--force`, `--always-approve`,
 `--dangerously-bypass-approvals-and-sandbox`) are never passed.
 
+Seat language selects the CLI and model separately. "Cursor" uses `--kind
+cursor` with the live Cursor Sol default. Bare "Grok" uses `--kind cursor`
+with a live Cursor Grok model. "Grok Build" and "SuperGrok" use `--kind
+grok`. Lantern checks the selected model with `bin/model-preflight` before it
+asks you to confirm a seat. It stops on a failed check. It names one live
+substitute when the requested model is unavailable.
+
 After a confirmed seat the lantern renames the agent's tab to
 `<slug> · <kind>` and says in one line what is running where: the slug, the
-kind, the model only when one was chosen — never guessed — and the task the
-agent was given, or that it has none yet.
+kind, the live model, effort, fast state, and the task the agent was given, or
+that it has none yet.
 
 How to use it (GitHub Pages, after this lands on `main`):
 [aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).

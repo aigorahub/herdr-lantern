@@ -224,6 +224,18 @@ Available models:
   - grok-4.5
 MODELS
 EOF
+cat >"$model_dir/claude" <<'EOF'
+#!/bin/sh
+case "$*" in
+"/usage -p --output-format json")
+    printf '%s\n' '{"result":"Current session: 4% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100% used - resets Aug 23 at 4:59am"}'
+    ;;
+"--help")
+    printf '%s\n' '--model fable opus sonnet --effort low medium high xhigh max'
+    ;;
+*) exit 2 ;;
+esac
+EOF
 cat >"$model_dir/codex.cmd" <<'EOF'
 @echo off
 if not "%1 %2"=="debug models" exit /b 2
@@ -247,7 +259,16 @@ echo Available models:
 echo   * grok-4.6 (default)
 echo   - grok-4.5
 EOF
-chmod +x "$model_dir/codex" "$model_dir/agent" "$model_dir/grok"
+cat >"$model_dir/claude.cmd" <<'EOF'
+@echo off
+if "%1"=="--help" (
+  echo --model fable opus sonnet --effort low medium high xhigh max
+  exit /b 0
+)
+if not "%1 %2 %3 %4"=="/usage -p --output-format json" exit /b 2
+echo {"result":"Current session: 4%% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82%% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100%% used - resets Aug 23 at 4:59am"}
+EOF
+chmod +x "$model_dir/codex" "$model_dir/agent" "$model_dir/grok" "$model_dir/claude"
 model_python=$(helper_detect_python) || fail "model route needs Python 3"
 model_path=$model_dir:$PATH
 run_model_route() {
@@ -255,6 +276,13 @@ run_model_route() {
         PATH="$model_path" py -3 "$root/bin/model-route" "$@"
     else
         PATH="$model_path" "$model_python" "$root/bin/model-route" "$@"
+    fi
+}
+run_model_preflight() {
+    if [ "$model_python" = "py -3" ]; then
+        PATH="$model_path" py -3 "$root/bin/model-preflight" "$@"
+    else
+        PATH="$model_path" "$model_python" "$root/bin/model-preflight" "$@"
     fi
 }
 codex_route=$(run_model_route codex \
@@ -283,6 +311,36 @@ grok_default=$(run_model_route grok \
     default) || fail "Grok live default route"
 printf '%s\n' "$grok_default" | grep -qF '"argv":["-m","grok-4.6","--reasoning-effort","high"]' ||
     fail "Grok default did not use live Grok 4.6 at high effort"
+if fable_check=$(run_model_preflight claude fable high); then
+    fail "Claude preflight accepted an exhausted Fable bucket"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "exhausted Fable should return unavailable"
+printf '%s\n' "$fable_check" | grep -qF '"reason":"Current week (Fable) is 100% used; resets Aug 23 at 4:59am"' ||
+    fail "Claude preflight did not report the exhausted bucket and reset"
+printf '%s\n' "$fable_check" | grep -qF '"substitute":{"kind":"claude","model":"opus","effort":"xhigh"' ||
+    fail "Claude preflight did not propose Opus xhigh"
+run_model_preflight cursor gpt-5.6-sol-high-fast high >/dev/null ||
+    fail "Cursor preflight rejected a listed model"
+if cursor_miss=$(run_model_preflight cursor cursor-grok-4.7-high-fast high); then
+    fail "Cursor preflight accepted a missing catalog model"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "Cursor catalog miss should return unavailable"
+printf '%s\n' "$cursor_miss" | grep -qF '"available":false' ||
+    fail "Cursor catalog miss did not fail closed"
+printf '%s\n' "$cursor_miss" | grep -qF '"substitute":{"kind":"cursor","model":"cursor-grok-4.6-high-fast"' ||
+    fail "Cursor Grok miss did not propose the next live Cursor Grok model"
+if grok_miss=$(run_model_preflight grok grok-4.7 high); then
+    fail "Grok preflight accepted a missing catalog model"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "Grok catalog miss should return unavailable"
+printf '%s\n' "$grok_miss" | grep -qF '"substitute":{"kind":"grok","model":"grok-4.5","effort":"high"' ||
+    fail "Grok Build miss did not propose live Grok 4.5 high"
 if run_model_route codex \
     "5.6 terra high fast" >/dev/null 2>&1; then
     fail "model route accepted fast for a model without fast service"
@@ -316,14 +374,24 @@ for review_kind in Cursor Grok; do
 done
 grep -qF '"Cursor" means `--kind cursor`' "$root/prompt.md" ||
     fail "prompt.md does not route Cursor to the Cursor kind"
-grep -qF '"Grok" means `--kind grok`' "$root/prompt.md" ||
-    fail "prompt.md does not route Grok to Grok Build"
-grep -qF 'only when the request names' "$root/prompt.md" ||
-    fail "prompt.md does not require both Cursor and Grok for a Cursor Grok model"
-grep -qF '"open battle paddle with Grok"' "$root/prompt.md" ||
-    fail "prompt.md does not route Grok alone to Grok Build"
+grep -qF '"open battle paddle with Grok" | Seat with `--kind cursor`' "$root/prompt.md" ||
+    fail "prompt.md does not route bare Grok through Cursor"
+grep -qF '"open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok`' "$root/prompt.md" ||
+    fail "prompt.md does not route Grok Build to the Grok CLI"
 grep -qF '"open battle paddle in Cursor with Grok"' "$root/prompt.md" ||
     fail "prompt.md does not name the explicit Cursor Grok route"
+grep -qF '"Grok review on XYZ", "have Cursor Grok review that PR" | Use the named pull request route with Cursor plan mode' "$root/prompt.md" ||
+    fail "prompt.md does not route bare Grok review through Cursor"
+grep -qF '"Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode' "$root/prompt.md" ||
+    fail "prompt.md does not route Grok Build review through the Grok CLI"
+for preflight_file in prompt.md launch.sh README.md; do
+    grep -qF 'model-preflight' "$root/$preflight_file" ||
+        fail "$preflight_file does not require the availability preflight"
+done
+grep -qF '"Grok" also' "$root/launch.sh" ||
+    fail "launch.sh does not route bare Grok through Cursor"
+grep -qF '"Grok Build" and' "$root/launch.sh" ||
+    fail "launch.sh does not route Grok Build to the Grok CLI"
 grep -qF 'Never merge' "$root/prompt.md" ||
     fail "prompt.md does not forbid merge from Lantern"
 # hsh carried a HERDR_REAL branch to dodge the wrapper, and launch.sh unsets

@@ -179,9 +179,10 @@ Runtime (injected by launch.sh; do not ignore):
   \`-r <id>\`, Cursor \`--continue\` or \`--resume <id>\`, Grok
   \`--continue\` or \`--resume <id>\`, Gemini \`--resume latest\`, OpenCode
   \`--continue\`, and Devin \`--continue\`.
-- "Cursor" means \`--kind cursor\`. "Grok" means \`--kind grok\` and the Grok
-  Build CLI. Use Cursor with a Cursor Grok model only when the request names
-  both Cursor and Grok. Unspecified Cursor seats use the live Sol default.
+- "Cursor" means \`--kind cursor\` with the live Sol default. "Grok" also
+  means \`--kind cursor\`, but with a live Cursor Grok model. "Grok Build" and
+  "SuperGrok" mean \`--kind grok\` with the live Grok Build default. "In
+  Cursor with Grok" uses the same route as bare Grok.
 - Route "open a review" and "review this" to the real Codex \`review\`
   command. For "review PR N on repo X", resolve the repo, inspect the pull
   request with \`gh -R <owner/repo> pr view\`, verify the local head matches
@@ -195,10 +196,18 @@ Runtime (injected by launch.sh; do not ignore):
   Reuse a matching Cursor agent with \`herdr agent prompt\`. Otherwise start
   \`--kind cursor\` with \`--auto-review --trust --mode plan\` and the live
   Cursor default. Cursor has no review subcommand on this machine.
-- Route "Grok review on X" through the same repo and pull request checks.
-  Reuse a matching Grok Build agent with \`herdr agent prompt\`. Otherwise
-  start \`--kind grok\` with \`--permission-mode auto -p\` and the live Grok
-  default. Grok Build has no review subcommand on this machine.
+- Route "Grok review on X" through the Cursor review route with a live Cursor
+  Grok model. Route "Grok Build review on X" through the same repo and pull
+  request checks. Reuse a matching Grok Build agent with \`herdr agent
+  prompt\`. Otherwise start \`--kind grok\` with \`--permission-mode auto
+  -p\` and the live Grok Build default. Grok Build has no review subcommand.
+- After model resolution, run
+  \`\$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]\`. Run it
+  before asking the user to confirm a seat. Do not create, start, or prompt
+  when it fails. A missing command, timeout, or unparseable check stops the
+  route. If the model is unavailable, report its bucket and reset time when
+  known. Name the one live substitute from the result and ask the user to
+  confirm it. Never switch models in silence.
 - Codex task phrases map to real commands: continue last is \`resume --last\`,
   fork last is \`fork --last\`, apply is \`apply <TASK_ID>\`, diagnostics are
   \`doctor --summary\` and \`login status\`. Lantern never applies a diff
