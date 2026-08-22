@@ -190,10 +190,13 @@ grep -qF '"walk me there"' "$root/prompt.md" ||
 # CLI's own dangerous tier, so a grep for it proves nothing.)
 for seat_file in prompt.md launch.sh; do
     for seat_args in '--permission-mode auto' '--auto-review --trust' \
-        '-a never -s workspace-write'; do
+        '-a never -s danger-full-access'; do
         grep -qF -- "$seat_args" "$root/$seat_file" ||
             fail "$seat_file does not pass $seat_args on agent start"
     done
+    if grep -qF -- '-s workspace-write' "$root/$seat_file"; then
+        fail "$seat_file still seats Codex in the workspace-write sandbox"
+    fi
     for reckless in bypassPermissions --yolo --always-approve \
         --dangerously-bypass-approvals-and-sandbox; do
         grep -qF -- "$reckless" "$root/$seat_file" ||

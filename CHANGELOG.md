@@ -2,6 +2,18 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.2] - 2026-08-22
+
+### Changed
+
+- Codex seats no longer use `-s workspace-write`. That sandbox blocks
+  network and writes outside the repo, and with `-a never` those failures
+  never reach the user. Smart-auto for Codex is now `-a never -s
+  danger-full-access`, the same working bar as Claude `--permission-mode
+  auto`. Claude, Grok, and Cursor seats are unchanged. Full bypass flags
+  stay yolo-only.
+- The plugin version is 0.9.2.
+
 ## [0.9.1] - 2026-08-22
 
 ### Changed
