@@ -1052,9 +1052,29 @@ fake_prompt=
     fail "[y/n] new-chat confirm should send y"
 [ "$(helper_codex_startup_key 'Resume this session? yes (y)')" = y ] ||
     fail "yes (y) new-chat confirm should send y"
-if helper_codex_startup_key 'Allow command?' >/dev/null; then
-    fail "a later permission prompt must not look like a first-run gate"
+[ "$(helper_codex_startup_key "$(printf '%s\n' \
+    'Do you trust the contents of this directory?' \
+    'Yes, continue' \
+    'Start a new chat? [y/n]')")" = Enter ] ||
+    fail "trust should win the first key when both gates are visible"
+if helper_codex_startup_key 'Would you like to run setup.sh? [y/n]' >/dev/null; then
+    fail "a permission [y/n] must not look like a new-chat confirm"
 fi
+if helper_codex_startup_key 'Approve MCP server startup? yes (y)' >/dev/null; then
+    fail "a permission yes (y) must not look like a new-chat confirm"
+fi
+helper_codex_is_ready '{"interactive_ready":true,"agent_status":"idle"}' ||
+    fail "idle plus interactive_ready should be ready"
+helper_codex_is_ready '{"interactive_ready":true,"agent_status":"done"}' ||
+    fail "done plus interactive_ready should be ready"
+if helper_codex_is_ready '{"interactive_ready":true,"agent_status":"blocked"}'; then
+    fail "blocked plus interactive_ready must not count as seated"
+fi
+if helper_codex_seat_ok '{"agent":"claude","pane_id":"w1:p1"}' w1:p1; then
+    fail "a Claude occupant must not count as the Codex seat"
+fi
+helper_codex_seat_ok '{"agent":"codex","pane_id":"w1:p1"}' w1:p1 ||
+    fail "a Codex occupant in the start pane should count"
 if helper_codex_startup_key 'press enter to confirm or esc to cancel' >/dev/null; then
     fail "a later confirm prompt must not look like a first-run gate"
 fi
@@ -1089,9 +1109,11 @@ case "$1 $2" in
     ;;
 "agent get")
     ready=false
-    [ -f "${FAKE_READY_FILE:-}" ] && ready=true
-    printf '{"result":{"agent":{"pane_id":"%s","interactive_ready":%s,"agent_status":"blocked"}}}\n' \
-        "${FAKE_AGENT_PANE:-w1:p1}" "$ready"
+    status=blocked
+    [ -f "${FAKE_READY_FILE:-}" ] && ready=true && status=idle
+    [ -n "${FAKE_GET_STATUS:-}" ] && status=$FAKE_GET_STATUS
+    printf '{"result":{"agent":{"pane_id":"%s","agent":"%s","interactive_ready":%s,"agent_status":"%s"}}}\n' \
+        "${FAKE_AGENT_PANE:-w1:p1}" "${FAKE_GET_AGENT:-codex}" "$ready" "$status"
     exit 0
     ;;
 "agent read")
@@ -1099,6 +1121,11 @@ case "$1 $2" in
     [ -f "${FAKE_READ_N:-}" ] && n=$(cat "$FAKE_READ_N")
     n=$((n + 1))
     [ -n "${FAKE_READ_N:-}" ] && printf '%s\n' "$n" >"$FAKE_READ_N"
+    if [ -n "${FAKE_PANE_AFTER:-}" ] && [ -f "$FAKE_PANE_AFTER" ] &&
+        [ "$n" -ge "${FAKE_SWAP_AT:-999}" ]; then
+        cat "$FAKE_PANE_AFTER"
+        exit 0
+    fi
     if [ "$n" -eq 1 ] && [ -n "${FAKE_PANE_DELAY:-}" ] && [ -f "$FAKE_PANE_DELAY" ]; then
         cat "$FAKE_PANE_DELAY"
         exit 0
@@ -1138,6 +1165,10 @@ export HERDR_HELPER_OK=1
 export FAKE_PANE="$fake_start/pane.txt"
 export FAKE_PANE_NEXT="$fake_start/pane.next"
 export FAKE_PANE_DELAY="$fake_start/pane.delay"
+export FAKE_PANE_AFTER="$fake_start/pane.after"
+export FAKE_SWAP_AT=999
+export FAKE_GET_AGENT=codex
+unset FAKE_GET_STATUS
 export FAKE_READ_N="$fake_start/read.n"
 export FAKE_HOLD_FILE="$fake_start/hold"
 export FAKE_READY_FILE="$fake_start/ready"
@@ -1184,6 +1215,54 @@ printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
     fail "sequential gates did not send Enter for trust"
 printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
     fail "sequential gates did not send y for new-chat"
+
+# Leftover trust text in the pane must not send a second Enter instead of y.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' \
+    'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "leftover trust text should still send y for new-chat"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
+    fail "leftover trust text ate the new-chat y"
+[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -eq 1 ] ||
+    fail "leftover trust text sent Enter more than once"
+
+# After trust, a blank transition, then the new-chat confirm.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+printf '%s\n' 'codex is starting...' >"$FAKE_PANE_NEXT"
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_AFTER"
+export FAKE_SWAP_AT=3
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "a delayed second gate should still recover"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "delayed second gate did not send Enter for trust"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
+    fail "delayed second gate did not send y after the blank"
+export FAKE_SWAP_AT=999
+rm -f "$FAKE_PANE_AFTER" "$FAKE_PANE_NEXT"
+
+# A live Claude occupant in that pane must not receive keys.
+export FAKE_GET_AGENT=claude
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a Claude occupant must not be reported as a Codex seat"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a Claude occupant must not receive Codex startup keys"
+fi
+export FAKE_GET_AGENT=codex
 
 # Trust, then a [y/n] that still needs Enter.
 rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
@@ -1313,10 +1392,14 @@ unset FAKE_START_DEAF
 unset FAKE_PANE
 unset FAKE_PANE_NEXT
 unset FAKE_PANE_DELAY
+unset FAKE_PANE_AFTER
+unset FAKE_SWAP_AT
 unset FAKE_READ_N
 unset FAKE_HOLD_FILE
 unset FAKE_READY_FILE
 unset FAKE_AGENT_PANE
+unset FAKE_GET_AGENT
+unset FAKE_GET_STATUS
 unset FAKE_START_ERR
 unset FAKE_START_OK
 unset HERDR_REAL
