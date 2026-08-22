@@ -80,3 +80,16 @@ plugin is a usable one.
 explicit `**Acceptance criteria**` label before the `- [ ] B#-A#: text` rows.
 `### B1: Name` parses as no batch at all and fails staging with
 `plan_batch_required` plus one `session_batch_missing_in_plan` per batch.
+
+---
+
+## Live agent catalogs
+
+**Use catalog IDs, not display names.** Codex lists Fast as a display name and
+`priority` as its service tier ID. A launcher must use the ID in
+`service_tier`. Derive it from the same live model row that matched the model.
+Stop when the catalog has no one clear ID.
+
+**A quota check is not an argv check.** Claude usage can prove that a bucket
+has capacity. It cannot prove that a model alias or effort exists. Check both
+the usage result and the installed CLI help before a seat is available.

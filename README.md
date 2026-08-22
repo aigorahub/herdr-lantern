@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.8.0** — a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -15,8 +15,9 @@ It opens as a chat tab in its own Herdr workspace and starts the helper CLI
 you already use (Cursor `agent`, Devin, Claude Code, Codex, or Grok). That
 CLI drives `herdr`.
 
-Requires Herdr **0.7.5+** on macOS, Linux, or Windows. Windows needs Git for
-Windows as well; see [Windows](#windows).
+Requires Herdr **0.7.5+** and Python 3 on macOS, Linux, or Windows. Model
+routing accepts `python3`, `python`, or the Windows `py -3` launcher. Windows
+also needs Git for Windows. See [Windows](#windows).
 
 ## Install the plugin
 
@@ -111,12 +112,28 @@ get `--permission-mode auto`, Cursor `agent` gets `--auto-review --trust`,
 Codex gets `-a never -s workspace-write`; kinds without a listed tier get no
 extra flags. The flags that skip approvals altogether (bypassPermissions,
 `--yolo`, `--force`, `--always-approve`,
-`--dangerously-bypass-approvals-and-sandbox`) are never passed.
+`--dangerously-bypass-approvals-and-sandbox`) are not part of any default.
+Lantern can pass one provider-specific bypass only when the user asks for
+yolo and confirms the exact flag and the protections it removes.
+
+Seat language selects the CLI and model separately. "Cursor" uses `--kind
+cursor` with the live Cursor Sol default. Bare "Grok" uses `--kind cursor`
+with a live Cursor Grok model. "Grok Build" and "SuperGrok" use `--kind
+grok`. Lantern checks the selected model with `bin/model-preflight` before it
+asks you to confirm a seat. It stops on a failed check. It names one live
+substitute when the requested model is unavailable.
+
+"There is a PR on battle-paddle, get a Codex review" is a review route.
+Lantern resolves the repository and pull request with Git and `gh`. It checks
+the model before it creates a workspace or tab. It reuses a matching Codex,
+Cursor, Cursor Grok, or Grok Build agent. Otherwise it seats the requested
+kind with its real review or read-only plan command. Lantern never checks out
+the pull request or edits the product repository.
 
 After a confirmed seat the lantern renames the agent's tab to
 `<slug> · <kind>` and says in one line what is running where: the slug, the
-kind, the model only when one was chosen — never guessed — and the task the
-agent was given, or that it has none yet.
+kind, the live model, effort, fast state, and the task the agent was given, or
+that it has none yet.
 
 How to use it (GitHub Pages, after this lands on `main`):
 [aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).
@@ -213,6 +230,8 @@ You need:
 
 - Herdr for Windows.
 - [Git for Windows](https://git-scm.com/download/win).
+- Python 3 through `python3`, `python`, or `py -3`. Lantern stops before any
+  seat change if none of these commands works.
 - `C:\Program Files\Git\bin` on your user `PATH`. That directory holds
   `sh.exe`, and Herdr starts the plugin with `sh open.sh` and `sh launch.sh`.
   The Git installer does not put it there: its default option adds

@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.8.0</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.9.0</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -191,8 +191,9 @@
     <ol class="steps">
       <li>
         <div>
-          Need Herdr 0.7.5+ on macOS, Linux, or Windows, already running and
-          attached. Windows needs Git for Windows as well.
+          Need Herdr 0.7.5+ and Python 3 on macOS, Linux, or Windows, already
+          running and attached. Windows also needs Git for Windows. Lantern
+          accepts <code>python3</code>, <code>python</code>, or <code>py -3</code>.
         </div>
       </li>
       <li>
@@ -245,7 +246,7 @@
       </tbody>
     </table>
     <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the lantern chat.</p>
-    <p class="note">Agents the lantern seats start in the smart-auto permission tier — each kind gets its own flags after <code>--</code> on <code>agent start</code>, and the flags that skip approvals altogether are never passed. After a confirmed seat it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and says in one line what is running where.</p>
+    <p class="note">Agents the lantern seats start in the smart-auto permission tier. Each kind gets its own flags after <code>--</code> on <code>agent start</code>. A full bypass is absent by default. Lantern can pass one only after a user asks for yolo and confirms the exact flag and lost protections. Before confirmation, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
@@ -324,6 +325,14 @@ HELPER_EXTRA_ARGS=""</pre>
       <li>
         “Open the image maker repo with claude.”
         <span>Reuse the workspace and agent if they are already there. Agent slugs: <code>image-maker</code>, not “Image Maker”.</span>
+      </li>
+      <li>
+        “There is a PR on battle-paddle. Get a Codex review.”
+        <span>Resolve the repository and PR first. Check the model before any workspace or tab change. Lantern does not edit the repository.</span>
+      </li>
+      <li>
+        “Open battle paddle with Grok.”
+        <span>Bare Grok means Cursor with a live Cursor Grok model. Say Grok Build to use the Grok CLI.</span>
       </li>
       <li>
         “Make a worktree on herdr for branch helper-tests.”

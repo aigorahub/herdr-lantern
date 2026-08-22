@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr hsh tests/smoke.sh; do
+for f in launch.sh open.sh lib.sh bin/herdr bin/model-route bin/model-preflight hsh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -28,7 +28,8 @@ argv_dir=
 open_dir=
 elves_tmp=
 update_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"' EXIT
+model_dir=
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"; [ -n "$model_dir" ] && rm -rf "$model_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -189,6 +190,243 @@ for seat_file in prompt.md launch.sh; do
             fail "$seat_file does not forbid $reckless for seated agents"
     done
 done
+
+# Spoken model choices are separate family, effort, and fast values. The
+# resolver must read each installed CLI catalog. It must not make one guessed
+# slug from the whole phrase.
+model_dir=$(mktemp -d)
+cat >"$model_dir/codex" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "debug models" ] || exit 2
+cat <<'JSON'
+{"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]},{"slug":"gpt-5.6-luna","display_name":"GPT-5.6-Luna","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":["fast"]}]}
+JSON
+EOF
+cat >"$model_dir/agent" <<'EOF'
+#!/bin/sh
+[ "$1" = "--list-models" ] || exit 2
+cat <<'MODELS'
+Available models
+auto - Auto (default)
+gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+claude-opus-5-high-fast - Claude Opus 5 1M Fast
+claude-opus-5-high - Claude Opus 5 1M
+MODELS
+EOF
+cat >"$model_dir/grok" <<'EOF'
+#!/bin/sh
+[ "$1" = "models" ] || exit 2
+cat <<'MODELS'
+Default model: grok-4.6
+Available models:
+  * grok-4.6 (default)
+  - grok-4.5
+MODELS
+EOF
+cat >"$model_dir/claude" <<'EOF'
+#!/bin/sh
+case "$*" in
+"/usage -p --output-format json")
+    if [ "${CLAUDE_USAGE_MODE-}" = global ]; then
+        printf '%s\n' '{"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}'
+    else
+        printf '%s\n' '{"result":"Current session: 4% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100% used - resets Aug 23 at 4:59am"}'
+    fi
+    ;;
+"--help")
+    cat <<'HELP'
+  --effort <level>  Effort level for the current session (low, medium, high, xhigh, max)
+  --model <model>   Use alias 'fable', 'opus', or 'sonnet', or full name 'claude-fable-5'.
+  --permission-mode <mode>
+HELP
+    ;;
+*) exit 2 ;;
+esac
+EOF
+cat >"$model_dir/codex.cmd" <<'EOF'
+@echo off
+if not "%1 %2"=="debug models" exit /b 2
+echo {"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]},{"slug":"gpt-5.6-luna","display_name":"GPT-5.6-Luna","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":["fast"]}]}
+EOF
+cat >"$model_dir/agent.cmd" <<'EOF'
+@echo off
+if not "%1"=="--list-models" exit /b 2
+echo Available models
+echo auto - Auto (default)
+echo gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+echo cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+echo claude-opus-5-high-fast - Claude Opus 5 1M Fast
+echo claude-opus-5-high - Claude Opus 5 1M
+EOF
+cat >"$model_dir/grok.cmd" <<'EOF'
+@echo off
+if not "%1"=="models" exit /b 2
+echo Default model: grok-4.6
+echo Available models:
+echo   * grok-4.6 (default)
+echo   - grok-4.5
+EOF
+cat >"$model_dir/claude.cmd" <<'EOF'
+@echo off
+if "%1"=="--help" (
+  echo   --effort ^<level^>  Effort level for the current session ^(low, medium, high, xhigh, max^)
+  echo   --model ^<model^>   Use alias 'fable', 'opus', or 'sonnet', or full name 'claude-fable-5'.
+  echo   --permission-mode ^<mode^>
+  exit /b 0
+)
+if not "%1 %2 %3 %4"=="/usage -p --output-format json" exit /b 2
+if "%CLAUDE_USAGE_MODE%"=="global" (
+  echo {"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}
+  exit /b 0
+)
+echo {"result":"Current session: 4%% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82%% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100%% used - resets Aug 23 at 4:59am"}
+EOF
+chmod +x "$model_dir/codex" "$model_dir/agent" "$model_dir/grok" "$model_dir/claude"
+helper_detect_python >/dev/null || fail "model route needs Python 3"
+model_path=$model_dir:$PATH
+run_model_route() {
+    PATH="$model_path" "$root/bin/model-route" "$@"
+}
+run_model_preflight() {
+    PATH="$model_path" "$root/bin/model-preflight" "$@"
+}
+codex_route=$(run_model_route codex \
+    "5.6 sol high fast") || fail "Codex spoken model route"
+printf '%s\n' "$codex_route" | grep -qF '"argv":["-m","gpt-5.6-sol","-c","model_reasoning_effort=\"high\"","-c","service_tier=\"priority\""]' ||
+    fail "5.6 sol high fast did not become separate Codex argv"
+cursor_route=$(run_model_route cursor \
+    "5.6 sol high fast") || fail "Cursor spoken model route"
+printf '%s\n' "$cursor_route" | grep -qF '"argv":["--model","gpt-5.6-sol-high-fast"]' ||
+    fail "Cursor route did not use the listed model ID"
+cursor_default=$(run_model_route cursor \
+    default) || fail "Cursor live default route"
+printf '%s\n' "$cursor_default" | grep -qF '"model":"gpt-5.6-sol-high-fast"' ||
+    fail "Cursor default did not prefer live Sol 5.6 high fast"
+printf '%s\n' "$cursor_default" | grep -qF 'cursor-grok' &&
+    fail "Cursor default used a Grok model"
+grok_route=$(run_model_route cursor \
+    "cursor grok 4.6 high fast") || fail "Cursor Grok spoken model route"
+printf '%s\n' "$grok_route" | grep -qF '"argv":["--model","cursor-grok-4.6-high-fast"]' ||
+    fail "Cursor Grok route did not use the listed model ID"
+opus_route=$(run_model_route cursor \
+    "opus 5 high fast") || fail "Cursor Opus spoken model route"
+printf '%s\n' "$opus_route" | grep -qF '"argv":["--model","claude-opus-5-high-fast"]' ||
+    fail "Cursor Opus route did not use the listed model ID"
+grok_default=$(run_model_route grok \
+    default) || fail "Grok live default route"
+printf '%s\n' "$grok_default" | grep -qF '"argv":["-m","grok-4.6","--reasoning-effort","high"]' ||
+    fail "Grok default did not use live Grok 4.6 at high effort"
+if fable_check=$(run_model_preflight claude fable high); then
+    fail "Claude preflight accepted an exhausted Fable bucket"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "exhausted Fable should return unavailable"
+printf '%s\n' "$fable_check" | grep -qF '"reason":"Current week (Fable) is 100% used; resets Aug 23 at 4:59am"' ||
+    fail "Claude preflight did not report the exhausted bucket and reset"
+printf '%s\n' "$fable_check" | grep -qF '"substitute":{"kind":"claude","model":"opus","effort":"xhigh"' ||
+    fail "Claude preflight did not propose Opus xhigh"
+if run_model_preflight claude fabel high >/dev/null 2>&1; then
+    fail "Claude preflight accepted an unverified model"
+fi
+if run_model_preflight claude fable ultra >/dev/null 2>&1; then
+    fail "Claude preflight accepted an unverified effort"
+fi
+CLAUDE_USAGE_MODE=global
+export CLAUDE_USAGE_MODE
+if global_check=$(run_model_preflight claude fable high); then
+    fail "Claude preflight accepted a global limit"
+else
+    preflight_status=$?
+fi
+unset CLAUDE_USAGE_MODE
+[ "$preflight_status" -eq 3 ] || fail "global Claude limit should return unavailable"
+printf '%s\n' "$global_check" | grep -qF '"reason":"Limit: weekly is 100% used; resets Aug 23 at 4:59am"' ||
+    fail "Claude preflight did not report the generic limit and reset"
+printf '%s\n' "$global_check" | grep -qF '"substitute":{"kind":"cursor","model":"gpt-5.6-sol-high-fast"' ||
+    fail "global Claude limit proposed another Claude model"
+run_model_preflight cursor gpt-5.6-sol-high-fast high >/dev/null ||
+    fail "Cursor preflight rejected a listed model"
+if cursor_miss=$(run_model_preflight cursor cursor-grok-4.7-high-fast high); then
+    fail "Cursor preflight accepted a missing catalog model"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "Cursor catalog miss should return unavailable"
+printf '%s\n' "$cursor_miss" | grep -qF '"available":false' ||
+    fail "Cursor catalog miss did not fail closed"
+printf '%s\n' "$cursor_miss" | grep -qF '"substitute":{"kind":"cursor","model":"cursor-grok-4.6-high-fast"' ||
+    fail "Cursor Grok miss did not propose the next live Cursor Grok model"
+if grok_miss=$(run_model_preflight grok grok-4.7 high); then
+    fail "Grok preflight accepted a missing catalog model"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "Grok catalog miss should return unavailable"
+printf '%s\n' "$grok_miss" | grep -qF '"substitute":{"kind":"grok","model":"grok-4.5","effort":"high"' ||
+    fail "Grok Build miss did not propose live Grok 4.5 high"
+if run_model_route codex \
+    "5.6 terra high fast" >/dev/null 2>&1; then
+    fail "model route accepted fast for a model without fast service"
+fi
+if run_model_route codex \
+    "5.6 luna high fast" >/dev/null 2>&1; then
+    fail "model route accepted Fast without one live service tier ID"
+fi
+if run_model_route cursor \
+    "retired mystery max" >/dev/null 2>&1; then
+    fail "model route invented a model for an unknown phrase"
+fi
+rm -rf "$model_dir"
+model_dir=
+
+for route_file in prompt.md launch.sh; do
+    grep -qiF 'open a review' "$root/$route_file" ||
+        fail "$route_file does not name the Codex review route"
+    grep -qF '5.6 sol high fast' "$root/$route_file" ||
+        fail "$route_file does not name the split Sol default"
+    grep -qE 'service_tier=\\?"priority\\?"' "$root/$route_file" ||
+        fail "$route_file does not pass the Codex fast setting"
+    grep -qF 'review PR' "$root/$route_file" ||
+        fail "$route_file does not name the pull request review route"
+done
+grep -qF 'gh -R <owner/repo> pr view' "$root/prompt.md" ||
+    fail "prompt.md does not resolve a named pull request with gh"
+grep -qF 'start <slug> --kind codex' "$root/prompt.md" ||
+    fail "prompt.md does not seat Codex for a named pull request review"
+for review_kind in Cursor Grok; do
+    for route_file in prompt.md launch.sh; do
+        grep -qF "$review_kind review" "$root/$route_file" ||
+            fail "$route_file does not name the $review_kind pull request review route"
+    done
+done
+grep -qF '"Cursor" means `--kind cursor`' "$root/prompt.md" ||
+    fail "prompt.md does not route Cursor to the Cursor kind"
+grep -qF '"open battle paddle with Grok" | Seat with `--kind cursor`' "$root/prompt.md" ||
+    fail "prompt.md does not route bare Grok through Cursor"
+grep -qF '"open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok`' "$root/prompt.md" ||
+    fail "prompt.md does not route Grok Build to the Grok CLI"
+grep -qF '"open battle paddle in Cursor with Grok"' "$root/prompt.md" ||
+    fail "prompt.md does not name the explicit Cursor Grok route"
+grep -qF '"Grok review on XYZ", "have Cursor Grok review that PR" | Use the named pull request route with Cursor plan mode' "$root/prompt.md" ||
+    fail "prompt.md does not route bare Grok review through Cursor"
+grep -qF '"Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode' "$root/prompt.md" ||
+    fail "prompt.md does not route Grok Build review through the Grok CLI"
+for preflight_file in prompt.md launch.sh README.md; do
+    grep -qF 'model-preflight' "$root/$preflight_file" ||
+        fail "$preflight_file does not require the availability preflight"
+done
+grep -qF '"Grok" also' "$root/launch.sh" ||
+    fail "launch.sh does not route bare Grok through Cursor"
+grep -qF '"Grok Build" and' "$root/launch.sh" ||
+    fail "launch.sh does not route Grok Build to the Grok CLI"
+grep -qF 'Never merge' "$root/prompt.md" ||
+    fail "prompt.md does not forbid merge from Lantern"
+grep -qF 'Finish this step before any' "$root/prompt.md" ||
+    fail "named PR route does not preflight before herd mutation"
+grep -qF 'confirms the exact flag and the protections it removes' "$root/README.md" ||
+    fail "README does not describe the explicit yolo exception"
 # hsh carried a HERDR_REAL branch to dodge the wrapper, and launch.sh unsets
 # HERDR_REAL before it execs the agent, so inside the pane that branch never
 # ran. Nothing should put a bypass back: opening a second lantern is a
@@ -620,6 +858,19 @@ export HERDR_REAL=/bin/echo
 export HERDR_HELPER_OK=
 out=$(sh "$root/bin/herdr" agent list) || fail "inspect should pass"
 printf '%s\n' "$out" | grep -q 'agent list' || fail "inspect did not exec real herdr"
+for inspect_route in 'tab list' 'pane list' 'session list' 'integration status'; do
+    # Word splitting is intentional. These fixed test values are command argv.
+    # shellcheck disable=SC2086
+    out=$(sh "$root/bin/herdr" $inspect_route) ||
+        fail "$inspect_route should pass the read only gate"
+    printf '%s\n' "$out" | grep -qF "$inspect_route" ||
+        fail "$inspect_route did not exec real herdr"
+done
+
+if sh "$root/bin/herdr" pane run w1:p1 codex review --base main 2>"$err"; then
+    fail "pane run without confirmation should fail"
+fi
+grep -q HERDR_HELPER_OK "$err" || fail "pane run blocked hint missing"
 
 if sh "$root/bin/herdr" workspace create --cwd /tmp --label x 2>"$err"; then
     fail "mutate without OK should fail"

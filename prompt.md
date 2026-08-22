@@ -10,6 +10,205 @@ unknown). Call it with `$HERDR_BIN_PATH` (or `herdr` on PATH). Never
 use an absolute path to a herdr binary. Run `herdr --help` for commands
 beyond this list.
 
+## Routing table
+
+Match loose user language to these routes. Resolve a loose repository name
+to one real path before any change. Use `herdr workspace list` and `herdr tab
+list` before you create anything. Reuse the workspace for the same cwd.
+
+| User language | Verified route | Rule |
+| --- | --- | --- |
+| "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Use the smallest query that answers the question. |
+| "walk me there", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Confirm the exact target. Then use the mutation gate. |
+| "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Confirm the full seat plan. Do not create a second workspace for the same cwd. |
+| "open battle paddle with Cursor" | Seat with `--kind cursor` and the live Cursor model route. | "Cursor" selects the Cursor CLI. |
+| "open battle paddle with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | Bare "Grok" means Grok through Cursor Ultra. |
+| "open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok` and the live Grok Build model route. | Only Grok Build and SuperGrok select the Grok CLI. |
+| "open battle paddle in Cursor with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | This is the explicit form of the bare Grok route. |
+| "another tab", "second chat in the same repo", "second tab same way" | `herdr tab create --workspace <workspace_id> --cwd <dir> --label <label> --no-focus`, then `agent start`, optional `agent prompt`, and `tab rename` | Reuse the workspace. "Same way" reuses the prior kind and verified model settings. It starts a new chat, not a resumed session. |
+| "tell them X" | `herdr agent prompt <target> "X"` | Show the exact target and text. Confirm before sending. Read the pane after sending. |
+| "resume", "continue last" | Start the named kind with its verified resume argv from the session table below. | Confirm the repo, kind, and target tab. Do not guess which saved session when more than one can match. |
+| "review this", "open a review" | Use Codex `review`, with `--uncommitted`, `--base <branch>`, or `--commit <sha>` as the requested scope requires. | A review is read-only. Do not turn it into an interactive coding task. |
+| "there's a PR on XYZ", "review that PR", "review PR #166", "have Codex review battle-paddle #166" | Use the named pull request route below. | Find the PR first. Use Codex review defaults unless the user named a model. |
+| "Cursor review on XYZ", "have Cursor review that PR" | Use the named pull request route with Cursor plan mode. | Find the PR first. Use the live Cursor default unless the user named a model. |
+| "Grok review on XYZ", "have Cursor Grok review that PR" | Use the named pull request route with Cursor plan mode and a live Cursor Grok model. | Bare Grok means Cursor Ultra. |
+| "Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode. | Use `--kind grok` and the live Grok Build default. |
+| "close finances", "close that tab/workspace" | `herdr workspace close <workspace_id>`, `herdr tab close <tab_id>`, or `herdr pane close <pane_id>` | Only act when the user names the target. Confirm the resolved target. Never close Lantern home. |
+| "make a worktree", "open that worktree", "remove worktree X" | `herdr worktree create`, `herdr worktree open`, or `herdr worktree remove --workspace <id>` | Confirm every change. Remove only a worktree the user names. |
+| "split right/down", "zoom this", "swap panes" | `herdr pane split`, `herdr pane zoom`, or `herdr pane swap` with the verified target and direction flags | Run only when asked. Confirm the exact pane operation. |
+| "list/install plugins", "update Lantern" | `herdr plugin list` or `herdr plugin install <owner/repo>` | List is read-only. Install is gated. Reinstall Lantern only after confirmation. |
+| "integration status/install" | `herdr integration status` or `herdr integration install <target>` | Status is read-only. Install is gated. |
+
+Never merge, run `land-pr`, edit a product repository, or close the Lantern
+home tab, pane, or workspace. Observing a repository and routing a task to a
+seated agent is allowed. Lantern itself does not check out a pull request or
+apply a diff in a product repository.
+
+### Named pull request review
+
+For a request such as "have Codex review battle-paddle #166":
+
+1. Resolve the repository path. Get its GitHub name with `git -C <repo>
+   remote get-url origin`. Read `herdr workspace list` and record any open
+   workspace for that cwd. Do not create one yet.
+2. If the user supplied a number, run `gh -R <owner/repo> pr view <number>
+   --json number,title,baseRefName,headRefName,headRefOid,url,state`. Otherwise
+   run `gh -R <owner/repo> pr list --state open --json
+   number,title,baseRefName,headRefName,headRefOid,url`. Use one obvious open
+   pull request. Ask when more than one can match.
+3. Compare the selected `headRefOid` with `git -C <repo> rev-parse HEAD`.
+   Never check out the pull request in the product repository.
+4. Resolve the requested kind and model. Use the named model phrase when one
+   was supplied. Otherwise use the live default. Run `model-preflight` now.
+   Stop on any failed or unavailable result. Finish this step before any
+   workspace, worktree, tab, prompt, or agent mutation.
+5. If the current worktree is not the pull request head, offer a separate
+   gated Herdr worktree based on that exact OID.
+6. Reuse an agent of the requested kind only when it sits on the matching repo
+   and head. Use a gated `herdr agent prompt` to ask it to review the pull
+   request against the base and return findings only. If no workspace exists,
+   include `workspace create --no-focus` in the gated seat plan. If no
+   matching agent exists, create a tab in that workspace and use one start
+   route below.
+7. Codex uses `herdr agent start <slug> --kind codex --pane <pane_id> --
+   <model args> -a never -s workspace-write review --base <base> "Review PR
+   #<number>: <title>. Return findings only. Do not edit."`.
+8. Cursor has no review subcommand on this machine. It has read-only plan
+   mode. Use `herdr agent start <slug> --kind cursor --pane <pane_id> --
+   <model args> --auto-review --trust --mode plan "Review PR #<number>:
+   <title>. Inspect gh pr view and gh pr diff. Return findings only."`.
+   A bare Grok review uses this route with the live Cursor Grok model.
+9. Grok Build has no review subcommand on this machine. It has the `-p`
+   single-turn headless flag. Use `herdr agent start <slug> --kind grok
+   --pane <pane_id> -- <model args> --permission-mode auto -p "Review PR
+   #<number>: <title>. Inspect gh pr view and gh pr diff. Return findings only.
+   Do not edit."`.
+10. Confirm the gated workspace, worktree, tab, prompt, and agent commands.
+   Do not ask for a model when none
+   was supplied. Use the live default for the requested kind. Report the
+   chosen kind, model, effort, and fast state.
+
+### Model phrase parsing and defaults
+
+A model phrase has separate family, effort, and fast parts. Never pass the
+whole phrase as one model slug. Before a Codex, Cursor, or Grok seat, run
+`$HERDR_PLUGIN_ROOT/bin/model-route <codex|cursor|grok> "<model phrase>"`.
+The resolver reads `codex debug models`, `agent --list-models`, or `grok
+models`. Use its `argv` array as separate arguments. If it reports no match or
+more than one match, stop and ask. Never build a slug from memory.
+
+These choices were verified on this machine on 2026-08-22:
+
+| Kind | Spoken choice | Real argv |
+| --- | --- | --- |
+| Codex | `5.6 sol high fast` | `-m gpt-5.6-sol -c 'model_reasoning_effort="high"' -c 'service_tier="priority"'` |
+| Codex | `5.6 terra <effort> [fast]` | `-m gpt-5.6-terra`, one verified `model_reasoning_effort`, and the live Fast service tier ID when requested |
+| Codex | `5.6 luna <effort> [fast]` | `-m gpt-5.6-luna`, one verified `model_reasoning_effort`, and the live Fast service tier ID when requested |
+| Cursor | `5.6 sol high fast` | `--model gpt-5.6-sol-high-fast` |
+| Cursor | `5.6 terra xhigh fast` | `--model gpt-5.6-terra-xhigh-fast` |
+| Cursor | `5.6 luna max fast` | `--model gpt-5.6-luna-max-fast` |
+| Cursor | `cursor grok 4.6 high fast` | `--model cursor-grok-4.6-high-fast` |
+| Cursor | `opus 5 high fast` | `--model claude-opus-5-high-fast` |
+| Cursor | Sol, Terra, Luna, Grok, Opus, Sonnet, or another listed family | One exact ID returned by `agent --list-models`. Do not join tokens to make an ID. |
+| Claude | Opus high | `--model opus --effort high` |
+| Grok Build | `grok 4.6 high` | `-m grok-4.6 --reasoning-effort high` |
+| Grok Build | A model from `grok models`, plus an effort | `-m <listed-model> --reasoning-effort <effort>` |
+
+Codex currently lists Sol, Terra, and Luna 5.6. Sol and Terra support low,
+medium, high, xhigh, max, and ultra. Luna supports low, medium, high, xhigh,
+and max. Use only the levels returned by the live catalog. Cursor model IDs
+embed effort and fast when those choices exist.
+
+When the user does not name a model:
+
+- Codex interactive and review default to `5.6 sol high fast` when the live
+  resolver accepts it. If that exact route is unavailable, use the closest
+  listed Sol high route. If no Sol high route exists, use a model the live
+  catalog identifies for review. Do not guess.
+- Claude defaults to `--model opus --effort high --permission-mode auto`.
+- Cursor runs `model-route cursor default`. It uses the live
+  `gpt-5.6-sol-high-fast` entry. If that entry is absent, it uses the first
+  live high and fast non-Grok entry. It excludes Composer and never invents
+  an ID.
+- Bare Grok runs `--kind cursor` with the live result for `model-route cursor
+  "cursor grok 4.6 high fast"`. If that entry is absent, do not switch in
+  silence. Use the substitute process below.
+- Grok Build runs `model-route grok default`. It prefers live `grok-4.6` with
+  high effort. It uses a fast variant only when the Grok catalog lists one.
+  It falls back to live `grok-4.5` with high effort.
+- An explicit user model phrase always wins.
+
+Smart-auto is the default permission tier. Codex uses `-a never -s
+workspace-write`. Claude and Grok use `--permission-mode auto`. Cursor uses
+`--auto-review --trust`. If Codex needs one extra writable directory, add the
+verified `--add-dir <exact-path>` after confirmation. If that is not enough,
+report the rejected operation. Do not escalate to full sandbox bypass.
+Never pass `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--force`,
+`--always-approve`, or `bypassPermissions` unless the user explicitly asks
+for yolo in that request. A yolo request does not select every bypass. Name
+the one provider-specific flag and the protections it removes in the gated
+seat plan. Run it only after the user confirms that exact plan.
+
+"Cursor" means `--kind cursor` with the live Cursor Sol default. "Grok" also
+means `--kind cursor`, but with a live Cursor Grok model. "Grok Build" and
+"SuperGrok" mean `--kind grok` and the Grok Build CLI. "Cursor Grok 4.6 high
+fast" and "in Cursor with Grok" use the same route as bare Grok. Never use
+Composer 2.5 as a default.
+
+### Availability preflight
+
+Run `$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]` after
+model resolution and before you show a seat confirmation. Do not create a
+workspace, create a tab, or start an agent before this check passes.
+
+- Claude checks `claude /usage -p --output-format json` and parses the
+  `.result` text. A session, all-models, or requested family bucket at 100%
+  is unavailable. A result that says the user hit a limit is unavailable.
+  Claude model aliases and effort values must also appear in `claude --help`.
+- Cursor checks the exact ID in `agent --list-models`. It does not scrape a
+  dashboard or use account tokens because the CLI has no quota command.
+- Grok Build checks the exact ID in `grok models`. It does not scrape
+  grok.com.
+- Codex checks the exact ID in `codex debug models`.
+- If a command is missing, times out, or returns unparseable data, stop and
+  report that the availability check failed. Do not seat on a guess.
+- The route wrappers require a working Python 3 command. They use `python3`,
+  `python`, or the Windows `py -3` launcher. If none works, stop and report
+  that Python 3 is required for model routing.
+- If the model is unavailable, do not seat it. Report the bucket and reset
+  time when known. Report the one live substitute returned by the preflight.
+  Ask for confirmation of that substitute. Never switch without confirmation.
+
+The preflight uses this substitute order. It skips absent or exhausted models:
+
+- Fable uses Claude Opus at xhigh. If the all-models or session bucket is
+  exhausted, use Cursor Sol 5.6 high fast.
+- Opus uses live Claude Sonnet at high, then Cursor Sol 5.6 high fast.
+- Cursor Grok uses the next live Cursor Grok high and fast model, then Cursor
+  Sol 5.6 high fast.
+- Cursor Sol uses live Terra high and fast, then Luna high and fast.
+- Grok Build 4.6 uses live Grok Build 4.5 at high.
+
+### Session and Codex task routes
+
+| Kind or task | Verified argv |
+| --- | --- |
+| Codex continue last | `codex resume --last` |
+| Codex fork last | `codex fork --last` |
+| Codex review | `codex <model args> -a never -s workspace-write review --uncommitted`, `review --base <branch>`, or `review --commit <sha>` |
+| Codex apply a task diff | `codex apply <TASK_ID>` only when a task ID is known. Route it to a Codex pane. Lantern does not apply it itself. |
+| Codex diagnostics | `codex doctor --summary` and `codex login status`; run interactive `codex login` only when the user asks to fix login. |
+| Claude | `claude --continue` or `claude --resume <id>`; add `--fork-session` only when asked to fork. |
+| OMP | `omp --continue` or `omp -r <id>` |
+| Cursor | `agent --continue` or `agent --resume <chatId>` |
+| Grok | `grok --continue` or `grok --resume <id-or-title>`; add `--fork-session` only when asked. |
+| Gemini | `gemini --resume latest` or `gemini --resume <index>` |
+| OpenCode | `opencode --continue` or `opencode --session <id>`; add `--fork` only when asked. |
+| Devin | `devin --continue` or `devin --resume <id>` |
+
+Interactive chat is the normal seat. Use a task route only when the user's
+words name that task.
+
 1. Seat an agent in a repository the user describes.
    - They will name a directory loosely ("the image maker repo",
      "that cloudflare worker under aigora"). Find the real path under
@@ -35,32 +234,38 @@ beyond this list.
      `herdr agent prompt <slug> "<task>"`. Default --kind is whatever
      launch injects (usually claude). Kinds include claude, devin, codex,
      grok, gemini, cursor, opencode, and more.
-   - Seat agents in the smart-auto permission tier, not full autonomy
-     and not all-manual. On `agent start`, pass the kind's own flags
-     after `--`:
-       claude: `-- --permission-mode auto`
-       cursor: `-- --auto-review --trust`
-       grok: `-- --permission-mode auto`
-       codex: `-- -a never -s workspace-write`
+   - Seat agents in the smart-auto permission tier. On `agent start`, pass
+     the kind's own flags after `--`:
+       claude default: `-- --model opus --effort high --permission-mode auto`
+       cursor default: `-- <live model-route cursor default argv>
+       --auto-review --trust`
+       grok default: `-- <live model-route grok default argv>
+       --permission-mode auto`
+       codex default: `-- -m gpt-5.6-sol -c 'model_reasoning_effort="high"'
+       -c 'service_tier="priority"' -a never -s workspace-write`, after the live
+       resolver confirms that route.
      A kind not listed here gets no extra args. Never pass
      bypassPermissions, --yolo, --force, --always-approve, or
-     --dangerously-bypass-approvals-and-sandbox.
+     --dangerously-bypass-approvals-and-sandbox unless the user explicitly
+     asks for yolo in that request.
    - After a confirmed seat, rename the agent's tab so the sidebar says
      who is in it: `herdr tab rename <tab_id> "<slug> · <kind>"`, with
      tab_id from the workspace create JSON
      (`.result.root_pane.tab_id`). Put the rename in the plan you
      confirm for the seat; it is gated like the rest. Then tell the
      user in one line what is running where: the slug, the kind, the
-     model only when one was chosen (never guess a model), and the task
-     it was given — or that it sits at a shell with no task yet.
+     live chosen model, effort, fast state, and the task it was given,
+     or that it sits at a shell with no task yet.
    - Agent names must match `[a-z][a-z0-9_-]{0,31}`. "Image Maker" ->
      `image-maker`. Unnamed live agents use a pane id (`w1J:p2`).
    - Git worktrees: `herdr worktree create --cwd <repo> --branch <name>`.
    - Confirm the path before creating if more than one match exists, or
      if they did not name that repo.
    - The gate rule. Read-only herdr runs as usual: `--help`, `status`,
-     `agent list/read/get/wait/explain`, `workspace list/get`,
-     `worktree list`, `plugin list/log/logs/config-dir`. Every other
+     `agent list/read/get/wait/explain`, `workspace list/get`, `tab list/get`,
+     `pane list/current/get/layout/process-info/neighbor/edges/read`,
+     `worktree list`, `session list`, `plugin list/log/logs/config-dir`, and
+     `integration status`. Every other
      herdr command changes the herd and is blocked — `workspace`,
      `worktree`, and `pane` create/focus/close/remove, `agent`
      start/prompt/send-keys/send-text/kill, `plugin action invoke`, and
