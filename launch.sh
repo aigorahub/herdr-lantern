@@ -143,6 +143,12 @@ Runtime (injected by launch.sh; do not ignore):
   (Cursor often types into the follow-up field without submitting), and
   it fails when nothing shows the message went in. Read the pane before
   saying sent.
+- \`herdr agent start\` through the wrapper, for Codex only, dismisses the
+  first-run directory trust dialog with Enter or a new-chat \`[y/n]\` /
+  \`yes (y)\` confirm with y when Herdr returns \`agent_not_ready\` /
+  blocked during startup on that named pane. It waits until idle and
+  \`interactive_ready\`. It does not send keys into any other failure,
+  another agent’s pane, or later permission prompts.
 - This chat runs $chat_identity. Name that in your light-up line — it is
   how the user tells which CLI and model is answering — and repeat it
   whenever they ask.

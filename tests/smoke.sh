@@ -20,6 +20,7 @@ tmp=$(mktemp)
 err=$(mktemp)
 fake=
 fake_prompt=
+fake_start=
 fake_ws=
 fake_cmd=
 fake_py=
@@ -29,7 +30,7 @@ open_dir=
 elves_tmp=
 update_dir=
 model_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"; [ -n "$model_dir" ] && rm -rf "$model_dir"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_start" ] && rm -rf "$fake_start"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"; [ -n "$model_dir" ] && rm -rf "$model_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -143,6 +144,8 @@ case $front_real in
 esac
 grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/launch.sh" ||
     fail "launch.sh should force the wrapper to the front of PATH"
+grep -q 'helper_relay_agent_start' "$root/bin/herdr" ||
+    fail "bin/herdr should relay agent start for the Codex startup gate"
 rm -rf "$resolve_dir"
 
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
@@ -1033,6 +1036,211 @@ unset HERDR_REAL
 rm -rf "$fake_prompt"
 fake_prompt=
 
+# Codex first-run gates. Herdr returns agent_not_ready as soon as the
+# seat is blocked during startup. The wrapper reads that named pane and
+# sends only the key that gate wants.
+[ "$(helper_codex_startup_key "$(printf '%s\n' \
+    '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue')")" = Enter ] ||
+    fail "trust dialog should send Enter"
+[ "$(helper_codex_startup_key "$(printf '%s\n' \
+    'Do you trust the contents of this' \
+    'directory?')")" = Enter ] ||
+    fail "a wrapped trust question should still send Enter"
+[ "$(helper_codex_startup_key 'Start a new chat? [y/n]')" = y ] ||
+    fail "[y/n] new-chat confirm should send y"
+[ "$(helper_codex_startup_key 'Resume this session? yes (y)')" = y ] ||
+    fail "yes (y) new-chat confirm should send y"
+if helper_codex_startup_key 'Allow command?' >/dev/null; then
+    fail "a later permission prompt must not look like a first-run gate"
+fi
+if helper_codex_startup_key 'press enter to confirm or esc to cancel' >/dev/null; then
+    fail "a later confirm prompt must not look like a first-run gate"
+fi
+if helper_codex_startup_key 'codex is starting...' >/dev/null; then
+    fail "unrelated pane text must not look like a first-run gate"
+fi
+[ "$(helper_argv_option_value --kind agent start reviewer --kind codex --pane w1:p1)" = codex ] ||
+    fail "--kind value"
+[ "$(helper_argv_option_value --pane agent start reviewer --kind=codex --pane=w1:p1)" = w1:p1 ] ||
+    fail "--pane= value"
+if helper_argv_option_value --kind agent start reviewer --pane w1:p1 -- --kind codex >/dev/null; then
+    fail "a --kind after -- must not be read as the seat kind"
+fi
+
+fake_start=$(mktemp -d)
+cat >"$fake_start/herdr" <<'EOF'
+#!/bin/sh
+case "$1 $2" in
+"agent start")
+    if [ "${FAKE_START_OK:-}" = 1 ]; then
+        printf 'agent start %s\n' "$3"
+        exit 0
+    fi
+    if [ "${FAKE_START_ERR:-agent_not_ready}" != agent_not_ready ]; then
+        printf '{"error":{"code":"%s","message":"start failed: %s"}}\n' \
+            "$FAKE_START_ERR" "$3" >&2
+        exit 1
+    fi
+    printf '{"error":{"code":"agent_not_ready","message":"%s is blocked during startup and is not ready for prompts"}}\n' \
+        "$3" >&2
+    exit 1
+    ;;
+"agent get")
+    ready=false
+    [ -f "${FAKE_READY_FILE:-}" ] && ready=true
+    printf '{"result":{"agent":{"pane_id":"%s","interactive_ready":%s,"agent_status":"blocked"}}}\n' \
+        "${FAKE_AGENT_PANE:-w1:p1}" "$ready"
+    exit 0
+    ;;
+"agent read")
+    cat "$FAKE_PANE" 2>/dev/null
+    exit 0
+    ;;
+"agent send-keys")
+    printf 'agent send-keys %s %s\n' "$3" "$4"
+    [ -n "${FAKE_START_DEAF:-}" ] || : >"${FAKE_READY_FILE:-/dev/null}"
+    exit 0
+    ;;
+"agent wait")
+    printf '%s\n' "$*"
+    exit 0
+    ;;
+esac
+printf '%s\n' "$*"
+exit 0
+EOF
+chmod +x "$fake_start/herdr"
+export HERDR_REAL="$fake_start/herdr"
+export HERDR_HELPER_OK=1
+export FAKE_PANE="$fake_start/pane.txt"
+export FAKE_READY_FILE="$fake_start/ready"
+export FAKE_AGENT_PANE=w1:p1
+export FAKE_START_ERR=agent_not_ready
+unset FAKE_START_OK
+unset FAKE_START_DEAF
+: >"$FAKE_PANE"
+rm -f "$FAKE_READY_FILE"
+
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "Codex trust gate should recover after Enter"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "Codex trust gate did not send Enter to the named seat"
+printf '%s\n' "$out" | grep -q 'agent wait reviewer --until idle' ||
+    fail "Codex trust gate did not wait until idle"
+
+rm -f "$FAKE_READY_FILE"
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "Codex new-chat [y/n] should recover after y"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
+    fail "Codex new-chat confirm did not send y to the named seat"
+
+rm -f "$FAKE_READY_FILE"
+printf '%s\n' 'Resume this session? yes (y)' >"$FAKE_PANE"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "Codex yes (y) confirm should recover after y"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
+    fail "Codex yes (y) confirm did not send y"
+
+# A successful start must not send keys.
+export FAKE_START_OK=1
+rm -f "$FAKE_READY_FILE"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1) ||
+    fail "a successful Codex start should pass through"
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a successful start must not send keys"
+fi
+unset FAKE_START_OK
+
+# Claude on the same dialog is somebody else's seat.
+rm -f "$FAKE_READY_FILE"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a non-Codex blocked start must not be reported as seated"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a non-Codex start must not send keys into the pane"
+fi
+
+# Unrelated start failure, even with a trust dialog on screen.
+export FAKE_START_ERR=pane_not_found
+rm -f "$FAKE_READY_FILE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "an unrelated start failure must not be reported as seated"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "an unrelated start failure must not send keys"
+fi
+export FAKE_START_ERR=agent_not_ready
+
+# The named agent is sitting in another pane. Do not type into it.
+export FAKE_AGENT_PANE=w2:p9
+rm -f "$FAKE_READY_FILE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a pane mismatch must not be reported as seated"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a pane mismatch must not send keys into another agent's pane"
+fi
+export FAKE_AGENT_PANE=w1:p1
+
+# A later permission prompt during startup is not a first-run gate.
+rm -f "$FAKE_READY_FILE"
+printf '%s\n' 'Allow command?' 'press enter to confirm or esc to cancel' >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a later permission prompt must not be auto-dismissed"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a later permission prompt must not receive keys"
+fi
+
+# Kind taken from agent args after -- must not trigger the gate.
+rm -f "$FAKE_READY_FILE"
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 -- --kind codex 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a --kind after -- must not trigger the Codex startup gate"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a --kind after -- must not send keys"
+fi
+
+# Enter that never makes the seat interactive_ready is a failed start.
+export FAKE_START_DEAF=1
+rm -f "$FAKE_READY_FILE"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a gate that did not become ready must not be reported as seated"
+fi
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "the unreadied trust gate should still press Enter"
+grep -q 'did not become ready' "$err" ||
+    fail "an unreadied Codex seat should say why"
+unset FAKE_START_DEAF
+
+unset FAKE_PANE
+unset FAKE_READY_FILE
+unset FAKE_AGENT_PANE
+unset FAKE_START_ERR
+unset FAKE_START_OK
+unset HERDR_REAL
+rm -rf "$fake_start"
+fake_start=
+
 # Windows: bin/herdr has no file extension, so a native caller resolving
 # `herdr` on PATH skips it under PATHEXT and reaches the real herdr.exe. The
 # .cmd sibling is what that caller finds instead. Nothing here runs elsewhere.
@@ -1599,6 +1807,10 @@ grep -q 'helper_agent_takes_effort' "$root/launch.sh" ||
     fail "launch.sh effort flags should share the lib.sh membership"
 grep -qF 'This chat runs $chat_identity' "$root/launch.sh" ||
     fail "the launch.sh appendix should name what the chat runs"
+grep -qF 'agent_not_ready' "$root/prompt.md" ||
+    fail "prompt.md does not describe the Codex startup gate"
+grep -qF 'agent_not_ready' "$root/launch.sh" ||
+    fail "the launch.sh appendix does not describe the Codex startup gate"
 grep -q 'helper_cursor_default_model' "$root/launch.sh" ||
     fail "launch.sh should take the cursor default model from lib.sh"
 # And what is supposed to be happening where: after a confirmed seat, each

@@ -25,6 +25,10 @@ case ${HERDR_HELPER_OK:-} in
         helper_relay_agent_prompt "$real" "$@"
         exit $?
     fi
+    if helper_is_agent_start "$@"; then
+        helper_relay_agent_start "$real" "$@"
+        exit $?
+    fi
     exec "$real" "$@"
     ;;
 esac

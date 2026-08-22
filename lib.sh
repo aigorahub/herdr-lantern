@@ -435,8 +435,40 @@ helper_argv_has_flag() {
     return 1
 }
 
+helper_argv_option_value() {
+    # Print the value of --flag from an argv list. Stops at -- so agent
+    # args cannot supply a fake kind or pane. Accepts --flag value and
+    # --flag=value.
+    _helper_opt=$1
+    shift
+    while [ $# -gt 0 ]; do
+        [ "$1" = -- ] && return 1
+        if [ "$1" = "$_helper_opt" ]; then
+            [ -n "${2:-}" ] || return 1
+            printf '%s' "$2"
+            return 0
+        fi
+        case $1 in
+        "$_helper_opt"=*)
+            printf '%s' "${1#"$_helper_opt"=}"
+            return 0
+            ;;
+        esac
+        shift
+    done
+    return 1
+}
+
 helper_is_agent_prompt() {
     [ "${1:-}" = agent ] && [ "${2:-}" = prompt ] && [ -n "${3:-}" ] && [ -n "${4:-}" ]
+}
+
+helper_is_agent_start() {
+    [ "${1:-}" = agent ] && [ "${2:-}" = start ] && [ -n "${3:-}" ] || return 1
+    case $3 in
+    -*) return 1 ;;
+    esac
+    return 0
 }
 
 helper_pane_holds_text() {
@@ -490,6 +522,80 @@ helper_relay_agent_prompt() {
         return 1
     fi
     return 0
+}
+
+helper_codex_startup_key() {
+    # Prints Enter or y when pane text ($1) is a Codex first-run gate.
+    # Newlines are flattened so a wrapped trust question still matches.
+    # Later permission prompts are not a match: those are not a first-run
+    # gate, and sending y into one would approve work nobody asked to skip.
+    _helper_flat=$(printf '%s\n' "$1" | tr '\n\r' '  ')
+    case $_helper_flat in
+    *"Allow command[?]"* | *"allow command[?]"* | \
+        *"press enter to confirm or esc to cancel"*)
+        return 1
+        ;;
+    esac
+    case $_helper_flat in
+    *"Do you trust the contents of this directory"* | *"Yes, continue"*)
+        printf 'Enter'
+        return 0
+        ;;
+    *'[y/n]'* | *'yes (y)'* | *'Yes (y)'*)
+        printf 'y'
+        return 0
+        ;;
+    esac
+    return 1
+}
+
+helper_relay_agent_start() {
+    # Codex first-run survival. Herdr returns agent_not_ready as soon as
+    # detection reports blocked during startup, so a directory-trust or
+    # new-chat confirm kills the seat. This reads that same named pane
+    # and sends only the key that gate wants. Any other failure, another
+    # kind, or another agent's pane is left alone.
+    _helper_real=$1
+    shift
+    _helper_name=$3
+    _helper_kind=$(helper_argv_option_value --kind "$@") || _helper_kind=
+    _helper_pane=$(helper_argv_option_value --pane "$@") || _helper_pane=
+    _helper_errf=$(mktemp) || {
+        "$_helper_real" "$@"
+        return $?
+    }
+    "$_helper_real" "$@" 2>"$_helper_errf"
+    _helper_status=$?
+    _helper_err=$(cat "$_helper_errf")
+    cat "$_helper_errf" >&2
+    rm -f "$_helper_errf"
+    [ "$_helper_status" -eq 0 ] && return 0
+    [ "$_helper_kind" = codex ] || return $_helper_status
+    [ -n "$_helper_name" ] && [ -n "$_helper_pane" ] || return $_helper_status
+    case $_helper_err in
+    *agent_not_ready* | *"blocked during startup"*) ;;
+    *) return $_helper_status ;;
+    esac
+    _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+        return $_helper_status
+    _helper_got_pane=$(printf '%s' "$_helper_got" | helper_json_value pane_id)
+    [ "$_helper_got_pane" = "$_helper_pane" ] || return $_helper_status
+    _helper_before=$("$_helper_real" agent read "$_helper_name" --lines 60 2>/dev/null) ||
+        _helper_before=
+    _helper_key=$(helper_codex_startup_key "$_helper_before") ||
+        return $_helper_status
+    "$_helper_real" agent send-keys "$_helper_name" "$_helper_key" || return $?
+    "$_helper_real" agent wait "$_helper_name" --until idle --timeout 120000 ||
+        return $?
+    _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) || {
+        printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
+        return 1
+    }
+    case $_helper_got in
+    *"\"interactive_ready\":true"*) return 0 ;;
+    esac
+    printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
+    return 1
 }
 
 helper_json_value() {

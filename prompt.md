@@ -232,6 +232,13 @@ words name that task.
      the input field (common on Cursor), sends Enter and waits again. It
      fails rather than guess when nothing shows the message went in.
      Read the pane before telling the user it was sent.
+     For Codex, `agent start` through the wrapper dismisses the first-run
+     directory trust dialog with Enter, or a new-chat `[y/n]` / `yes (y)`
+     confirm with y, only when Herdr returns `agent_not_ready` / blocked
+     during startup on that same named pane. It then waits until idle and
+     `interactive_ready`. It does not send keys into any other failure,
+     another agent's pane, or later permission prompts. Do not send y or
+     Enter yourself for those startup gates.
    - To seat: `herdr workspace create --cwd <dir> --label <label> --no-focus`
      (JSON: `.result.root_pane.pane_id`), then
      `herdr agent start <slug> --kind <kind> --pane <pane_id>`, optionally
