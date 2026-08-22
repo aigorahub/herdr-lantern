@@ -224,6 +224,29 @@ Available models:
   - grok-4.5
 MODELS
 EOF
+cat >"$model_dir/codex.cmd" <<'EOF'
+@echo off
+if not "%1 %2"=="debug models" exit /b 2
+echo {"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]}]}
+EOF
+cat >"$model_dir/agent.cmd" <<'EOF'
+@echo off
+if not "%1"=="--list-models" exit /b 2
+echo Available models
+echo auto - Auto (default)
+echo gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+echo cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+echo claude-opus-5-high-fast - Claude Opus 5 1M Fast
+echo claude-opus-5-high - Claude Opus 5 1M
+EOF
+cat >"$model_dir/grok.cmd" <<'EOF'
+@echo off
+if not "%1"=="models" exit /b 2
+echo Default model: grok-4.6
+echo Available models:
+echo   * grok-4.6 (default)
+echo   - grok-4.5
+EOF
 chmod +x "$model_dir/codex" "$model_dir/agent" "$model_dir/grok"
 model_python=$(helper_detect_python) || fail "model route needs Python 3"
 model_path=$model_dir:$PATH
