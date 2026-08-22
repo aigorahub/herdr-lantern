@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.2** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -109,7 +109,7 @@ Mutating `herdr` commands (create, start, focus, close, …) go through
 Agents the lantern seats for you start in the smart-auto permission tier:
 `agent start` passes each kind's own flags after `--` — Claude Code and Grok
 get `--permission-mode auto`, Cursor `agent` gets `--auto-review --trust`,
-Codex gets `-a never -s workspace-write`; kinds without a listed tier get no
+Codex gets `-a never -s danger-full-access`; kinds without a listed tier get no
 extra flags. The flags that skip approvals altogether (bypassPermissions,
 `--yolo`, `--force`, `--always-approve`,
 `--dangerously-bypass-approvals-and-sandbox`) are not part of any default.

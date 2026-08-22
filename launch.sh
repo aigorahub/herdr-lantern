@@ -156,7 +156,7 @@ Runtime (injected by launch.sh; do not ignore):
   effort, then \`grok-4.5\` at high effort. Codex interactive and review
   default to Sol 5.6, high, fast, after the live catalog confirms
   \`-m gpt-5.6-sol -c model_reasoning_effort=\"high\" -c
-  service_tier=\"priority\"\`, plus \`-a never -s workspace-write\`. Use
+  service_tier=\"priority\"\`, plus \`-a never -s danger-full-access\`. Use
   \`\$HERDR_PLUGIN_ROOT/bin/model-route codex "5.6 sol high fast"\` to get
   separate Codex argv. Use the same resolver with cursor or grok for a user
   supplied model phrase. Never invent a model slug. A kind not named here

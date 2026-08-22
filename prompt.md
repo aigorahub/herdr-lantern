@@ -71,7 +71,7 @@ For a request such as "have Codex review battle-paddle #166":
    matching agent exists, create a tab in that workspace and use one start
    route below.
 7. Codex uses `herdr agent start <slug> --kind codex --pane <pane_id> --
-   <model args> -a never -s workspace-write review --base <base> "Review PR
+   <model args> -a never -s danger-full-access review --base <base> "Review PR
    #<number>: <title>. Return findings only. Do not edit."`.
 8. Cursor has no review subcommand on this machine. It has read-only plan
    mode. Use `herdr agent start <slug> --kind cursor --pane <pane_id> --
@@ -139,11 +139,11 @@ When the user does not name a model:
 - An explicit user model phrase always wins.
 
 Smart-auto is the default permission tier. Codex uses `-a never -s
-workspace-write`. Claude and Grok use `--permission-mode auto`. Cursor uses
-`--auto-review --trust`. If Codex needs one extra writable directory, add the
-verified `--add-dir <exact-path>` after confirmation. If that is not enough,
-report the rejected operation. Do not escalate to full sandbox bypass.
-Never pass `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--force`,
+danger-full-access`. That is the Codex equivalent of Claude
+`--permission-mode auto`: approve and run, without a workspace-only sandbox
+that blocks network and ordinary writes. Claude and Grok use
+`--permission-mode auto`. Cursor uses `--auto-review --trust`. Never pass
+`--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--force`,
 `--always-approve`, or `bypassPermissions` unless the user explicitly asks
 for yolo in that request. A yolo request does not select every bypass. Name
 the one provider-specific flag and the protections it removes in the gated
@@ -195,7 +195,7 @@ The preflight uses this substitute order. It skips absent or exhausted models:
 | --- | --- |
 | Codex continue last | `codex resume --last` |
 | Codex fork last | `codex fork --last` |
-| Codex review | `codex <model args> -a never -s workspace-write review --uncommitted`, `review --base <branch>`, or `review --commit <sha>` |
+| Codex review | `codex <model args> -a never -s danger-full-access review --uncommitted`, `review --base <branch>`, or `review --commit <sha>` |
 | Codex apply a task diff | `codex apply <TASK_ID>` only when a task ID is known. Route it to a Codex pane. Lantern does not apply it itself. |
 | Codex diagnostics | `codex doctor --summary` and `codex login status`; run interactive `codex login` only when the user asks to fix login. |
 | Claude | `claude --continue` or `claude --resume <id>`; add `--fork-session` only when asked to fork. |
@@ -242,7 +242,7 @@ words name that task.
        grok default: `-- <live model-route grok default argv>
        --permission-mode auto`
        codex default: `-- -m gpt-5.6-sol -c 'model_reasoning_effort="high"'
-       -c 'service_tier="priority"' -a never -s workspace-write`, after the live
+       -c 'service_tier="priority"' -a never -s danger-full-access`, after the live
        resolver confirms that route.
      A kind not listed here gets no extra args. Never pass
      bypassPermissions, --yolo, --force, --always-approve, or
