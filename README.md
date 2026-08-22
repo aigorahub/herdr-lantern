@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.2** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.3** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -120,8 +120,10 @@ Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok" uses `--kind cursor`
 with a live Cursor Grok model. "Grok Build" and "SuperGrok" use `--kind
 grok`. Lantern checks the selected model with `bin/model-preflight` before it
-asks you to confirm a seat. It stops on a failed check. It names one live
-substitute when the requested model is unavailable.
+asks you to confirm a seat. It stops on a failed check or a model it knows
+will not work, and names one live substitute. A usage line with no reset
+time is still valid. Missing quota info on a harness that has no usage
+command is not a failed check.
 
 "There is a PR on battle-paddle, get a Codex review" is a review route.
 Lantern resolves the repository and pull request with Git and `gh`. It checks

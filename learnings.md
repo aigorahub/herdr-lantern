@@ -93,3 +93,9 @@ Stop when the catalog has no one clear ID.
 **A quota check is not an argv check.** Claude usage can prove that a bucket
 has capacity. It cannot prove that a model alias or effort exists. Check both
 the usage result and the installed CLI help before a seat is available.
+
+**A usage line does not need a reset time.** Claude now prints
+`Current session: 0% used` with no reset. Treat the percent as the check.
+Fail only when a parsed bucket is exhausted, the model is absent, or the
+usage command itself failed. Do not require every bucket or a reset just
+to pass. Harnesses with no quota command stay catalog-only.

@@ -164,14 +164,18 @@ workspace, create a tab, or start an agent before this check passes.
 - Claude checks `claude /usage -p --output-format json` and parses the
   `.result` text. A session, all-models, or requested family bucket at 100%
   is unavailable. A result that says the user hit a limit is unavailable.
-  Claude model aliases and effort values must also appear in `claude --help`.
+  A usage line with no reset time is still a valid bucket. Report the reset
+  only when the text has one. Claude model aliases and effort values must
+  also appear in `claude --help`. Do not require every Claude alias, every
+  usage bucket, or a reset time just to pass.
 - Cursor checks the exact ID in `agent --list-models`. It does not scrape a
   dashboard or use account tokens because the CLI has no quota command.
 - Grok Build checks the exact ID in `grok models`. It does not scrape
   grok.com.
 - Codex checks the exact ID in `codex debug models`.
 - If a command is missing, times out, or returns unparseable data, stop and
-  report that the availability check failed. Do not seat on a guess.
+  report that the availability check failed. Do not seat on a guess. A
+  harness with no usage or quota command is not a failed check.
 - The route wrappers require a working Python 3 command. They use `python3`,
   `python`, or the Windows `py -3` launcher. If none works, stop and report
   that Python 3 is required for model routing.

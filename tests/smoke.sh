@@ -241,11 +241,23 @@ cat >"$model_dir/claude" <<'EOF'
 #!/bin/sh
 case "$*" in
 "/usage -p --output-format json")
-    if [ "${CLAUDE_USAGE_MODE-}" = global ]; then
+    case ${CLAUDE_USAGE_MODE-} in
+    global)
         printf '%s\n' '{"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}'
-    else
+        ;;
+    session-no-reset)
+        printf '%s\n' '{"result":"Current session: 0% used\nCurrent week (all models): 82% used · resets Aug 23 at 5am\nCurrent week (Fable): 100% used · resets Aug 23 at 5am"}'
+        ;;
+    session-only-no-reset)
+        printf '%s\n' '{"result":"Current session: 0% used"}'
+        ;;
+    session-exhausted-no-reset)
+        printf '%s\n' '{"result":"Current session: 100% used"}'
+        ;;
+    *)
         printf '%s\n' '{"result":"Current session: 4% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100% used - resets Aug 23 at 4:59am"}'
-    fi
+        ;;
+    esac
     ;;
 "--help")
     cat <<'HELP'
@@ -291,6 +303,18 @@ if "%1"=="--help" (
 if not "%1 %2 %3 %4"=="/usage -p --output-format json" exit /b 2
 if "%CLAUDE_USAGE_MODE%"=="global" (
   echo {"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}
+  exit /b 0
+)
+if "%CLAUDE_USAGE_MODE%"=="session-no-reset" (
+  echo {"result":"Current session: 0%% used\nCurrent week (all models): 82%% used - resets Aug 23 at 5am\nCurrent week (Fable): 100%% used - resets Aug 23 at 5am"}
+  exit /b 0
+)
+if "%CLAUDE_USAGE_MODE%"=="session-only-no-reset" (
+  echo {"result":"Current session: 0%% used"}
+  exit /b 0
+)
+if "%CLAUDE_USAGE_MODE%"=="session-exhausted-no-reset" (
+  echo {"result":"Current session: 100%% used"}
   exit /b 0
 )
 echo {"result":"Current session: 4%% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82%% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100%% used - resets Aug 23 at 4:59am"}
@@ -346,6 +370,39 @@ fi
 if run_model_preflight claude fable ultra >/dev/null 2>&1; then
     fail "Claude preflight accepted an unverified effort"
 fi
+CLAUDE_USAGE_MODE=session-no-reset
+export CLAUDE_USAGE_MODE
+opus_ok=$(run_model_preflight claude opus high) ||
+    fail "Claude preflight rejected Opus when session has no reset time"
+printf '%s\n' "$opus_ok" | grep -qF '"available":true' ||
+    fail "Claude preflight did not treat a session without reset as available"
+if fable_no_reset=$(run_model_preflight claude fable high); then
+    fail "Claude preflight accepted exhausted Fable without a session reset"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "exhausted Fable without session reset should return unavailable"
+printf '%s\n' "$fable_no_reset" | grep -qF '"reason":"Current week (Fable) is 100% used; resets Aug 23 at 5am"' ||
+    fail "Claude preflight dropped the Fable reset when session had none"
+printf '%s\n' "$fable_no_reset" | grep -qF '"substitute":{"kind":"claude","model":"opus","effort":"xhigh"' ||
+    fail "Claude preflight did not keep the Opus substitute"
+CLAUDE_USAGE_MODE=session-only-no-reset
+opus_session_only=$(run_model_preflight claude opus high) ||
+    fail "Claude preflight required an all-models bucket"
+printf '%s\n' "$opus_session_only" | grep -qF '"available":true' ||
+    fail "Claude preflight did not accept a session-only usage line"
+CLAUDE_USAGE_MODE=session-exhausted-no-reset
+if session_exhausted=$(run_model_preflight claude opus high); then
+    fail "Claude preflight accepted a 100% session with no reset time"
+else
+    preflight_status=$?
+fi
+[ "$preflight_status" -eq 3 ] || fail "100% session without reset should return unavailable"
+printf '%s\n' "$session_exhausted" | grep -qF '"reason":"Current session is 100% used"' ||
+    fail "Claude preflight required a reset time in the exhausted reason"
+printf '%s\n' "$session_exhausted" | grep -qF '"substitute":{"kind":"cursor","model":"gpt-5.6-sol-high-fast"' ||
+    fail "exhausted session did not keep the substitute list"
+unset CLAUDE_USAGE_MODE
 CLAUDE_USAGE_MODE=global
 export CLAUDE_USAGE_MODE
 if global_check=$(run_model_preflight claude fable high); then
@@ -429,6 +486,8 @@ grep -qF '"Grok Build review on XYZ", "have SuperGrok review that PR" | Use the 
 for preflight_file in prompt.md launch.sh README.md; do
     grep -qF 'model-preflight' "$root/$preflight_file" ||
         fail "$preflight_file does not require the availability preflight"
+    grep -qF 'usage line with no reset' "$root/$preflight_file" ||
+        fail "$preflight_file still requires a reset time on Claude usage"
 done
 grep -qF '"Grok" also' "$root/launch.sh" ||
     fail "launch.sh does not route bare Grok through Cursor"

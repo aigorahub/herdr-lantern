@@ -145,6 +145,13 @@ def cursor_sol_substitute() -> dict[str, object] | None:
     return {"kind": "cursor", "model": choice, "effort": "high", "fast": True, "argv": ["--model", choice]}
 
 
+def exhausted_reason(bucket: UsageBucket) -> str:
+    reason = f"{bucket.label} is {bucket.percent}% used"
+    if bucket.reset:
+        reason += f"; resets {bucket.reset}"
+    return reason
+
+
 def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
     try:
         payload = json.loads(run(["claude", "/usage", "-p", "--output-format", "json"]))
@@ -156,18 +163,15 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
     buckets = []
     limit = re.search(r"hit your\s+(.+?)\s+limit(?:[^\n]*?resets\s+([^\n]+))?", result, re.IGNORECASE)
     if limit:
-        reset = limit.group(2).strip() if limit.group(2) else "unknown"
+        reset = limit.group(2).strip() if limit.group(2) else ""
         buckets.append(UsageBucket(f"Limit: {limit.group(1).strip()}", 100, reset))
     pattern = re.compile(
-        r"^(Current session|Current week \([^)]+\)):\s*(\d+)% used\s*[·-]\s*resets\s+(.+)$",
+        r"^(Current session|Current week \([^)]+\)):\s*(\d+)% used(?:\s*[·•\-]\s*resets\s+(.+))?$",
         re.IGNORECASE | re.MULTILINE,
     )
     for match in pattern.finditer(result):
-        buckets.append(UsageBucket(match.group(1), int(match.group(2)), match.group(3).strip()))
-    labels = {bucket.label.lower() for bucket in buckets}
-    if "current session" not in labels or "current week (all models)" not in labels:
-        if not limit:
-            fail("availability check failed: Claude usage text has no session or all-models bucket")
+        reset = match.group(3).strip() if match.group(3) else ""
+        buckets.append(UsageBucket(match.group(1), int(match.group(2)), reset))
     return result, buckets
 
 
@@ -203,7 +207,7 @@ def claude_capabilities() -> tuple[set[str], set[str]]:
     models = {value.lower() for value in re.findall(r"'([a-zA-Z0-9.-]+)'", model_block.group(0))}
     effort_choices = re.search(r"\((low(?:\s*,\s*(?:medium|high|xhigh|max))+?)\)", effort_block.group(0))
     efforts = set(re.findall(r"low|medium|high|xhigh|max", effort_choices.group(1))) if effort_choices else set()
-    if not {"fable", "opus", "sonnet"} <= models or not efforts:
+    if not models or not efforts:
         fail("availability check failed: Claude returned unparseable model or effort choices")
     return models, efforts
 
@@ -261,15 +265,29 @@ def report_unavailable(kind: str, model: str, reason: str, substitute: dict[str,
 def check(kind: str, model: str, effort: str) -> int:
     if kind == "claude":
         models, efforts = claude_capabilities()
-        if model.lower() not in models:
-            fail(f"availability check failed: Claude model {model} is not verified by claude --help")
-        if effort and effort.lower() not in efforts:
-            fail(f"availability check failed: Claude effort {effort} is not verified by claude --help")
         _, buckets = parse_claude_usage()
+        if model.lower() not in models:
+            return report_unavailable(
+                kind,
+                model,
+                f"Claude model {model} is not verified by claude --help",
+                claude_substitute(model, buckets, models, efforts),
+            )
+        if effort and effort.lower() not in efforts:
+            return report_unavailable(
+                kind,
+                model,
+                f"Claude effort {effort} is not verified by claude --help",
+                claude_substitute(model, buckets, models, efforts),
+            )
         exhausted = exhausted_bucket(model, buckets)
         if exhausted:
-            reason = f"{exhausted.label} is {exhausted.percent}% used; resets {exhausted.reset}"
-            return report_unavailable(kind, model, reason, claude_substitute(model, buckets, models, efforts))
+            return report_unavailable(
+                kind,
+                model,
+                exhausted_reason(exhausted),
+                claude_substitute(model, buckets, models, efforts),
+            )
         return report_available(kind, model, effort)
     if kind == "cursor":
         models = cursor_models()
