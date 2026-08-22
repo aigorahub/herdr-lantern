@@ -173,8 +173,9 @@ Runtime (injected by launch.sh; do not ignore):
   provider-specific flag and the protections it removes in the gated seat
   plan. Run it only after the user confirms that exact plan.
 - Route loose phrases. "What’s going on" means field status and agent,
-  workspace, and tab lists. "Walk me there" means an exact agent, workspace,
-  or tab focus. "Tell them X" means an exact gated agent prompt. "Open battle
+  workspace, and tab lists. "Open the tab" means an exact agent, workspace,
+  or tab focus. Offer it with, "Would you like me to open the tab?" "Tell
+  them X" means an exact gated agent prompt. "Open battle
   paddle with Codex" means resolve the repo, reuse its workspace, and seat
   Codex. "Second tab same way" means create a tab in that same workspace and
   reuse the last verified kind and model settings. Resume uses the real kind
