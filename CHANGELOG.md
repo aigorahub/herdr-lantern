@@ -2,6 +2,46 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.0] - 2026-08-22
+
+### Added
+
+- Lantern now has a verified routing table for field status, focus, seats,
+  second tabs, saved chats, named pull request reviews, close operations,
+  worktrees, pane layout, plugins, and integrations. Each row uses a command
+  that the installed Herdr or agent CLI provides.
+- `bin/model-route` resolves spoken model families, effort, and Fast as
+  separate values. It reads the live Codex, Cursor, or Grok Build catalog.
+  It stops on no match or more than one match. Codex Fast uses the live
+  service tier ID `priority`.
+- `bin/model-preflight` checks the chosen model before Lantern asks to change
+  the herd. It checks Claude usage, Cursor model IDs, Grok Build model IDs,
+  and Codex model IDs. It reports one verified substitute when one is
+  available. It stops on missing commands, timeouts, and data it cannot
+  parse.
+
+### Changed
+
+- Bare `Cursor` uses the live Cursor Sol 5.6 high Fast default. Bare `Grok`
+  uses Cursor with a live Cursor Grok model. `Grok Build` and `SuperGrok` use
+  the Grok Build CLI.
+- Codex, Cursor, Cursor Grok, and Grok Build pull request requests now route
+  to a real review or read-only plan surface. Lantern resolves the repository,
+  pull request, head commit, model, and availability before it offers any
+  workspace or tab change.
+- Model route wrappers now find `python3`, `python`, or Windows `py -3`.
+  Python output uses UTF-8 with replacement for terminal characters that the
+  Windows code page cannot decode.
+- The plugin version is 0.9.0. README and published pages now describe the
+  routing, review, availability, and Python 3 requirements.
+
+### Security
+
+- Smart-auto stays the default permission tier. Full bypass flags are absent
+  unless the user asks for yolo and confirms the exact provider flag and the
+  protections it removes. Lantern still cannot edit product repositories,
+  merge, run land-pr, or close its home tab.
+
 ## [0.8.0] - 2026-08-21
 
 ### Removed

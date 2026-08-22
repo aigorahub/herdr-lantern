@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr hsh tests/smoke.sh; do
+for f in launch.sh open.sh lib.sh bin/herdr bin/model-route bin/model-preflight hsh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -199,7 +199,7 @@ cat >"$model_dir/codex" <<'EOF'
 #!/bin/sh
 [ "$1 $2" = "debug models" ] || exit 2
 cat <<'JSON'
-{"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]}]}
+{"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]},{"slug":"gpt-5.6-luna","display_name":"GPT-5.6-Luna","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":["fast"]}]}
 JSON
 EOF
 cat >"$model_dir/agent" <<'EOF'
@@ -228,10 +228,18 @@ cat >"$model_dir/claude" <<'EOF'
 #!/bin/sh
 case "$*" in
 "/usage -p --output-format json")
-    printf '%s\n' '{"result":"Current session: 4% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100% used - resets Aug 23 at 4:59am"}'
+    if [ "${CLAUDE_USAGE_MODE-}" = global ]; then
+        printf '%s\n' '{"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}'
+    else
+        printf '%s\n' '{"result":"Current session: 4% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100% used - resets Aug 23 at 4:59am"}'
+    fi
     ;;
 "--help")
-    printf '%s\n' '--model fable opus sonnet --effort low medium high xhigh max'
+    cat <<'HELP'
+  --effort <level>  Effort level for the current session (low, medium, high, xhigh, max)
+  --model <model>   Use alias 'fable', 'opus', or 'sonnet', or full name 'claude-fable-5'.
+  --permission-mode <mode>
+HELP
     ;;
 *) exit 2 ;;
 esac
@@ -239,7 +247,7 @@ EOF
 cat >"$model_dir/codex.cmd" <<'EOF'
 @echo off
 if not "%1 %2"=="debug models" exit /b 2
-echo {"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]}]}
+echo {"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]},{"slug":"gpt-5.6-luna","display_name":"GPT-5.6-Luna","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":["fast"]}]}
 EOF
 cat >"$model_dir/agent.cmd" <<'EOF'
 @echo off
@@ -262,32 +270,30 @@ EOF
 cat >"$model_dir/claude.cmd" <<'EOF'
 @echo off
 if "%1"=="--help" (
-  echo --model fable opus sonnet --effort low medium high xhigh max
+  echo   --effort ^<level^>  Effort level for the current session ^(low, medium, high, xhigh, max^)
+  echo   --model ^<model^>   Use alias 'fable', 'opus', or 'sonnet', or full name 'claude-fable-5'.
+  echo   --permission-mode ^<mode^>
   exit /b 0
 )
 if not "%1 %2 %3 %4"=="/usage -p --output-format json" exit /b 2
+if "%CLAUDE_USAGE_MODE%"=="global" (
+  echo {"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}
+  exit /b 0
+)
 echo {"result":"Current session: 4%% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82%% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100%% used - resets Aug 23 at 4:59am"}
 EOF
 chmod +x "$model_dir/codex" "$model_dir/agent" "$model_dir/grok" "$model_dir/claude"
-model_python=$(helper_detect_python) || fail "model route needs Python 3"
+helper_detect_python >/dev/null || fail "model route needs Python 3"
 model_path=$model_dir:$PATH
 run_model_route() {
-    if [ "$model_python" = "py -3" ]; then
-        PATH="$model_path" py -3 "$root/bin/model-route" "$@"
-    else
-        PATH="$model_path" "$model_python" "$root/bin/model-route" "$@"
-    fi
+    PATH="$model_path" "$root/bin/model-route" "$@"
 }
 run_model_preflight() {
-    if [ "$model_python" = "py -3" ]; then
-        PATH="$model_path" py -3 "$root/bin/model-preflight" "$@"
-    else
-        PATH="$model_path" "$model_python" "$root/bin/model-preflight" "$@"
-    fi
+    PATH="$model_path" "$root/bin/model-preflight" "$@"
 }
 codex_route=$(run_model_route codex \
     "5.6 sol high fast") || fail "Codex spoken model route"
-printf '%s\n' "$codex_route" | grep -qF '"argv":["-m","gpt-5.6-sol","-c","model_reasoning_effort=\"high\"","-c","service_tier=\"fast\""]' ||
+printf '%s\n' "$codex_route" | grep -qF '"argv":["-m","gpt-5.6-sol","-c","model_reasoning_effort=\"high\"","-c","service_tier=\"priority\""]' ||
     fail "5.6 sol high fast did not become separate Codex argv"
 cursor_route=$(run_model_route cursor \
     "5.6 sol high fast") || fail "Cursor spoken model route"
@@ -321,6 +327,25 @@ printf '%s\n' "$fable_check" | grep -qF '"reason":"Current week (Fable) is 100% 
     fail "Claude preflight did not report the exhausted bucket and reset"
 printf '%s\n' "$fable_check" | grep -qF '"substitute":{"kind":"claude","model":"opus","effort":"xhigh"' ||
     fail "Claude preflight did not propose Opus xhigh"
+if run_model_preflight claude fabel high >/dev/null 2>&1; then
+    fail "Claude preflight accepted an unverified model"
+fi
+if run_model_preflight claude fable ultra >/dev/null 2>&1; then
+    fail "Claude preflight accepted an unverified effort"
+fi
+CLAUDE_USAGE_MODE=global
+export CLAUDE_USAGE_MODE
+if global_check=$(run_model_preflight claude fable high); then
+    fail "Claude preflight accepted a global limit"
+else
+    preflight_status=$?
+fi
+unset CLAUDE_USAGE_MODE
+[ "$preflight_status" -eq 3 ] || fail "global Claude limit should return unavailable"
+printf '%s\n' "$global_check" | grep -qF '"reason":"Limit: weekly is 100% used; resets Aug 23 at 4:59am"' ||
+    fail "Claude preflight did not report the generic limit and reset"
+printf '%s\n' "$global_check" | grep -qF '"substitute":{"kind":"cursor","model":"gpt-5.6-sol-high-fast"' ||
+    fail "global Claude limit proposed another Claude model"
 run_model_preflight cursor gpt-5.6-sol-high-fast high >/dev/null ||
     fail "Cursor preflight rejected a listed model"
 if cursor_miss=$(run_model_preflight cursor cursor-grok-4.7-high-fast high); then
@@ -345,6 +370,10 @@ if run_model_route codex \
     "5.6 terra high fast" >/dev/null 2>&1; then
     fail "model route accepted fast for a model without fast service"
 fi
+if run_model_route codex \
+    "5.6 luna high fast" >/dev/null 2>&1; then
+    fail "model route accepted Fast without one live service tier ID"
+fi
 if run_model_route cursor \
     "retired mystery max" >/dev/null 2>&1; then
     fail "model route invented a model for an unknown phrase"
@@ -357,7 +386,7 @@ for route_file in prompt.md launch.sh; do
         fail "$route_file does not name the Codex review route"
     grep -qF '5.6 sol high fast' "$root/$route_file" ||
         fail "$route_file does not name the split Sol default"
-    grep -qE 'service_tier=\\?"fast\\?"' "$root/$route_file" ||
+    grep -qE 'service_tier=\\?"priority\\?"' "$root/$route_file" ||
         fail "$route_file does not pass the Codex fast setting"
     grep -qF 'review PR' "$root/$route_file" ||
         fail "$route_file does not name the pull request review route"
@@ -394,6 +423,10 @@ grep -qF '"Grok Build" and' "$root/launch.sh" ||
     fail "launch.sh does not route Grok Build to the Grok CLI"
 grep -qF 'Never merge' "$root/prompt.md" ||
     fail "prompt.md does not forbid merge from Lantern"
+grep -qF 'Finish this step before any' "$root/prompt.md" ||
+    fail "named PR route does not preflight before herd mutation"
+grep -qF 'confirms the exact flag and the protections it removes' "$root/README.md" ||
+    fail "README does not describe the explicit yolo exception"
 # hsh carried a HERDR_REAL branch to dodge the wrapper, and launch.sh unsets
 # HERDR_REAL before it execs the agent, so inside the pane that branch never
 # ran. Nothing should put a bypass back: opening a second lantern is a

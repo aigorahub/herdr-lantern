@@ -31,10 +31,10 @@ changes behind the existing confirmation gate.
 
 **Tasks:**
 
-- [ ] Verify all routes against the installed Herdr and agent CLI help.
-- [ ] Review the existing branch with Fugu and a separate host review.
-- [ ] Fix all blocking review findings and add regression tests.
-- [ ] Update all operator documentation, release notes, and version surfaces.
+- [x] Verify all routes against the installed Herdr and agent CLI help.
+- [x] Review the existing branch with Fugu and a separate host review.
+- [x] Fix all blocking review findings and add regression tests.
+- [x] Update all operator documentation, release notes, and version surfaces.
 
 **Acceptance criteria:**
 
@@ -52,7 +52,7 @@ changes behind the existing confirmation gate.
 
 **Caution:** Live catalogs can change. Every route must fail closed instead of creating a model name.
 
-**Affected surfaces:** `prompt.md`, `launch.sh`, `lib.sh`, `bin/model-route`, `bin/model-preflight`, `tests/smoke.sh`, `README.md`, `CHANGELOG.md`, and `herdr-plugin.toml`.
+**Affected surfaces:** `prompt.md`, `launch.sh`, `lib.sh`, `bin/model-route*`, `bin/model-preflight*`, `tests/smoke.sh`, `README.md`, `CHANGELOG.md`, `docs/index.html`, `howto.html`, and `herdr-plugin.toml`.
 
 **Constitution impacts:** The helper gate and the ban on product repository edits must stay unchanged.
 

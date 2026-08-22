@@ -242,7 +242,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.8.0 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.9.0 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -256,7 +256,7 @@
 
       <h2>Install</h2>
       <ol class="steps">
-        <li><div>Need Herdr 0.7.5+ on macOS, Linux, or Windows, already running. Windows needs Git for Windows as well.</div></li>
+        <li><div>Need Herdr 0.7.5+ and Python 3 on macOS, Linux, or Windows, already running. Windows also needs Git for Windows. Lantern accepts <code>python3</code>, <code>python</code>, or <code>py -3</code>.</div></li>
         <li>
           <div>
             Install from GitHub:
@@ -387,13 +387,15 @@ No Elves install required. If there are no
         <li>“What are they working toward?”<span>Titles, Claude <code>/goal</code> / recap lines, who is waiting on a merge. Status alone is not progress.</span></li>
         <li>“Jump me to the love-spark agent.”<span>Reuse the workspace. Unnamed agents use a pane id, e.g. <code>w1X:p1</code>.</span></li>
         <li>“Open the image maker repo with claude.”<span>Reuse if they are already there. Slugs: <code>image-maker</code>, not “Image Maker”.</span></li>
+        <li>“There is a PR on battle-paddle. Get a Codex review.”<span>Resolve the repository and PR first. Check the model before any workspace or tab change. Lantern does not edit the repository.</span></li>
+        <li>“Open battle paddle with Grok.”<span>Bare Grok means Cursor with a live Cursor Grok model. Say Grok Build to use the Grok CLI.</span></li>
         <li>“Make a worktree on herdr for branch helper-tests.”<span><code>herdr worktree create</code>, not a second workspace on the main checkout.</span></li>
         <li>“How’s the night shift?”<span>If Elves session files are around, it reads that floor. It does not cobble or land.</span></li>
       </ul>
 
       <h2>Pick your helper CLI</h2>
       <p>The lantern chat is one CLI. That is yours. It is not a shared team model. <code>HELPER_SPAWN_KIND</code> is separate: the default <code>--kind</code> when Lantern starts an agent for your work (usually <code>claude</code>).</p>
-      <p class="note">Agents Lantern seats for you start in the smart-auto permission tier — each kind gets its own flags after <code>--</code> on <code>agent start</code>, and the flags that skip approvals altogether are never passed. After a confirmed seat it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and says in one line what is running where.</p>
+      <p class="note">Agents Lantern seats start in the smart-auto permission tier. Each kind gets its own flags after <code>--</code> on <code>agent start</code>. A full bypass is absent by default. Lantern can pass one only after a user asks for yolo and confirms the exact flag and lost protections. Before confirmation, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
       <table>
         <thead>
           <tr><th>Helper</th><th>Install</th><th>Your helper.conf</th></tr>

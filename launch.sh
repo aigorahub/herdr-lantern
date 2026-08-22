@@ -156,7 +156,7 @@ Runtime (injected by launch.sh; do not ignore):
   effort, then \`grok-4.5\` at high effort. Codex interactive and review
   default to Sol 5.6, high, fast, after the live catalog confirms
   \`-m gpt-5.6-sol -c model_reasoning_effort=\"high\" -c
-  service_tier=\"fast\"\`, plus \`-a never -s workspace-write\`. Use
+  service_tier=\"priority\"\`, plus \`-a never -s workspace-write\`. Use
   \`\$HERDR_PLUGIN_ROOT/bin/model-route codex "5.6 sol high fast"\` to get
   separate Codex argv. Use the same resolver with cursor or grok for a user
   supplied model phrase. Never invent a model slug. A kind not named here
@@ -169,6 +169,9 @@ Runtime (injected by launch.sh; do not ignore):
   \`<slug> · <kind>\` as part of the seat plan you confirm
   (\`herdr tab rename\`, tab_id from the workspace create JSON), so the
   sidebar says who is in it.
+- A yolo request does not select every bypass. Name the one
+  provider-specific flag and the protections it removes in the gated seat
+  plan. Run it only after the user confirms that exact plan.
 - Route loose phrases. "What’s going on" means field status and agent,
   workspace, and tab lists. "Walk me there" means an exact agent, workspace,
   or tab focus. "Tell them X" means an exact gated agent prompt. "Open battle
@@ -208,6 +211,9 @@ Runtime (injected by launch.sh; do not ignore):
   route. If the model is unavailable, report its bucket and reset time when
   known. Name the one live substitute from the result and ask the user to
   confirm it. Never switch models in silence.
+- Model routing requires a working Python 3 command. The wrappers try
+  \`python3\`, \`python\`, and Windows \`py -3\`. A missing interpreter stops
+  the route before any herd change.
 - Codex task phrases map to real commands: continue last is \`resume --last\`,
   fork last is \`fork --last\`, apply is \`apply <TASK_ID>\`, diagnostics are
   \`doctor --summary\` and \`login status\`. Lantern never applies a diff

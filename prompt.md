@@ -49,35 +49,42 @@ apply a diff in a product repository.
 For a request such as "have Codex review battle-paddle #166":
 
 1. Resolve the repository path. Get its GitHub name with `git -C <repo>
-   remote get-url origin`. Reuse an open workspace for that cwd. If none is
-   open, confirm and create one with `workspace create --no-focus`.
+   remote get-url origin`. Read `herdr workspace list` and record any open
+   workspace for that cwd. Do not create one yet.
 2. If the user supplied a number, run `gh -R <owner/repo> pr view <number>
    --json number,title,baseRefName,headRefName,headRefOid,url,state`. Otherwise
    run `gh -R <owner/repo> pr list --state open --json
    number,title,baseRefName,headRefName,headRefOid,url`. Use one obvious open
    pull request. Ask when more than one can match.
 3. Compare the selected `headRefOid` with `git -C <repo> rev-parse HEAD`.
-   Never check out the pull request in the product repository. If the current
-   worktree is not the pull request head, offer a separate gated Herdr
-   worktree based on that exact OID.
-4. Reuse an agent of the requested kind only when it sits on the matching repo
+   Never check out the pull request in the product repository.
+4. Resolve the requested kind and model. Use the named model phrase when one
+   was supplied. Otherwise use the live default. Run `model-preflight` now.
+   Stop on any failed or unavailable result. Finish this step before any
+   workspace, worktree, tab, prompt, or agent mutation.
+5. If the current worktree is not the pull request head, offer a separate
+   gated Herdr worktree based on that exact OID.
+6. Reuse an agent of the requested kind only when it sits on the matching repo
    and head. Use a gated `herdr agent prompt` to ask it to review the pull
-   request against the base and return findings only. If no matching agent
-   exists, create a tab in that workspace and use one start route below.
-5. Codex uses `herdr agent start <slug> --kind codex --pane <pane_id> --
+   request against the base and return findings only. If no workspace exists,
+   include `workspace create --no-focus` in the gated seat plan. If no
+   matching agent exists, create a tab in that workspace and use one start
+   route below.
+7. Codex uses `herdr agent start <slug> --kind codex --pane <pane_id> --
    <model args> -a never -s workspace-write review --base <base> "Review PR
    #<number>: <title>. Return findings only. Do not edit."`.
-6. Cursor has no review subcommand on this machine. It has read-only plan
+8. Cursor has no review subcommand on this machine. It has read-only plan
    mode. Use `herdr agent start <slug> --kind cursor --pane <pane_id> --
    <model args> --auto-review --trust --mode plan "Review PR #<number>:
    <title>. Inspect gh pr view and gh pr diff. Return findings only."`.
    A bare Grok review uses this route with the live Cursor Grok model.
-7. Grok Build has no review subcommand on this machine. It has the `-p`
+9. Grok Build has no review subcommand on this machine. It has the `-p`
    single-turn headless flag. Use `herdr agent start <slug> --kind grok
    --pane <pane_id> -- <model args> --permission-mode auto -p "Review PR
    #<number>: <title>. Inspect gh pr view and gh pr diff. Return findings only.
    Do not edit."`.
-8. Confirm the gated tab and agent commands. Do not ask for a model when none
+10. Confirm the gated workspace, worktree, tab, prompt, and agent commands.
+   Do not ask for a model when none
    was supplied. Use the live default for the requested kind. Report the
    chosen kind, model, effort, and fast state.
 
@@ -94,9 +101,9 @@ These choices were verified on this machine on 2026-08-22:
 
 | Kind | Spoken choice | Real argv |
 | --- | --- | --- |
-| Codex | `5.6 sol high fast` | `-m gpt-5.6-sol -c 'model_reasoning_effort="high"' -c 'service_tier="fast"'` |
-| Codex | `5.6 terra <effort> [fast]` | `-m gpt-5.6-terra`, one verified `model_reasoning_effort`, and optional verified `service_tier="fast"` |
-| Codex | `5.6 luna <effort> [fast]` | `-m gpt-5.6-luna`, one verified `model_reasoning_effort`, and optional verified `service_tier="fast"` |
+| Codex | `5.6 sol high fast` | `-m gpt-5.6-sol -c 'model_reasoning_effort="high"' -c 'service_tier="priority"'` |
+| Codex | `5.6 terra <effort> [fast]` | `-m gpt-5.6-terra`, one verified `model_reasoning_effort`, and the live Fast service tier ID when requested |
+| Codex | `5.6 luna <effort> [fast]` | `-m gpt-5.6-luna`, one verified `model_reasoning_effort`, and the live Fast service tier ID when requested |
 | Cursor | `5.6 sol high fast` | `--model gpt-5.6-sol-high-fast` |
 | Cursor | `5.6 terra xhigh fast` | `--model gpt-5.6-terra-xhigh-fast` |
 | Cursor | `5.6 luna max fast` | `--model gpt-5.6-luna-max-fast` |
@@ -138,7 +145,9 @@ verified `--add-dir <exact-path>` after confirmation. If that is not enough,
 report the rejected operation. Do not escalate to full sandbox bypass.
 Never pass `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--force`,
 `--always-approve`, or `bypassPermissions` unless the user explicitly asks
-for yolo in that request.
+for yolo in that request. A yolo request does not select every bypass. Name
+the one provider-specific flag and the protections it removes in the gated
+seat plan. Run it only after the user confirms that exact plan.
 
 "Cursor" means `--kind cursor` with the live Cursor Sol default. "Grok" also
 means `--kind cursor`, but with a live Cursor Grok model. "Grok Build" and
@@ -155,6 +164,7 @@ workspace, create a tab, or start an agent before this check passes.
 - Claude checks `claude /usage -p --output-format json` and parses the
   `.result` text. A session, all-models, or requested family bucket at 100%
   is unavailable. A result that says the user hit a limit is unavailable.
+  Claude model aliases and effort values must also appear in `claude --help`.
 - Cursor checks the exact ID in `agent --list-models`. It does not scrape a
   dashboard or use account tokens because the CLI has no quota command.
 - Grok Build checks the exact ID in `grok models`. It does not scrape
@@ -162,6 +172,9 @@ workspace, create a tab, or start an agent before this check passes.
 - Codex checks the exact ID in `codex debug models`.
 - If a command is missing, times out, or returns unparseable data, stop and
   report that the availability check failed. Do not seat on a guess.
+- The route wrappers require a working Python 3 command. They use `python3`,
+  `python`, or the Windows `py -3` launcher. If none works, stop and report
+  that Python 3 is required for model routing.
 - If the model is unavailable, do not seat it. Report the bucket and reset
   time when known. Report the one live substitute returned by the preflight.
   Ask for confirmation of that substitute. Never switch without confirmation.
@@ -229,7 +242,7 @@ words name that task.
        grok default: `-- <live model-route grok default argv>
        --permission-mode auto`
        codex default: `-- -m gpt-5.6-sol -c 'model_reasoning_effort="high"'
-       -c 'service_tier="fast"' -a never -s workspace-write`, after the live
+       -c 'service_tier="priority"' -a never -s workspace-write`, after the live
        resolver confirms that route.
      A kind not listed here gets no extra args. Never pass
      bypassPermissions, --yolo, --force, --always-approve, or

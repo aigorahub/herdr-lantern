@@ -54,7 +54,7 @@
     "default_for_session": true
   },
   "continuation_guard": {
-    "next_required_action": "Run the Fugu review and the independent host review.",
+    "next_required_action": "Commit and push the reviewed revision, then wait for all pull request checks.",
     "stop_allowed": false
   },
   "execution_log_path": ".elves-execution-log.md",
@@ -83,7 +83,7 @@
   "risk": "standard",
   "run_id": "lantern-routing-preflight-2026-08-22",
   "start_head": "b7fb32605a5a0d3961038913ed619093f6f27742",
-  "status": "reviewing",
+  "status": "validating",
   "survival_guide_path": ".elves-survival-guide.md",
   "trust_mode": "trusted"
 }
