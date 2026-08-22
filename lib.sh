@@ -549,12 +549,22 @@ helper_codex_startup_key() {
     return 1
 }
 
+helper_codex_is_ready() {
+    # True when agent get JSON ($1) says the seat can take prompts.
+    case $1 in
+    *"\"interactive_ready\":true"*) return 0 ;;
+    esac
+    return 1
+}
+
 helper_relay_agent_start() {
     # Codex first-run survival. Herdr returns agent_not_ready as soon as
     # detection reports blocked during startup, so a directory-trust or
-    # new-chat confirm kills the seat. This reads that same named pane
-    # and sends only the key that gate wants. Any other failure, another
-    # kind, or another agent's pane is left alone.
+    # new-chat confirm kills the seat. Trust and a new-chat confirm can
+    # appear in sequence, and a [y/n] prompt may still need Enter after
+    # y. This stays on that same named pane and sends only those keys.
+    # Any other failure, another kind, or another agent's pane is left
+    # alone.
     _helper_real=$1
     shift
     _helper_name=$3
@@ -580,20 +590,44 @@ helper_relay_agent_start() {
         return $_helper_status
     _helper_got_pane=$(printf '%s' "$_helper_got" | helper_json_value pane_id)
     [ "$_helper_got_pane" = "$_helper_pane" ] || return $_helper_status
-    _helper_before=$("$_helper_real" agent read "$_helper_name" --lines 60 2>/dev/null) ||
-        _helper_before=
-    _helper_key=$(helper_codex_startup_key "$_helper_before") ||
-        return $_helper_status
-    "$_helper_real" agent send-keys "$_helper_name" "$_helper_key" || return $?
+    _helper_sent=0
+    _helper_miss=0
+    _helper_prev=
+    while [ "$_helper_sent" -lt 3 ]; do
+        _helper_before=$("$_helper_real" agent read "$_helper_name" --lines 60 2>/dev/null) ||
+            _helper_before=
+        _helper_key=$(helper_codex_startup_key "$_helper_before") || {
+            if [ "$_helper_sent" -gt 0 ]; then
+                break
+            fi
+            _helper_miss=$((_helper_miss + 1))
+            [ "$_helper_miss" -ge 2 ] && return $_helper_status
+            # Herdr already called it blocked; the dialog may still be
+            # painting. --until idle times out while it stays blocked.
+            "$_helper_real" agent wait "$_helper_name" --until idle --timeout 2000 \
+                >/dev/null 2>&1 || true
+            continue
+        }
+        if [ "$_helper_key" = y ] && [ "$_helper_prev" = y ]; then
+            _helper_key=Enter
+        fi
+        "$_helper_real" agent send-keys "$_helper_name" "$_helper_key" || return $?
+        _helper_sent=$((_helper_sent + 1))
+        _helper_prev=$_helper_key
+        if "$_helper_real" agent wait "$_helper_name" --until idle --timeout 5000; then
+            _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+                _helper_got=
+            helper_codex_is_ready "$_helper_got" && return 0
+        fi
+    done
+    [ "$_helper_sent" -gt 0 ] || return $_helper_status
     "$_helper_real" agent wait "$_helper_name" --until idle --timeout 120000 ||
         return $?
     _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) || {
         printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
         return 1
     }
-    case $_helper_got in
-    *"\"interactive_ready\":true"*) return 0 ;;
-    esac
+    helper_codex_is_ready "$_helper_got" && return 0
     printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
     return 1
 }

@@ -1095,17 +1095,38 @@ case "$1 $2" in
     exit 0
     ;;
 "agent read")
+    n=0
+    [ -f "${FAKE_READ_N:-}" ] && n=$(cat "$FAKE_READ_N")
+    n=$((n + 1))
+    [ -n "${FAKE_READ_N:-}" ] && printf '%s\n' "$n" >"$FAKE_READ_N"
+    if [ "$n" -eq 1 ] && [ -n "${FAKE_PANE_DELAY:-}" ] && [ -f "$FAKE_PANE_DELAY" ]; then
+        cat "$FAKE_PANE_DELAY"
+        exit 0
+    fi
     cat "$FAKE_PANE" 2>/dev/null
     exit 0
     ;;
 "agent send-keys")
     printf 'agent send-keys %s %s\n' "$3" "$4"
+    if [ -n "${FAKE_PANE_NEXT:-}" ] && [ -f "$FAKE_PANE_NEXT" ]; then
+        cat "$FAKE_PANE_NEXT" >"$FAKE_PANE"
+        rm -f "$FAKE_PANE_NEXT"
+        exit 0
+    fi
+    if [ -n "${FAKE_HOLD_FILE:-}" ] && [ -f "$FAKE_HOLD_FILE" ]; then
+        rm -f "$FAKE_HOLD_FILE"
+        exit 0
+    fi
     [ -n "${FAKE_START_DEAF:-}" ] || : >"${FAKE_READY_FILE:-/dev/null}"
     exit 0
     ;;
 "agent wait")
     printf '%s\n' "$*"
-    exit 0
+    case "$*" in
+    *"--timeout 120000"*) exit 0 ;;
+    esac
+    [ -f "${FAKE_READY_FILE:-}" ] && exit 0
+    exit 1
     ;;
 esac
 printf '%s\n' "$*"
@@ -1115,13 +1136,17 @@ chmod +x "$fake_start/herdr"
 export HERDR_REAL="$fake_start/herdr"
 export HERDR_HELPER_OK=1
 export FAKE_PANE="$fake_start/pane.txt"
+export FAKE_PANE_NEXT="$fake_start/pane.next"
+export FAKE_PANE_DELAY="$fake_start/pane.delay"
+export FAKE_READ_N="$fake_start/read.n"
+export FAKE_HOLD_FILE="$fake_start/hold"
 export FAKE_READY_FILE="$fake_start/ready"
 export FAKE_AGENT_PANE=w1:p1
 export FAKE_START_ERR=agent_not_ready
 unset FAKE_START_OK
 unset FAKE_START_DEAF
 : >"$FAKE_PANE"
-rm -f "$FAKE_READY_FILE"
+rm -f "$FAKE_READY_FILE" "$FAKE_PANE_NEXT" "$FAKE_PANE_DELAY" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
 
 printf '%s\n' '> You are in /tmp/demo' \
     'Do you trust the contents of this directory?' \
@@ -1146,6 +1171,59 @@ out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev
     fail "Codex yes (y) confirm should recover after y"
 printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
     fail "Codex yes (y) confirm did not send y"
+
+# Trust then a new-chat confirm: one key is not enough.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "trust then new-chat should recover after both keys"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "sequential gates did not send Enter for trust"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
+    fail "sequential gates did not send y for new-chat"
+
+# Trust, then a [y/n] that still needs Enter.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
+: >"$FAKE_HOLD_FILE"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "trust then stuck [y/n] should recover after Enter"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "trust then stuck [y/n] did not send Enter"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
+    fail "trust then stuck [y/n] did not send y"
+# Enter, y, Enter — the last Enter is the one that submits [y/n].
+[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -ge 2 ] ||
+    fail "trust then stuck [y/n] should send Enter twice"
+
+# A [y/n] that does not submit on y still needs Enter.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
+: >"$FAKE_HOLD_FILE"
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "a [y/n] that stayed up should recover after Enter"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
+    fail "stuck [y/n] did not send y first"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "stuck [y/n] did not send Enter after y"
+
+# The dialog may still be painting when Herdr first reports blocked.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
+printf '%s\n' 'codex is starting...' >"$FAKE_PANE_DELAY"
+printf '%s\n' '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue' >"$FAKE_PANE"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
+    fail "a delayed trust dialog should still recover"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "a delayed trust dialog did not send Enter"
+rm -f "$FAKE_PANE_DELAY"
 
 # A successful start must not send keys.
 export FAKE_START_OK=1
@@ -1233,6 +1311,10 @@ grep -q 'did not become ready' "$err" ||
 unset FAKE_START_DEAF
 
 unset FAKE_PANE
+unset FAKE_PANE_NEXT
+unset FAKE_PANE_DELAY
+unset FAKE_READ_N
+unset FAKE_HOLD_FILE
 unset FAKE_READY_FILE
 unset FAKE_AGENT_PANE
 unset FAKE_START_ERR

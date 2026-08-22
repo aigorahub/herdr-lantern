@@ -235,7 +235,8 @@ words name that task.
      For Codex, `agent start` through the wrapper dismisses the first-run
      directory trust dialog with Enter, or a new-chat `[y/n]` / `yes (y)`
      confirm with y, only when Herdr returns `agent_not_ready` / blocked
-     during startup on that same named pane. It then waits until idle and
+     during startup on that same named pane. If both appear, it dismisses
+     them in order. It then waits until idle and
      `interactive_ready`. It does not send keys into any other failure,
      another agent's pane, or later permission prompts. Do not send y or
      Enter yourself for those startup gates.
