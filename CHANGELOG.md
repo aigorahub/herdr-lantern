@@ -2,6 +2,15 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.1] - 2026-08-22
+
+### Changed
+
+- Lantern now asks, "Would you like me to open the tab?" when it offers to
+  focus an agent, workspace, or tab. It still accepts the old phrase as an
+  input alias.
+- The plugin version is 0.9.1.
+
 ## [0.9.0] - 2026-08-22
 
 ### Added

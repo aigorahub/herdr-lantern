@@ -172,6 +172,16 @@ for gated_verb in prompt send-keys start focus close remove; do
         fail "the launch.sh appendix does not name $gated_verb as gated"
 done
 
+for route_file in prompt.md launch.sh; do
+    grep -qF 'Would you like me to open the tab?' "$root/$route_file" ||
+        fail "$route_file does not use the open-tab confirmation"
+    if grep -qiF 'Would you like me to walk you there?' "$root/$route_file"; then
+        fail "$route_file still uses the old walk confirmation"
+    fi
+done
+grep -qF '"walk me there"' "$root/prompt.md" ||
+    fail "prompt.md no longer accepts the old input alias"
+
 # Seated agents start in the smart-auto tier. The per-kind flags have to
 # appear everywhere the lantern is told how to start an agent — the prompt
 # and the pane appendix — and the flags that would hand a seated agent the
