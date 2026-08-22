@@ -402,10 +402,23 @@ helper_is_inspect() {
     "workspace list" | "workspace get")
         return 0
         ;;
+    "tab list" | "tab get")
+        return 0
+        ;;
+    "pane list" | "pane current" | "pane get" | "pane layout" | \
+        "pane process-info" | "pane neighbor" | "pane edges" | "pane read")
+        return 0
+        ;;
     "worktree list")
         return 0
         ;;
+    "session list")
+        return 0
+        ;;
     "plugin list" | "plugin log" | "plugin logs" | "plugin config-dir")
+        return 0
+        ;;
+    "integration status")
         return 0
         ;;
     esac

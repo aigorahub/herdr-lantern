@@ -28,7 +28,8 @@ argv_dir=
 open_dir=
 elves_tmp=
 update_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"' EXIT
+model_dir=
+trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"; [ -n "$model_dir" ] && rm -rf "$model_dir"' EXIT
 
 printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
 HELPER_AGENT=""
@@ -189,6 +190,119 @@ for seat_file in prompt.md launch.sh; do
             fail "$seat_file does not forbid $reckless for seated agents"
     done
 done
+
+# Spoken model choices are separate family, effort, and fast values. The
+# resolver must read each installed CLI catalog. It must not make one guessed
+# slug from the whole phrase.
+model_dir=$(mktemp -d)
+cat >"$model_dir/codex" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "debug models" ] || exit 2
+cat <<'JSON'
+{"models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}],"service_tiers":[{"id":"priority","name":"Fast"}],"additional_speed_tiers":["fast"]},{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list","supported_reasoning_levels":[{"effort":"high"}],"service_tiers":[],"additional_speed_tiers":[]}]}
+JSON
+EOF
+cat >"$model_dir/agent" <<'EOF'
+#!/bin/sh
+[ "$1" = "--list-models" ] || exit 2
+cat <<'MODELS'
+Available models
+auto - Auto (default)
+gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+claude-opus-5-high-fast - Claude Opus 5 1M Fast
+claude-opus-5-high - Claude Opus 5 1M
+MODELS
+EOF
+cat >"$model_dir/grok" <<'EOF'
+#!/bin/sh
+[ "$1" = "models" ] || exit 2
+cat <<'MODELS'
+Default model: grok-4.6
+Available models:
+  * grok-4.6 (default)
+  - grok-4.5
+MODELS
+EOF
+chmod +x "$model_dir/codex" "$model_dir/agent" "$model_dir/grok"
+model_python=$(helper_detect_python) || fail "model route needs Python 3"
+model_path=$model_dir:$PATH
+run_model_route() {
+    if [ "$model_python" = "py -3" ]; then
+        PATH="$model_path" py -3 "$root/bin/model-route" "$@"
+    else
+        PATH="$model_path" "$model_python" "$root/bin/model-route" "$@"
+    fi
+}
+codex_route=$(run_model_route codex \
+    "5.6 sol high fast") || fail "Codex spoken model route"
+printf '%s\n' "$codex_route" | grep -qF '"argv":["-m","gpt-5.6-sol","-c","model_reasoning_effort=\"high\"","-c","service_tier=\"fast\""]' ||
+    fail "5.6 sol high fast did not become separate Codex argv"
+cursor_route=$(run_model_route cursor \
+    "5.6 sol high fast") || fail "Cursor spoken model route"
+printf '%s\n' "$cursor_route" | grep -qF '"argv":["--model","gpt-5.6-sol-high-fast"]' ||
+    fail "Cursor route did not use the listed model ID"
+cursor_default=$(run_model_route cursor \
+    default) || fail "Cursor live default route"
+printf '%s\n' "$cursor_default" | grep -qF '"model":"gpt-5.6-sol-high-fast"' ||
+    fail "Cursor default did not prefer live Sol 5.6 high fast"
+printf '%s\n' "$cursor_default" | grep -qF 'cursor-grok' &&
+    fail "Cursor default used a Grok model"
+grok_route=$(run_model_route cursor \
+    "cursor grok 4.6 high fast") || fail "Cursor Grok spoken model route"
+printf '%s\n' "$grok_route" | grep -qF '"argv":["--model","cursor-grok-4.6-high-fast"]' ||
+    fail "Cursor Grok route did not use the listed model ID"
+opus_route=$(run_model_route cursor \
+    "opus 5 high fast") || fail "Cursor Opus spoken model route"
+printf '%s\n' "$opus_route" | grep -qF '"argv":["--model","claude-opus-5-high-fast"]' ||
+    fail "Cursor Opus route did not use the listed model ID"
+grok_default=$(run_model_route grok \
+    default) || fail "Grok live default route"
+printf '%s\n' "$grok_default" | grep -qF '"argv":["-m","grok-4.6","--reasoning-effort","high"]' ||
+    fail "Grok default did not use live Grok 4.6 at high effort"
+if run_model_route codex \
+    "5.6 terra high fast" >/dev/null 2>&1; then
+    fail "model route accepted fast for a model without fast service"
+fi
+if run_model_route cursor \
+    "retired mystery max" >/dev/null 2>&1; then
+    fail "model route invented a model for an unknown phrase"
+fi
+rm -rf "$model_dir"
+model_dir=
+
+for route_file in prompt.md launch.sh; do
+    grep -qiF 'open a review' "$root/$route_file" ||
+        fail "$route_file does not name the Codex review route"
+    grep -qF '5.6 sol high fast' "$root/$route_file" ||
+        fail "$route_file does not name the split Sol default"
+    grep -qE 'service_tier=\\?"fast\\?"' "$root/$route_file" ||
+        fail "$route_file does not pass the Codex fast setting"
+    grep -qF 'review PR' "$root/$route_file" ||
+        fail "$route_file does not name the pull request review route"
+done
+grep -qF 'gh -R <owner/repo> pr view' "$root/prompt.md" ||
+    fail "prompt.md does not resolve a named pull request with gh"
+grep -qF 'start <slug> --kind codex' "$root/prompt.md" ||
+    fail "prompt.md does not seat Codex for a named pull request review"
+for review_kind in Cursor Grok; do
+    for route_file in prompt.md launch.sh; do
+        grep -qF "$review_kind review" "$root/$route_file" ||
+            fail "$route_file does not name the $review_kind pull request review route"
+    done
+done
+grep -qF '"Cursor" means `--kind cursor`' "$root/prompt.md" ||
+    fail "prompt.md does not route Cursor to the Cursor kind"
+grep -qF '"Grok" means `--kind grok`' "$root/prompt.md" ||
+    fail "prompt.md does not route Grok to Grok Build"
+grep -qF 'only when the request names' "$root/prompt.md" ||
+    fail "prompt.md does not require both Cursor and Grok for a Cursor Grok model"
+grep -qF '"open battle paddle with Grok"' "$root/prompt.md" ||
+    fail "prompt.md does not route Grok alone to Grok Build"
+grep -qF '"open battle paddle in Cursor with Grok"' "$root/prompt.md" ||
+    fail "prompt.md does not name the explicit Cursor Grok route"
+grep -qF 'Never merge' "$root/prompt.md" ||
+    fail "prompt.md does not forbid merge from Lantern"
 # hsh carried a HERDR_REAL branch to dodge the wrapper, and launch.sh unsets
 # HERDR_REAL before it execs the agent, so inside the pane that branch never
 # ran. Nothing should put a bypass back: opening a second lantern is a
@@ -620,6 +734,19 @@ export HERDR_REAL=/bin/echo
 export HERDR_HELPER_OK=
 out=$(sh "$root/bin/herdr" agent list) || fail "inspect should pass"
 printf '%s\n' "$out" | grep -q 'agent list' || fail "inspect did not exec real herdr"
+for inspect_route in 'tab list' 'pane list' 'session list' 'integration status'; do
+    # Word splitting is intentional. These fixed test values are command argv.
+    # shellcheck disable=SC2086
+    out=$(sh "$root/bin/herdr" $inspect_route) ||
+        fail "$inspect_route should pass the read only gate"
+    printf '%s\n' "$out" | grep -qF "$inspect_route" ||
+        fail "$inspect_route did not exec real herdr"
+done
+
+if sh "$root/bin/herdr" pane run w1:p1 codex review --base main 2>"$err"; then
+    fail "pane run without confirmation should fail"
+fi
+grep -q HERDR_HELPER_OK "$err" || fail "pane run blocked hint missing"
 
 if sh "$root/bin/herdr" workspace create --cwd /tmp --label x 2>"$err"; then
     fail "mutate without OK should fail"
