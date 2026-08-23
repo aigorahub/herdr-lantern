@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.6** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.7** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -133,6 +133,10 @@ the model before it creates a workspace or tab. It reuses a matching Codex,
 Cursor, Cursor Grok, or Grok Build agent. Otherwise it seats the requested
 kind with its real review or read-only plan command. Lantern never checks out
 the pull request or edits the product repository.
+
+GitHub repositories Lantern creates are private. `gh repo create` always
+includes `--private`. It does not pass `--public` unless you explicitly ask
+for a public repo.
 
 After a confirmed seat the lantern renames the agent's tab to
 `<slug> · <kind>` and says in one line what is running where: the slug, the

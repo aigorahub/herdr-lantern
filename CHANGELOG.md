@@ -2,6 +2,15 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.7] - 2026-08-23
+
+### Changed
+
+- GitHub repositories Lantern creates are private by default. The routing
+  table and helper instructions require `gh repo create --private`. Public
+  only when the user explicitly asks for a public repo.
+- The plugin version is 0.9.7.
+
 ## [0.9.6] - 2026-08-22
 
 ### Changed
