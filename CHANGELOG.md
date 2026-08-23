@@ -2,6 +2,19 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.8] - 2026-08-23
+
+### Fixed
+
+- Claude seats that stop on the first-run folder trust screen (Accessing
+  workspace, `Yes, I trust this folder`, Enter to confirm) no longer die as
+  `agent_not_ready`. The herdr wrapper reads that named start pane, sends one
+  Enter, and waits until the seat is idle or done and `interactive_ready`.
+  Only that screen counts: later permission prompts, a Codex directory-trust
+  dialog, a new-chat `[y/n]`, another agent in that pane, another pane, and
+  every other start failure are unchanged. The Codex gate is unchanged.
+- The plugin version is 0.9.8.
+
 ## [0.9.7] - 2026-08-23
 
 ### Changed

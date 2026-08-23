@@ -1076,11 +1076,11 @@ fi
 if helper_codex_startup_key 'Approve MCP server startup? yes (y)' >/dev/null; then
     fail "a permission yes (y) must not look like a new-chat confirm"
 fi
-helper_codex_is_ready '{"interactive_ready":true,"agent_status":"idle"}' ||
+helper_seat_is_ready '{"interactive_ready":true,"agent_status":"idle"}' ||
     fail "idle plus interactive_ready should be ready"
-helper_codex_is_ready '{"interactive_ready":true,"agent_status":"done"}' ||
+helper_seat_is_ready '{"interactive_ready":true,"agent_status":"done"}' ||
     fail "done plus interactive_ready should be ready"
-if helper_codex_is_ready '{"interactive_ready":true,"agent_status":"blocked"}'; then
+if helper_seat_is_ready '{"interactive_ready":true,"agent_status":"blocked"}'; then
     fail "blocked plus interactive_ready must not count as seated"
 fi
 if helper_codex_seat_ok '{"agent":"claude","pane_id":"w1:p1"}' w1:p1; then
@@ -1088,6 +1088,45 @@ if helper_codex_seat_ok '{"agent":"claude","pane_id":"w1:p1"}' w1:p1; then
 fi
 helper_codex_seat_ok '{"agent":"codex","pane_id":"w1:p1"}' w1:p1 ||
     fail "a Codex occupant in the start pane should count"
+helper_seat_ok '{"agent":"claude","pane_id":"w1:p1"}' w1:p1 claude ||
+    fail "a Claude occupant in the start pane should count"
+if helper_seat_ok '{"agent":"codex","pane_id":"w1:p1"}' w1:p1 claude; then
+    fail "a Codex occupant must not count as the Claude seat"
+fi
+if helper_seat_ok '{"agent":"claude","pane_id":"w2:p9"}' w1:p1 claude; then
+    fail "a Claude seat in another pane must not count"
+fi
+
+# Claude first-run folder trust. One screen, one Enter, nothing else.
+helper_claude_pane_has_trust "$(printf '%s\n' \
+    'Accessing workspace' \
+    '/tmp/demo' \
+    '› 1. Yes, I trust this folder' \
+    '  2. No, choose another folder' \
+    'Enter to confirm')" ||
+    fail "the Claude folder trust screen should be a gate"
+helper_claude_pane_has_trust "$(printf '%s\n' \
+    'Yes, I' \
+    'trust this folder')" ||
+    fail "a wrapped Claude trust option should still be a gate"
+if helper_claude_pane_has_trust "$(printf '%s\n' \
+    '> You are in /tmp/demo' \
+    'Do you trust the contents of this directory?' \
+    '› 1. Yes, continue')"; then
+    fail "the Codex trust dialog must not be the Claude gate"
+fi
+if helper_claude_pane_has_trust 'press enter to confirm or esc to cancel'; then
+    fail "a later permission prompt must not look like the Claude gate"
+fi
+if helper_claude_pane_has_trust 'Do you want to make this edit to lib.sh?'; then
+    fail "a later edit permission prompt must not look like the Claude gate"
+fi
+if helper_claude_pane_has_trust 'Start a new chat? [y/n]'; then
+    fail "a new-chat confirm must not look like the Claude gate"
+fi
+if helper_claude_pane_has_trust 'claude is starting...'; then
+    fail "unrelated pane text must not look like the Claude gate"
+fi
 if helper_codex_startup_key 'press enter to confirm or esc to cancel' >/dev/null; then
     fail "a later confirm prompt must not look like a first-run gate"
 fi
@@ -1363,6 +1402,9 @@ out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1) ||
 if grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$FAKE_START_LOG"; then
     fail "a Claude start must not receive the Codex unattended flag"
 fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a successful Claude start must not send keys"
+fi
 rm -f "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
     -- resume --last) ||
@@ -1400,17 +1442,17 @@ check_start_log "$codex_start_head
     "a Codex review must get the unattended flag before the subcommand"
 unset FAKE_START_OK
 
-# Claude on the same dialog is somebody else's seat.
+# The Codex dialog on a Claude seat is somebody else's gate.
 rm -f "$FAKE_READY_FILE"
 printf '%s\n' '> You are in /tmp/demo' \
     'Do you trust the contents of this directory?' \
     '› 1. Yes, continue' >"$FAKE_PANE"
 if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
     printf '%s\n' "$out" >&2
-    fail "a non-Codex blocked start must not be reported as seated"
+    fail "a Claude start on the Codex dialog must not be reported as seated"
 fi
 if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a non-Codex start must not send keys into the pane"
+    fail "a Claude start on the Codex dialog must not send keys into the pane"
 fi
 
 # Unrelated start failure, even with a trust dialog on screen.
@@ -1474,6 +1516,114 @@ printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
 grep -q 'did not become ready' "$err" ||
     fail "an unreadied Codex seat should say why"
 unset FAKE_START_DEAF
+
+# Claude first-run folder trust, same shape as Codex: only that screen,
+# only the named start pane, one Enter, then wait for a ready seat.
+claude_trust_pane() {
+    printf '%s\n' 'Accessing workspace' \
+        '/tmp/demo' \
+        '› 1. Yes, I trust this folder' \
+        '  2. No, choose another folder' \
+        'Enter to confirm' >"$FAKE_PANE"
+}
+export FAKE_GET_AGENT=claude
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+claude_trust_pane
+out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
+    fail "Claude folder trust gate should recover after Enter"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "Claude folder trust gate did not send Enter to the named seat"
+printf '%s\n' "$out" | grep -q 'agent wait reviewer --until idle' ||
+    fail "Claude folder trust gate did not wait until idle"
+[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys')" -eq 1 ] ||
+    fail "Claude folder trust gate should send exactly one key"
+
+# The dialog may still be painting when Herdr first reports blocked.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+printf '%s\n' 'claude is starting...' >"$FAKE_PANE_DELAY"
+claude_trust_pane
+out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
+    fail "a delayed Claude trust screen should still recover"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "a delayed Claude trust screen did not send Enter"
+rm -f "$FAKE_PANE_DELAY"
+
+# A later Claude permission prompt during startup is not a first-run gate.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+printf '%s\n' 'Allow command?' 'press enter to confirm or esc to cancel' >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a later Claude permission prompt must not be auto-dismissed"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a later Claude permission prompt must not receive keys"
+fi
+
+# A new-chat confirm is a Codex gate. Claude seats leave it alone.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a [y/n] on a Claude seat must not be reported as seated"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a Claude seat must not answer a new-chat confirm"
+fi
+
+# A Codex occupant on the Claude trust screen is another agent's pane.
+export FAKE_GET_AGENT=codex
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+claude_trust_pane
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a Codex occupant must not be reported as a Claude seat"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a Codex occupant must not receive Claude startup keys"
+fi
+export FAKE_GET_AGENT=claude
+
+# The named agent is sitting in another pane. Do not type into it.
+export FAKE_AGENT_PANE=w2:p9
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+claude_trust_pane
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a Claude pane mismatch must not be reported as seated"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a Claude pane mismatch must not send keys into another agent's pane"
+fi
+export FAKE_AGENT_PANE=w1:p1
+
+# Unrelated start failure, even with the folder trust screen on show.
+export FAKE_START_ERR=pane_not_found
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+claude_trust_pane
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "an unrelated Claude start failure must not be reported as seated"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "an unrelated Claude start failure must not send keys"
+fi
+export FAKE_START_ERR=agent_not_ready
+
+# Enter that never makes the seat interactive_ready is a failed start.
+export FAKE_START_DEAF=1
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+claude_trust_pane
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a Claude gate that did not become ready must not be reported as seated"
+fi
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "the unreadied Claude trust gate should still press Enter"
+grep -q 'did not become ready' "$err" ||
+    fail "an unreadied Claude seat should say why"
+unset FAKE_START_DEAF
+export FAKE_GET_AGENT=codex
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
 
 unset FAKE_PANE
 unset FAKE_PANE_NEXT

@@ -551,6 +551,22 @@ helper_codex_pane_has_trust() {
     return 1
 }
 
+helper_claude_pane_has_trust() {
+    # True when pane text ($1) is Claude's first-run folder trust screen:
+    # Accessing workspace, Yes, I trust this folder, Enter to confirm.
+    # Later permission prompts are not a match, and neither is the Codex
+    # directory-trust dialog, which is a different screen on a different
+    # kind of seat.
+    helper_codex_pane_is_later_prompt "$1" && return 1
+    _helper_flat=$(helper_codex_flat_pane "$1")
+    case $_helper_flat in
+    *"trust this folder"*)
+        return 0
+        ;;
+    esac
+    return 1
+}
+
 helper_codex_pane_has_yn() {
     helper_codex_pane_is_later_prompt "$1" && return 1
     _helper_flat=$(helper_codex_flat_pane "$1")
@@ -583,8 +599,9 @@ helper_codex_startup_key() {
     return 1
 }
 
-helper_codex_is_ready() {
-    # True when agent get JSON ($1) says the seat can take prompts.
+helper_seat_is_ready() {
+    # True when agent get JSON ($1) says the seat can take prompts. Both
+    # kinds report the same fields, so one check serves both.
     # Unfocused new seats report done rather than idle, so both count.
     case $1 in
     *"\"interactive_ready\":true"*) ;;
@@ -598,23 +615,70 @@ helper_codex_is_ready() {
     return 1
 }
 
-helper_codex_seat_ok() {
-    # True when agent get JSON ($1) is still the Codex seat in pane ($2).
+helper_seat_ok() {
+    # True when agent get JSON ($1) is still kind ($3) in pane ($2).
     _helper_got_pane=$(printf '%s' "$1" | helper_json_value pane_id)
     [ "$_helper_got_pane" = "$2" ] || return 1
     _helper_got_agent=$(printf '%s' "$1" | helper_json_value agent)
-    [ "$_helper_got_agent" = codex ] || return 1
+    [ "$_helper_got_agent" = "$3" ] || return 1
     return 0
 }
 
+helper_codex_seat_ok() {
+    # True when agent get JSON ($1) is still the Codex seat in pane ($2).
+    helper_seat_ok "$1" "$2" codex
+}
+
+helper_claude_startup_gate() {
+    # Claude first-run folder trust. Only that screen, only the named
+    # start pane, and only one Enter. $1 real herdr, $2 name, $3 pane,
+    # $4 the start status to return when this is not that gate.
+    _helper_real=$1
+    _helper_name=$2
+    _helper_pane=$3
+    _helper_status=$4
+    _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+        return "$_helper_status"
+    helper_seat_ok "$_helper_got" "$_helper_pane" claude ||
+        return "$_helper_status"
+    _helper_miss=0
+    while :; do
+        _helper_before=$("$_helper_real" agent read "$_helper_name" --lines 60 2>/dev/null) ||
+            _helper_before=
+        helper_claude_pane_has_trust "$_helper_before" && break
+        _helper_miss=$((_helper_miss + 1))
+        [ "$_helper_miss" -ge 2 ] && return "$_helper_status"
+        # Herdr already called it blocked; the dialog may still be
+        # painting. --until idle times out while it stays blocked.
+        "$_helper_real" agent wait "$_helper_name" --until idle --until done \
+            --timeout 2000 >/dev/null 2>&1 || true
+    done
+    _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+        return "$_helper_status"
+    helper_seat_ok "$_helper_got" "$_helper_pane" claude ||
+        return "$_helper_status"
+    "$_helper_real" agent send-keys "$_helper_name" Enter || return $?
+    "$_helper_real" agent wait "$_helper_name" --until idle --until done \
+        --timeout 120000 || return $?
+    _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+        _helper_got=
+    if helper_seat_ok "$_helper_got" "$_helper_pane" claude &&
+        helper_seat_is_ready "$_helper_got"; then
+        return 0
+    fi
+    printf '%s\n' "lantern: Claude in $_helper_name did not become ready after the folder trust gate" >&2
+    return 1
+}
+
 helper_relay_agent_start() {
-    # Codex first-run survival. Herdr returns agent_not_ready as soon as
-    # detection reports blocked during startup, so a directory-trust or
-    # new-chat confirm kills the seat. Trust and a new-chat confirm can
-    # appear in sequence, and a [y/n] prompt may still need Enter after
-    # y. This stays on that same named pane and sends only those keys.
-    # Any other failure, another kind, or another agent's pane is left
-    # alone.
+    # Codex and Claude first-run survival. Herdr returns agent_not_ready
+    # as soon as detection reports blocked during startup, so a
+    # first-run gate kills the seat. For Codex, trust and a new-chat
+    # confirm can appear in sequence, and a [y/n] prompt may still need
+    # Enter after y. For Claude, the only gate handled is the folder
+    # trust screen, and the only key is one Enter. This stays on that
+    # same named pane and sends only those keys. Any other failure,
+    # another kind, or another agent's pane is left alone.
     _helper_real=$1
     shift
     _helper_name=$3
@@ -685,12 +749,20 @@ helper_relay_agent_start() {
     cat "$_helper_errf" >&2
     rm -f "$_helper_errf"
     [ "$_helper_status" -eq 0 ] && return 0
-    [ "$_helper_kind" = codex ] || return $_helper_status
+    case $_helper_kind in
+    codex | claude) ;;
+    *) return $_helper_status ;;
+    esac
     [ -n "$_helper_name" ] && [ -n "$_helper_pane" ] || return $_helper_status
     case $_helper_err in
     *agent_not_ready* | *"blocked during startup"*) ;;
     *) return $_helper_status ;;
     esac
+    if [ "$_helper_kind" = claude ]; then
+        helper_claude_startup_gate "$_helper_real" "$_helper_name" \
+            "$_helper_pane" "$_helper_status"
+        return $?
+    fi
     _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
         return $_helper_status
     helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return $_helper_status
@@ -730,7 +802,7 @@ helper_relay_agent_start() {
                 [ "$_helper_sent" -gt 0 ] && break
                 return $_helper_status
             }
-            helper_codex_is_ready "$_helper_got" && return 0
+            helper_seat_is_ready "$_helper_got" && return 0
             if [ "$_helper_sent" -gt 0 ]; then
                 _helper_post_miss=$((_helper_post_miss + 1))
                 [ "$_helper_post_miss" -ge 3 ] && break
@@ -764,7 +836,7 @@ helper_relay_agent_start() {
             _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
                 _helper_got=
             helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return 1
-            helper_codex_is_ready "$_helper_got" && return 0
+            helper_seat_is_ready "$_helper_got" && return 0
         fi
     done
     [ "$_helper_sent" -gt 0 ] || return $_helper_status
@@ -776,7 +848,7 @@ helper_relay_agent_start() {
         return 1
     }
     helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return 1
-    helper_codex_is_ready "$_helper_got" && return 0
+    helper_seat_is_ready "$_helper_got" && return 0
     printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
     return 1
 }
