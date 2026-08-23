@@ -238,11 +238,13 @@ words name that task.
      the input field (common on Cursor), sends Enter and waits again. It
      fails rather than guess when nothing shows the message went in.
      Read the pane before telling the user it was sent.
-     For Codex, `agent start` through the wrapper dismisses the first-run
-     directory trust dialog with Enter, or a new-chat `[y/n]` / `yes (y)`
-     confirm with y, only when Herdr returns `agent_not_ready` / blocked
-     during startup on that same named pane. If both appear, it dismisses
-     them in order. It then waits until idle or done and
+     `agent start` through the wrapper dismisses first-run gates, only
+     when Herdr returns `agent_not_ready` / blocked during startup on that
+     same named pane. For Codex: the directory trust dialog with Enter, or
+     a new-chat `[y/n]` / `yes (y)` confirm with y. If both appear, it
+     dismisses them in order. For Claude: the folder trust screen
+     (Accessing workspace, `Yes, I trust this folder`, Enter to confirm)
+     with one Enter, and nothing else. It then waits until idle or done and
      `interactive_ready`. It does not send keys into any other failure,
      another agent's pane, or later permission prompts. Do not send y or
      Enter yourself for those startup gates.
