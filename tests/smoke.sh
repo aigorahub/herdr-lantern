@@ -1076,11 +1076,11 @@ fi
 if helper_codex_startup_key 'Approve MCP server startup? yes (y)' >/dev/null; then
     fail "a permission yes (y) must not look like a new-chat confirm"
 fi
-helper_codex_is_ready '{"interactive_ready":true,"agent_status":"idle"}' ||
+helper_seat_is_ready '{"interactive_ready":true,"agent_status":"idle"}' ||
     fail "idle plus interactive_ready should be ready"
-helper_codex_is_ready '{"interactive_ready":true,"agent_status":"done"}' ||
+helper_seat_is_ready '{"interactive_ready":true,"agent_status":"done"}' ||
     fail "done plus interactive_ready should be ready"
-if helper_codex_is_ready '{"interactive_ready":true,"agent_status":"blocked"}'; then
+if helper_seat_is_ready '{"interactive_ready":true,"agent_status":"blocked"}'; then
     fail "blocked plus interactive_ready must not count as seated"
 fi
 if helper_codex_seat_ok '{"agent":"claude","pane_id":"w1:p1"}' w1:p1; then

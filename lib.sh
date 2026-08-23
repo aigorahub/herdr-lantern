@@ -599,8 +599,9 @@ helper_codex_startup_key() {
     return 1
 }
 
-helper_codex_is_ready() {
-    # True when agent get JSON ($1) says the seat can take prompts.
+helper_seat_is_ready() {
+    # True when agent get JSON ($1) says the seat can take prompts. Both
+    # kinds report the same fields, so one check serves both.
     # Unfocused new seats report done rather than idle, so both count.
     case $1 in
     *"\"interactive_ready\":true"*) ;;
@@ -662,7 +663,7 @@ helper_claude_startup_gate() {
     _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
         _helper_got=
     if helper_seat_ok "$_helper_got" "$_helper_pane" claude &&
-        helper_codex_is_ready "$_helper_got"; then
+        helper_seat_is_ready "$_helper_got"; then
         return 0
     fi
     printf '%s\n' "lantern: Claude in $_helper_name did not become ready after the folder trust gate" >&2
@@ -801,7 +802,7 @@ helper_relay_agent_start() {
                 [ "$_helper_sent" -gt 0 ] && break
                 return $_helper_status
             }
-            helper_codex_is_ready "$_helper_got" && return 0
+            helper_seat_is_ready "$_helper_got" && return 0
             if [ "$_helper_sent" -gt 0 ]; then
                 _helper_post_miss=$((_helper_post_miss + 1))
                 [ "$_helper_post_miss" -ge 3 ] && break
@@ -835,7 +836,7 @@ helper_relay_agent_start() {
             _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
                 _helper_got=
             helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return 1
-            helper_codex_is_ready "$_helper_got" && return 0
+            helper_seat_is_ready "$_helper_got" && return 0
         fi
     done
     [ "$_helper_sent" -gt 0 ] || return $_helper_status
@@ -847,7 +848,7 @@ helper_relay_agent_start() {
         return 1
     }
     helper_codex_seat_ok "$_helper_got" "$_helper_pane" || return 1
-    helper_codex_is_ready "$_helper_got" && return 0
+    helper_seat_is_ready "$_helper_got" && return 0
     printf '%s\n' "lantern: Codex in $_helper_name did not become ready after the startup gate" >&2
     return 1
 }
