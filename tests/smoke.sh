@@ -501,6 +501,16 @@ grep -qF '"Grok Build" and' "$root/launch.sh" ||
     fail "launch.sh does not route Grok Build to the Grok CLI"
 grep -qF 'Never merge' "$root/prompt.md" ||
     fail "prompt.md does not forbid merge from Lantern"
+for repo_file in prompt.md launch.sh README.md; do
+    grep -qF 'gh repo create' "$root/$repo_file" ||
+        fail "$repo_file does not route GitHub repo creation"
+    grep -qF -- '--private' "$root/$repo_file" ||
+        fail "$repo_file does not require private GitHub repos"
+    grep -qF -- '--public' "$root/$repo_file" ||
+        fail "$repo_file does not forbid public GitHub repos unless asked"
+done
+grep -qF '"create a GitHub repo"' "$root/prompt.md" ||
+    fail "prompt.md has no GitHub repo creation route"
 grep -qF 'Finish this step before any' "$root/prompt.md" ||
     fail "named PR route does not preflight before herd mutation"
 grep -qF 'confirms the exact flag and the protections it removes' "$root/README.md" ||

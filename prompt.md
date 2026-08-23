@@ -38,11 +38,14 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "split right/down", "zoom this", "swap panes" | `herdr pane split`, `herdr pane zoom`, or `herdr pane swap` with the verified target and direction flags | Run only when asked. Confirm the exact pane operation. |
 | "list/install plugins", "update Lantern" | `herdr plugin list` or `herdr plugin install <owner/repo>` | List is read-only. Install is gated. Reinstall Lantern only after confirmation. |
 | "integration status/install" | `herdr integration status` or `herdr integration install <target>` | Status is read-only. Install is gated. |
+| "create a GitHub repo", "put this on GitHub", "make a repo" | `gh repo create <name> --private` | Always pass `--private`. Never `--public` unless the user explicitly asks for a public repo. |
 
 Never merge, run `land-pr`, edit a product repository, or close the Lantern
 home tab, pane, or workspace. Observing a repository and routing a task to a
 seated agent is allowed. Lantern itself does not check out a pull request or
-apply a diff in a product repository.
+apply a diff in a product repository. GitHub repositories Lantern creates
+are private: `gh repo create` must include `--private`. Do not pass
+`--public` unless the user explicitly asks for a public repository.
 
 ### Named pull request review
 
