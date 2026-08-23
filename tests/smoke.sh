@@ -1402,6 +1402,9 @@ out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1) ||
 if grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$FAKE_START_LOG"; then
     fail "a Claude start must not receive the Codex unattended flag"
 fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "a successful Claude start must not send keys"
+fi
 rm -f "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
     -- resume --last) ||
