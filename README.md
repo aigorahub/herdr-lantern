@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.5** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.6** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -95,7 +95,8 @@ Code gets `CLAUDE.md`.
 
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
-working toward?” for that readout.
+working toward?” for that readout. “What’s going on” names every open tab
+after who needs you, with working and blocked first, then done and idle.
 
 Lantern works great with Elves. Without Elves it is still the Herdr
 plugin: workspaces, panes, agents. If `.elves-session.json` files exist,
@@ -106,15 +107,16 @@ Mutating `herdr` commands (create, start, focus, close, …) go through
 `bin/herdr`. After you confirm a path or target, the helper reruns with
 `HERDR_HELPER_OK=1`.
 
-Agents the lantern seats for you start in the smart-auto permission tier:
-`agent start` passes each kind's own flags after `--` — Claude Code and Grok
-get `--permission-mode auto`, Cursor `agent` gets `--auto-review --trust`,
-Codex gets `-a never -s danger-full-access`; kinds without a listed tier get no
-extra flags. The flags that skip approvals altogether (bypassPermissions,
-`--yolo`, `--force`, `--always-approve`,
-`--dangerously-bypass-approvals-and-sandbox`) are not part of any default.
-Lantern can pass one provider-specific bypass only when the user asks for
-yolo and confirms the exact flag and the protections it removes.
+Agents the lantern seats for you start without stopping for ordinary
+approvals. `agent start` passes each kind's own flags after `--`: Claude
+Code and Grok get `--permission-mode auto`, Cursor `agent` gets
+`--auto-review --trust`, Codex gets
+`--dangerously-bypass-approvals-and-sandbox` so a Codex tab does not wait
+for command or sandbox confirms. The herdr wrapper puts that Codex flag
+immediately after `--`, including when the seat omitted it or placed it
+after resume or review. Kinds without a listed tier get no extra flags.
+bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
+unless the user asks for yolo and confirms the exact flag and the protections it removes.
 
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok" uses `--kind cursor`

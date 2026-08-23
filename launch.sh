@@ -154,7 +154,8 @@ Runtime (injected by launch.sh; do not ignore):
   how the user tells which CLI and model is answering — and repeat it
   whenever they ask.
 - Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
-- Seat agents in the smart-auto permission tier. Claude defaults to
+- Seat agents in the smart-auto permission tier, except Codex, which is
+  unattended. Claude defaults to
   \`--model opus --effort high --permission-mode auto\`. Cursor uses the live
   \`model-route cursor default\` result with \`--auto-review --trust\`. It
   prefers \`gpt-5.6-sol-high-fast\` and excludes Grok and Composer from its
@@ -163,12 +164,17 @@ Runtime (injected by launch.sh; do not ignore):
   effort, then \`grok-4.5\` at high effort. Codex interactive and review
   default to Sol 5.6, high, fast, after the live catalog confirms
   \`-m gpt-5.6-sol -c model_reasoning_effort=\"high\" -c
-  service_tier=\"priority\"\`, plus \`-a never -s danger-full-access\`. Use
+  service_tier=\"priority\"\`, plus
+  \`--dangerously-bypass-approvals-and-sandbox\` so the tab does not stop
+  for approvals. Do not seat Codex with only \`-a never -s danger-full-access\`;
+  the TUI can still ask. The herdr wrapper puts the
+  Codex flag immediately after \`--\`, and moves a copy that sat after
+  resume or review. Use
   \`\$HERDR_PLUGIN_ROOT/bin/model-route codex "5.6 sol high fast"\` to get
   separate Codex argv. Use the same resolver with cursor or grok for a user
   supplied model phrase. Never invent a model slug. A kind not named here
-  gets no extra args. Never pass bypassPermissions, --yolo, --force,
-  --always-approve, or --dangerously-bypass-approvals-and-sandbox unless the
+  gets no extra args. Never omit the Codex unattended flag. Never pass
+  bypassPermissions, --yolo, --force, or --always-approve unless the
   user explicitly asks for yolo in that request. After a confirmed seat, say
   in one line what is running where: the slug, the kind, the live chosen
   model, effort, fast state, and the task, or that it sits at a shell with no
@@ -185,8 +191,10 @@ Runtime (injected by launch.sh; do not ignore):
   done / idle). Join \`herdr tab list\` with \`herdr agent list\` on
   \`tab_id\` and with \`herdr workspace list\` on \`workspace_id\`. Use the
   tab label exactly as the sidebar shows it (\`elves-run\`, \`chrome\`,
-  \`lantern · 2\`). Quiet and idle tabs stay in the list. Two tabs in one
-  workspace are two lines, both named. A tab with no agent is \`shell\`. Add
+  \`lantern · 2\`). Sort the tab list by state so working tabs sit above
+  idle ones: working, then blocked, then done, then idle, then unknown. A
+  tab with no agent (\`shell\`) sorts with idle. Within a state, keep the order from \`herdr tab list\`. Do not add group headings. Quiet and idle tabs stay in the list. Two tabs in one workspace are two lines, both
+  named. A tab with no agent is \`shell\`. Add
   nothing else to those lines; keep the answer short.
 - Route loose phrases. "What’s going on" means field status and agent,
   workspace, and tab lists. "Open the tab" means an exact agent, workspace,
@@ -195,7 +203,7 @@ Runtime (injected by launch.sh; do not ignore):
   paddle with Codex" means resolve the repo, reuse its workspace, and seat
   Codex. "Second tab same way" means create a tab in that same workspace and
   reuse the last verified kind and model settings. Resume uses the real kind
-  CLI: Codex \`resume --last\`, Claude \`--continue\`, OMP \`--continue\` or
+  CLI: Codex \`--dangerously-bypass-approvals-and-sandbox resume --last\`, Claude \`--continue\`, OMP \`--continue\` or
   \`-r <id>\`, Cursor \`--continue\` or \`--resume <id>\`, Grok
   \`--continue\` or \`--resume <id>\`, Gemini \`--resume latest\`, OpenCode
   \`--continue\`, and Devin \`--continue\`.
@@ -232,8 +240,10 @@ Runtime (injected by launch.sh; do not ignore):
 - Model routing requires a working Python 3 command. The wrappers try
   \`python3\`, \`python\`, and Windows \`py -3\`. A missing interpreter stops
   the route before any herd change.
-- Codex task phrases map to real commands: continue last is \`resume --last\`,
-  fork last is \`fork --last\`, apply is \`apply <TASK_ID>\`, diagnostics are
+- Codex task phrases map to real commands: continue last is
+  \`--dangerously-bypass-approvals-and-sandbox resume --last\`, fork last is
+  \`--dangerously-bypass-approvals-and-sandbox fork --last\`, apply is
+  \`apply <TASK_ID>\`, diagnostics are
   \`doctor --summary\` and \`login status\`. Lantern never applies a diff
   itself. Interactive chat remains the normal seat.
 - Close a workspace, tab, pane, or worktree only when the user names it.
@@ -355,6 +365,9 @@ if [ "$helper_bin" = "agent" ]; then
     smart | accept-edits) set -- "$@" --auto-review ;;
     dangerous) set -- "$@" --force ;;
     esac
+fi
+if [ "$HELPER_AGENT" = "codex" ]; then
+    set -- "$@" --dangerously-bypass-approvals-and-sandbox
 fi
 if [ -n "$HELPER_EXTRA_ARGS" ]; then
     set -f

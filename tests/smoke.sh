@@ -185,23 +185,26 @@ done
 grep -qF '"walk me there"' "$root/prompt.md" ||
     fail "prompt.md no longer accepts the old input alias"
 
-# Seated agents start in the smart-auto tier. The per-kind flags have to
-# appear everywhere the lantern is told how to start an agent — the prompt
-# and the pane appendix — and the flags that would hand a seated agent the
-# keys have to be named as never passed in the same two places. (--force is
-# forbidden there too, but launch.sh passes it legitimately for the helper
-# CLI's own dangerous tier, so a grep for it proves nothing.)
+# Seated agents start without ordinary approval stops. The per-kind flags
+# have to appear everywhere the lantern is told how to start an agent —
+# the prompt and the pane appendix. Codex is unattended
+# (--dangerously-bypass-approvals-and-sandbox). Claude, Grok, and Cursor
+# stay smart-auto. bypassPermissions, --yolo, and --always-approve stay
+# named as never passed unless the user asks. (--force is forbidden there
+# too, but launch.sh passes it legitimately for the helper CLI's own
+# dangerous tier, so a grep for it proves nothing.)
 for seat_file in prompt.md launch.sh; do
     for seat_args in '--permission-mode auto' '--auto-review --trust' \
-        '-a never -s danger-full-access'; do
+        '--dangerously-bypass-approvals-and-sandbox'; do
         grep -qF -- "$seat_args" "$root/$seat_file" ||
             fail "$seat_file does not pass $seat_args on agent start"
     done
     if grep -qF -- '-s workspace-write' "$root/$seat_file"; then
         fail "$seat_file still seats Codex in the workspace-write sandbox"
     fi
-    for reckless in bypassPermissions --yolo --always-approve \
-        --dangerously-bypass-approvals-and-sandbox; do
+    grep -qF -- '-a never -s danger-full-access' "$root/$seat_file" ||
+        fail "$seat_file does not warn that -a never is not enough for Codex"
+    for reckless in bypassPermissions --yolo --always-approve; do
         grep -qF -- "$reckless" "$root/$seat_file" ||
             fail "$seat_file does not forbid $reckless for seated agents"
     done
@@ -1094,6 +1097,7 @@ cat >"$fake_start/herdr" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
 "agent start")
+    printf '<%s>\n' "$@" >"${FAKE_START_LOG:-/dev/null}"
     if [ "${FAKE_START_OK:-}" = 1 ]; then
         printf 'agent start %s\n' "$3"
         exit 0
@@ -1174,6 +1178,7 @@ export FAKE_HOLD_FILE="$fake_start/hold"
 export FAKE_READY_FILE="$fake_start/ready"
 export FAKE_AGENT_PANE=w1:p1
 export FAKE_START_ERR=agent_not_ready
+export FAKE_START_LOG="$fake_start/start.log"
 unset FAKE_START_OK
 unset FAKE_START_DEAF
 : >"$FAKE_PANE"
@@ -1304,14 +1309,85 @@ printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
     fail "a delayed trust dialog did not send Enter"
 rm -f "$FAKE_PANE_DELAY"
 
-# A successful start must not send keys.
+# A successful start must not send keys. Codex argv is logged one token
+# per line so a glued string cannot fake the unattended-flag position.
 export FAKE_START_OK=1
-rm -f "$FAKE_READY_FILE"
+codex_start_head='<agent>
+<start>
+<reviewer>
+<--kind>
+<codex>
+<--pane>
+<w1:p1>
+<-->
+<--dangerously-bypass-approvals-and-sandbox>'
+check_start_log() {
+    printf '%s\n' "$1" >"$fake_start/want"
+    if ! diff -u "$fake_start/want" "$FAKE_START_LOG"; then
+        fail "$2"
+    fi
+}
+rm -f "$FAKE_READY_FILE" "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1) ||
     fail "a successful Codex start should pass through"
 if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
     fail "a successful start must not send keys"
 fi
+check_start_log "$codex_start_head" \
+    "a Codex start that omitted the unattended flag must grow -- and the flag"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    --) ||
+    fail "a Codex start with a trailing -- should pass through"
+check_start_log "$codex_start_head" \
+    "a trailing -- must still receive the unattended flag after --"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- --dangerously-bypass-approvals-and-sandbox) ||
+    fail "a Codex start that already has the unattended flag should pass through"
+check_start_log "$codex_start_head" \
+    "a Codex start must not duplicate the unattended flag"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1) ||
+    fail "a successful Claude start should pass through"
+if grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$FAKE_START_LOG"; then
+    fail "a Claude start must not receive the Codex unattended flag"
+fi
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- resume --last) ||
+    fail "a Codex resume start should pass through"
+check_start_log "$codex_start_head
+<resume>
+<--last>" \
+    "a Codex resume must get the unattended flag before the subcommand"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- resume --last --dangerously-bypass-approvals-and-sandbox) ||
+    fail "a Codex resume with a trailing unattended flag should pass through"
+check_start_log "$codex_start_head
+<resume>
+<--last>" \
+    "a misplaced unattended flag after resume must move to after --"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- fork --last) ||
+    fail "a Codex fork start should pass through"
+check_start_log "$codex_start_head
+<fork>
+<--last>" \
+    "a Codex fork must get the unattended flag before the subcommand"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- -m gpt-5.6-sol review --base main) ||
+    fail "a Codex review start should pass through"
+check_start_log "$codex_start_head
+<-m>
+<gpt-5.6-sol>
+<review>
+<--base>
+<main>" \
+    "a Codex review must get the unattended flag before the subcommand"
 unset FAKE_START_OK
 
 # Claude on the same dialog is somebody else's seat.
@@ -1726,7 +1802,7 @@ HELPER_CWD="~"' ' [--model] [opus] [--effort] [high]'
 argv_is "codex" 'HELPER_AGENT="codex"
 HELPER_MODEL="gpt-x"
 HELPER_EFFORT="high"
-HELPER_CWD="~"' ' [--model] [gpt-x] [--config] [model_reasoning_effort="high"]'
+HELPER_CWD="~"' ' [--model] [gpt-x] [--config] [model_reasoning_effort="high"] [--dangerously-bypass-approvals-and-sandbox]'
 
 argv_is "grok" 'HELPER_AGENT="grok"
 HELPER_MODEL="grok-x"
@@ -2023,6 +2099,18 @@ grep -qF 'Then name every open tab' "$root/prompt.md" ||
     fail "the prompt.md light-up should name every open tab after who needs you"
 grep -qF 'Keep answers short' "$root/prompt.md" ||
     fail "prompt.md should still keep answers short"
+for field_file in prompt.md launch.sh; do
+    grep -qF 'Sort the tab list by state' "$root/$field_file" ||
+        fail "$field_file field status does not sort working tabs above idle"
+    grep -qF 'working, then blocked, then done, then idle' "$root/$field_file" ||
+        fail "$field_file field status does not name the working-to-idle order"
+    grep -qF 'sorts with idle' "$root/$field_file" ||
+        fail "$field_file field status does not sort shell tabs with idle"
+    grep -qF 'keep the order from' "$root/$field_file" ||
+        fail "$field_file field status does not keep herdr tab list order within a state"
+    grep -qF 'Do not add group headings' "$root/$field_file" ||
+        fail "$field_file field status adds group headings"
+done
 printf 'ok: field status names every open tab\n'
 
 printf 'ok\n'
