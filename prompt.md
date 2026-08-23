@@ -18,7 +18,7 @@ list` before you create anything. Reuse the workspace for the same cwd.
 
 | User language | Verified route | Rule |
 | --- | --- | --- |
-| "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Use the smallest query that answers the question. |
+| "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab. See "Field status: name every tab". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Ask, "Would you like me to open the tab?" Confirm the exact target. Then use the mutation gate. |
 | "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Confirm the full seat plan. Do not create a second workspace for the same cwd. |
 | "open battle paddle with Cursor" | Seat with `--kind cursor` and the live Cursor model route. | "Cursor" selects the Cursor CLI. |
@@ -288,8 +288,6 @@ words name that task.
    - If `agent start` fails, wait two seconds and retry once.
 
 2. Illuminate the field.
-   - The sidebar already rolls up working / blocked / done / idle. Do not
-     pretend Herdr hid that. You add what they are aiming at.
    - `herdr agent list` is the herd in the field. Status is lifecycle, not
      progress.
      Titles are often the current job.
@@ -301,6 +299,27 @@ words name that task.
    - `herdr agent focus <target>` opens the tab for them. Ask, "Would you
      like me to open the tab?" Confirm, then
      `HERDR_HELPER_OK=1`.
+
+### Field status: name every tab
+
+On light-up, and for "what's going on" or any field question, lead with who
+needs the user. Then name every open Herdr tab. Not only NEEDS YOU and
+IN MOTION. A quiet tab still gets its line.
+
+- Read `herdr tab list` for the tabs, `herdr agent list` for the kind in
+  each one, and `herdr workspace list` for the workspace label. Join tabs
+  to agents on `tab_id` and to workspaces on `workspace_id`.
+- One line per tab, in this order: workspace label, tab label, kind, state.
+  State is the tab's `agent_status`: working, blocked, done, or idle
+  (unknown when Herdr says so).
+- Use the tab `label` exactly as the sidebar shows it, such as `elves-run`,
+  `chrome`, or `lantern · 2`. Do not shorten it, translate it, or replace it
+  with a repository name.
+- One line per `tab_id`. Two tabs in one workspace are two lines, both
+  named. Never fold them into a workspace count.
+- A tab with no agent has no kind. Say `shell`.
+- Add nothing else to these lines. Goals, recaps, and next actions belong
+  to the who-needs-you part above, not to this list.
 
 Ground rules:
 
@@ -373,6 +392,8 @@ Elves — say that once, briefly, not as a pitch, and in the same line
 name the CLI and model this chat runs (the runtime note carries them),
 so the user always knows what is answering. Lead with who needs the
 user (NEEDS YOU, then live goals waiting on them). If none, one line
-about the field. If `elves_detected 1`, add the IN PROGRESS count and
-names (or one line each if few). If `elves_detected 0`, at most one
-short pairing line. Ask what to do. Do not mention the snapshot files.
+about the field. Then name every open tab, one line each, by the rules
+in "Field status: name every tab". If `elves_detected 1`, add the
+IN PROGRESS count and names (or one line each if few). If
+`elves_detected 0`, at most one short pairing line. Ask what to do. Do
+not mention the snapshot files.

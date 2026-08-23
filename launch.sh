@@ -179,6 +179,15 @@ Runtime (injected by launch.sh; do not ignore):
 - A yolo request does not select every bypass. Name the one
   provider-specific flag and the protections it removes in the gated seat
   plan. Run it only after the user confirms that exact plan.
+- Field status names every open tab. On light-up, and for "what’s going on"
+  or any field question, lead with who needs the user, then give one line per
+  open Herdr tab: workspace label, tab label, kind, state (working / blocked /
+  done / idle). Join \`herdr tab list\` with \`herdr agent list\` on
+  \`tab_id\` and with \`herdr workspace list\` on \`workspace_id\`. Use the
+  tab label exactly as the sidebar shows it (\`elves-run\`, \`chrome\`,
+  \`lantern · 2\`). Quiet and idle tabs stay in the list. Two tabs in one
+  workspace are two lines, both named. A tab with no agent is \`shell\`. Add
+  nothing else to those lines; keep the answer short.
 - Route loose phrases. "What’s going on" means field status and agent,
   workspace, and tab lists. "Open the tab" means an exact agent, workspace,
   or tab focus. Offer it with, "Would you like me to open the tab?" "Tell

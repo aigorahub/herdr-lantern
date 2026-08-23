@@ -1989,4 +1989,40 @@ grep -qF 'tab rename' "$root/prompt.md" ||
     fail "prompt.md should rename a seated agent's tab"
 printf 'ok: the chat and its seats say what they run\n'
 
+# Field status is the whole field. Light-up and "what's going on" used to
+# name only the panes that needed the user or were moving, so a quiet tab
+# was invisible in a chat that claims to light the field. Every instruction
+# surface must now name every open tab, and both prompt.md and the rendered
+# appendix carry the same rule, because a lantern seated on Cursor or Codex
+# reads the appendix copy and never the file in this repo.
+grep -qF 'Field status: name every tab' "$root/prompt.md" ||
+    fail "prompt.md has no field status section"
+for field_file in prompt.md launch.sh; do
+    for field_word in 'herdr tab list' 'herdr agent list' \
+        'herdr workspace list' 'workspace label' 'tab label'; do
+        grep -qF -- "$field_word" "$root/$field_file" ||
+            fail "$field_file field status does not name $field_word"
+    done
+    # The sidebar name is the point: elves-run, chrome, and a second lantern
+    # tab in the same workspace are what the user reads in Herdr, and a
+    # per-workspace roll-up would drop the second one.
+    for field_example in 'elves-run' 'chrome' 'lantern · 2'; do
+        grep -qF -- "$field_example" "$root/$field_file" ||
+            fail "$field_file field status does not keep the sidebar name $field_example"
+    done
+    grep -qF 'Two tabs in one' "$root/$field_file" ||
+        fail "$field_file does not name both tabs in one workspace"
+    grep -qiE 'quiet and idle tabs stay|a quiet tab still gets its line' \
+        "$root/$field_file" ||
+        fail "$field_file drops quiet tabs from the field status"
+done
+# Who needs the user still comes first, and the answer stays a lamp.
+grep -qF 'lead with who needs the user' "$root/launch.sh" ||
+    fail "the launch.sh appendix should still lead with who needs the user"
+grep -qF 'Then name every open tab' "$root/prompt.md" ||
+    fail "the prompt.md light-up should name every open tab after who needs you"
+grep -qF 'Keep answers short' "$root/prompt.md" ||
+    fail "prompt.md should still keep answers short"
+printf 'ok: field status names every open tab\n'
+
 printf 'ok\n'

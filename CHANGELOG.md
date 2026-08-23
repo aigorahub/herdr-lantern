@@ -2,6 +2,23 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.5] - 2026-08-22
+
+### Changed
+
+- Light-up and "what's going on" now name every open Herdr tab, not only
+  NEEDS YOU and IN MOTION. The answer still leads with who needs the user,
+  then gives one line per tab: workspace label, tab label, kind, and state
+  (working, blocked, done, or idle). The lantern joins `herdr tab list`
+  with `herdr agent list` on `tab_id` and with `herdr workspace list` on
+  `workspace_id`, so the line carries the sidebar name (`elves-run`,
+  `chrome`, `lantern · 2`) rather than a repository name. Quiet and idle
+  tabs stay in the list. Two tabs in one workspace are two lines, both
+  named. A tab with no agent reads as `shell`. Nothing else is added per
+  tab, and answers stay short. Seating, gates, and the Elves rules are
+  unchanged.
+- The plugin version is 0.9.5.
+
 ## [0.9.4] - 2026-08-22
 
 ### Fixed
