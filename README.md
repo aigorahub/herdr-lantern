@@ -112,8 +112,9 @@ approvals. `agent start` passes each kind's own flags after `--`: Claude
 Code and Grok get `--permission-mode auto`, Cursor `agent` gets
 `--auto-review --trust`, Codex gets
 `--dangerously-bypass-approvals-and-sandbox` so a Codex tab does not wait
-for command or sandbox confirms. The herdr wrapper adds that Codex flag
-when the seat omits it. Kinds without a listed tier get no extra flags.
+for command or sandbox confirms. The herdr wrapper puts that Codex flag
+immediately after `--`, including when the seat omitted it or placed it
+after resume or review. Kinds without a listed tier get no extra flags.
 bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
 unless the user asks for yolo and confirms the exact flag and the protections it removes.
 

@@ -620,12 +620,12 @@ helper_relay_agent_start() {
     _helper_name=$3
     _helper_kind=$(helper_argv_option_value --kind "$@") || _helper_kind=
     _helper_pane=$(helper_argv_option_value --pane "$@") || _helper_pane=
-    # Codex seats must not stop for command or sandbox confirms. The
-    # helper is told to pass this flag; add it when the seat omits it.
-    # Insert after -- so it stays a Codex global option, before resume
-    # or review. Appending after a subcommand would drop it.
-    if [ "$_helper_kind" = codex ] &&
-        ! helper_argv_has_flag --dangerously-bypass-approvals-and-sandbox "$@"; then
+    # Codex seats must not stop for command or sandbox confirms. Put the
+    # unattended flag immediately after -- so it stays a Codex global
+    # option, before resume or review. Drop any copy already in the kind
+    # args, including one after the subcommand, then insert exactly one.
+    if [ "$_helper_kind" = codex ]; then
+        _helper_flag=--dangerously-bypass-approvals-and-sandbox
         _helper_dd_at=0
         _helper_i=0
         for _helper_a in "$@"; do
@@ -636,18 +636,36 @@ helper_relay_agent_start() {
             fi
         done
         if [ "$_helper_dd_at" -eq 0 ]; then
-            set -- "$@" -- --dangerously-bypass-approvals-and-sandbox
+            set -- "$@" -- "$_helper_flag"
         else
-            _helper_i=1
-            while [ "$_helper_i" -lt "$_helper_dd_at" ]; do
+            _helper_prefix=$((_helper_dd_at - 1))
+            _helper_kind_n=$(($# - _helper_dd_at))
+            _helper_i=0
+            while [ "$_helper_i" -lt "$_helper_prefix" ]; do
                 _helper_a=$1
                 shift
                 set -- "$@" "$_helper_a"
                 _helper_i=$((_helper_i + 1))
             done
             shift
-            set -- -- --dangerously-bypass-approvals-and-sandbox "$@"
-            _helper_keep=$(($# - _helper_dd_at + 1))
+            _helper_i=0
+            while [ "$_helper_i" -lt "$_helper_kind_n" ]; do
+                _helper_a=$1
+                shift
+                _helper_i=$((_helper_i + 1))
+                if [ "$_helper_a" != "$_helper_flag" ]; then
+                    set -- "$@" "$_helper_a"
+                fi
+            done
+            _helper_i=0
+            while [ "$_helper_i" -lt "$_helper_prefix" ]; do
+                _helper_a=$1
+                shift
+                set -- "$@" "$_helper_a"
+                _helper_i=$((_helper_i + 1))
+            done
+            set -- -- "$_helper_flag" "$@"
+            _helper_keep=$(($# - _helper_prefix))
             _helper_i=0
             while [ "$_helper_i" -lt "$_helper_keep" ]; do
                 _helper_a=$1

@@ -1097,7 +1097,7 @@ cat >"$fake_start/herdr" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
 "agent start")
-    printf '%s\n' "$*" >"${FAKE_START_LOG:-/dev/null}"
+    printf '<%s>\n' "$@" >"${FAKE_START_LOG:-/dev/null}"
     if [ "${FAKE_START_OK:-}" = 1 ]; then
         printf 'agent start %s\n' "$3"
         exit 0
@@ -1309,24 +1309,44 @@ printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
     fail "a delayed trust dialog did not send Enter"
 rm -f "$FAKE_PANE_DELAY"
 
-# A successful start must not send keys.
+# A successful start must not send keys. Codex argv is logged one token
+# per line so a glued string cannot fake the unattended-flag position.
 export FAKE_START_OK=1
+codex_start_head='<agent>
+<start>
+<reviewer>
+<--kind>
+<codex>
+<--pane>
+<w1:p1>
+<-->
+<--dangerously-bypass-approvals-and-sandbox>'
+check_start_log() {
+    printf '%s\n' "$1" >"$fake_start/want"
+    if ! diff -u "$fake_start/want" "$FAKE_START_LOG"; then
+        fail "$2"
+    fi
+}
 rm -f "$FAKE_READY_FILE" "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1) ||
     fail "a successful Codex start should pass through"
 if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
     fail "a successful start must not send keys"
 fi
-grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$FAKE_START_LOG" ||
-    fail "a Codex start that omitted the unattended flag must receive it"
-grep -qF -- '-- --dangerously-bypass-approvals-and-sandbox' "$FAKE_START_LOG" ||
-    fail "a Codex start with no kind args must grow a -- before the unattended flag"
+check_start_log "$codex_start_head" \
+    "a Codex start that omitted the unattended flag must grow -- and the flag"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    --) ||
+    fail "a Codex start with a trailing -- should pass through"
+check_start_log "$codex_start_head" \
+    "a trailing -- must still receive the unattended flag after --"
 rm -f "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
     -- --dangerously-bypass-approvals-and-sandbox) ||
     fail "a Codex start that already has the unattended flag should pass through"
-[ "$(grep -o -- '--dangerously-bypass-approvals-and-sandbox' "$FAKE_START_LOG" | wc -l | tr -d ' ')" = 1 ] ||
-    fail "a Codex start must not duplicate the unattended flag"
+check_start_log "$codex_start_head" \
+    "a Codex start must not duplicate the unattended flag"
 rm -f "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1) ||
     fail "a successful Claude start should pass through"
@@ -1337,11 +1357,37 @@ rm -f "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
     -- resume --last) ||
     fail "a Codex resume start should pass through"
-grep -qF -- '-- --dangerously-bypass-approvals-and-sandbox resume --last' "$FAKE_START_LOG" ||
-    fail "a Codex resume must get the unattended flag before the subcommand"
-if grep -qF -- 'resume --last --dangerously-bypass-approvals-and-sandbox' "$FAKE_START_LOG"; then
-    fail "the Codex unattended flag must not follow resume"
-fi
+check_start_log "$codex_start_head
+<resume>
+<--last>" \
+    "a Codex resume must get the unattended flag before the subcommand"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- resume --last --dangerously-bypass-approvals-and-sandbox) ||
+    fail "a Codex resume with a trailing unattended flag should pass through"
+check_start_log "$codex_start_head
+<resume>
+<--last>" \
+    "a misplaced unattended flag after resume must move to after --"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- fork --last) ||
+    fail "a Codex fork start should pass through"
+check_start_log "$codex_start_head
+<fork>
+<--last>" \
+    "a Codex fork must get the unattended flag before the subcommand"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- -m gpt-5.6-sol review --base main) ||
+    fail "a Codex review start should pass through"
+check_start_log "$codex_start_head
+<-m>
+<gpt-5.6-sol>
+<review>
+<--base>
+<main>" \
+    "a Codex review must get the unattended flag before the subcommand"
 unset FAKE_START_OK
 
 # Claude on the same dialog is somebody else's seat.
@@ -2058,6 +2104,12 @@ for field_file in prompt.md launch.sh; do
         fail "$field_file field status does not sort working tabs above idle"
     grep -qF 'working, then blocked, then done, then idle' "$root/$field_file" ||
         fail "$field_file field status does not name the working-to-idle order"
+    grep -qF 'sorts with idle' "$root/$field_file" ||
+        fail "$field_file field status does not sort shell tabs with idle"
+    grep -qF 'keep the order from' "$root/$field_file" ||
+        fail "$field_file field status does not keep herdr tab list order within a state"
+    grep -qF 'Do not add group headings' "$root/$field_file" ||
+        fail "$field_file field status adds group headings"
 done
 printf 'ok: field status names every open tab\n'
 

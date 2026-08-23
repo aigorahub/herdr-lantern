@@ -167,8 +167,9 @@ Runtime (injected by launch.sh; do not ignore):
   service_tier=\"priority\"\`, plus
   \`--dangerously-bypass-approvals-and-sandbox\` so the tab does not stop
   for approvals. Do not seat Codex with only \`-a never -s danger-full-access\`;
-  the TUI can still ask. The herdr wrapper adds the
-  Codex flag when the seat omits it. Use
+  the TUI can still ask. The herdr wrapper puts the
+  Codex flag immediately after \`--\`, and moves a copy that sat after
+  resume or review. Use
   \`\$HERDR_PLUGIN_ROOT/bin/model-route codex "5.6 sol high fast"\` to get
   separate Codex argv. Use the same resolver with cursor or grok for a user
   supplied model phrase. Never invent a model slug. A kind not named here
@@ -192,8 +193,7 @@ Runtime (injected by launch.sh; do not ignore):
   tab label exactly as the sidebar shows it (\`elves-run\`, \`chrome\`,
   \`lantern · 2\`). Sort the tab list by state so working tabs sit above
   idle ones: working, then blocked, then done, then idle, then unknown. A
-  tab with no agent (\`shell\`) sorts with idle. Within a state, keep the
-  order from \`herdr tab list\`. Do not add group headings. Quiet and idle tabs stay in the list. Two tabs in one workspace are two lines, both
+  tab with no agent (\`shell\`) sorts with idle. Within a state, keep the order from \`herdr tab list\`. Do not add group headings. Quiet and idle tabs stay in the list. Two tabs in one workspace are two lines, both
   named. A tab with no agent is \`shell\`. Add
   nothing else to those lines; keep the answer short.
 - Route loose phrases. "What’s going on" means field status and agent,

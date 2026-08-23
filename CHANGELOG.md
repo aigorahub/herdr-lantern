@@ -12,8 +12,9 @@ All notable changes to Lantern, by Elves are documented here.
 - Codex seats, resumes, forks, and reviews now pass
   `--dangerously-bypass-approvals-and-sandbox` so a Codex tab does not stop
   for command or sandbox confirms. `-a never -s danger-full-access` still
-  left TUI prompts. The herdr wrapper adds the flag when a Codex `agent
-  start` omits it. A lantern chat that itself runs Codex gets the same flag.
+  left TUI prompts. The herdr wrapper puts that flag immediately after `--`
+  on a Codex `agent start`, and moves a copy that sat after resume or
+  review. A lantern chat that itself runs Codex gets the same flag.
   Claude, Grok, and Cursor stay on smart-auto. bypassPermissions, `--yolo`,
   `--force`, and `--always-approve` stay off unless the user asks for yolo
   and confirms the exact flag and the protections it removes.

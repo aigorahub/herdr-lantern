@@ -144,7 +144,8 @@ Claude and Grok use `--permission-mode auto`. Cursor uses `--auto-review
 `--dangerously-bypass-approvals-and-sandbox` on every Codex start, resume,
 fork, and review. That skips command and sandbox confirms so the tab does
 not wait. `-a never -s danger-full-access` is not enough; the TUI can still
-ask. The herdr wrapper adds the Codex flag when the seat omits it. Never
+ask. The herdr wrapper puts the Codex flag immediately after `--`, and
+moves a copy that sat after resume or review. Never
 pass `--yolo`, `--force`, `--always-approve`, or `bypassPermissions` unless
 the user explicitly asks for yolo in that request. A yolo request does not
 select every bypass. Name the one provider-specific flag and the
