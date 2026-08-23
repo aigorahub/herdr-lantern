@@ -2,6 +2,23 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.6] - 2026-08-22
+
+### Changed
+
+- Light-up and "what's going on" now sort the open-tab list by state:
+  working, then blocked, then done, then idle. Quiet tabs stay in the list.
+  Two tabs in one workspace are still two lines. No group headings.
+- Codex seats, resumes, forks, and reviews now pass
+  `--dangerously-bypass-approvals-and-sandbox` so a Codex tab does not stop
+  for command or sandbox confirms. `-a never -s danger-full-access` still
+  left TUI prompts. The herdr wrapper adds the flag when a Codex `agent
+  start` omits it. A lantern chat that itself runs Codex gets the same flag.
+  Claude, Grok, and Cursor stay on smart-auto. bypassPermissions, `--yolo`,
+  `--force`, and `--always-approve` stay off unless the user asks for yolo
+  and confirms the exact flag and the protections it removes.
+- The plugin version is 0.9.6.
+
 ## [0.9.5] - 2026-08-22
 
 ### Changed

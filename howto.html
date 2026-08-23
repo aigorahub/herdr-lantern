@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.9.5</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.9.6</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -246,7 +246,7 @@
       </tbody>
     </table>
     <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the lantern chat.</p>
-    <p class="note">Agents the lantern seats start in the smart-auto permission tier. Each kind gets its own flags after <code>--</code> on <code>agent start</code>. A full bypass is absent by default. Lantern can pass one only after a user asks for yolo and confirms the exact flag and lost protections. Before confirmation, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
+    <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper adds that flag if the seat omits it. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Before confirmation, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>

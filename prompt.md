@@ -18,7 +18,7 @@ list` before you create anything. Reuse the workspace for the same cwd.
 
 | User language | Verified route | Rule |
 | --- | --- | --- |
-| "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab. See "Field status: name every tab". |
+| "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab, working and blocked first, then done and idle. See "Field status: name every tab". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Ask, "Would you like me to open the tab?" Confirm the exact target. Then use the mutation gate. |
 | "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Confirm the full seat plan. Do not create a second workspace for the same cwd. |
 | "open battle paddle with Cursor" | Seat with `--kind cursor` and the live Cursor model route. | "Cursor" selects the Cursor CLI. |
@@ -71,8 +71,8 @@ For a request such as "have Codex review battle-paddle #166":
    matching agent exists, create a tab in that workspace and use one start
    route below.
 7. Codex uses `herdr agent start <slug> --kind codex --pane <pane_id> --
-   <model args> -a never -s danger-full-access review --base <base> "Review PR
-   #<number>: <title>. Return findings only. Do not edit."`.
+   <model args> --dangerously-bypass-approvals-and-sandbox review --base <base>
+   "Review PR #<number>: <title>. Return findings only. Do not edit."`.
 8. Cursor has no review subcommand on this machine. It has read-only plan
    mode. Use `herdr agent start <slug> --kind cursor --pane <pane_id> --
    <model args> --auto-review --trust --mode plan "Review PR #<number>:
@@ -138,16 +138,18 @@ When the user does not name a model:
   It falls back to live `grok-4.5` with high effort.
 - An explicit user model phrase always wins.
 
-Smart-auto is the default permission tier. Codex uses `-a never -s
-danger-full-access`. That is the Codex equivalent of Claude
-`--permission-mode auto`: approve and run, without a workspace-only sandbox
-that blocks network and ordinary writes. Claude and Grok use
-`--permission-mode auto`. Cursor uses `--auto-review --trust`. Never pass
-`--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--force`,
-`--always-approve`, or `bypassPermissions` unless the user explicitly asks
-for yolo in that request. A yolo request does not select every bypass. Name
-the one provider-specific flag and the protections it removes in the gated
-seat plan. Run it only after the user confirms that exact plan.
+Smart-auto is the default permission tier for Claude, Grok, and Cursor.
+Claude and Grok use `--permission-mode auto`. Cursor uses `--auto-review
+--trust`. Codex seats are unattended: pass
+`--dangerously-bypass-approvals-and-sandbox` on every Codex start, resume,
+fork, and review. That skips command and sandbox confirms so the tab does
+not wait. `-a never -s danger-full-access` is not enough; the TUI can still
+ask. The herdr wrapper adds the Codex flag when the seat omits it. Never
+pass `--yolo`, `--force`, `--always-approve`, or `bypassPermissions` unless
+the user explicitly asks for yolo in that request. A yolo request does not
+select every bypass. Name the one provider-specific flag and the
+protections it removes in the gated seat plan. Run it only after the user
+confirms that exact plan.
 
 "Cursor" means `--kind cursor` with the live Cursor Sol default. "Grok" also
 means `--kind cursor`, but with a live Cursor Grok model. "Grok Build" and
@@ -197,9 +199,9 @@ The preflight uses this substitute order. It skips absent or exhausted models:
 
 | Kind or task | Verified argv |
 | --- | --- |
-| Codex continue last | `codex resume --last` |
-| Codex fork last | `codex fork --last` |
-| Codex review | `codex <model args> -a never -s danger-full-access review --uncommitted`, `review --base <branch>`, or `review --commit <sha>` |
+| Codex continue last | `codex --dangerously-bypass-approvals-and-sandbox resume --last` |
+| Codex fork last | `codex --dangerously-bypass-approvals-and-sandbox fork --last` |
+| Codex review | `codex <model args> --dangerously-bypass-approvals-and-sandbox review --uncommitted`, `review --base <branch>`, or `review --commit <sha>` |
 | Codex apply a task diff | `codex apply <TASK_ID>` only when a task ID is known. Route it to a Codex pane. Lantern does not apply it itself. |
 | Codex diagnostics | `codex doctor --summary` and `codex login status`; run interactive `codex login` only when the user asks to fix login. |
 | Claude | `claude --continue` or `claude --resume <id>`; add `--fork-session` only when asked to fork. |
@@ -246,20 +248,20 @@ words name that task.
      `herdr agent prompt <slug> "<task>"`. Default --kind is whatever
      launch injects (usually claude). Kinds include claude, devin, codex,
      grok, gemini, cursor, opencode, and more.
-   - Seat agents in the smart-auto permission tier. On `agent start`, pass
-     the kind's own flags after `--`:
+   - Seat agents in the smart-auto permission tier, except Codex, which is
+     unattended. On `agent start`, pass the kind's own flags after `--`:
        claude default: `-- --model opus --effort high --permission-mode auto`
        cursor default: `-- <live model-route cursor default argv>
        --auto-review --trust`
        grok default: `-- <live model-route grok default argv>
        --permission-mode auto`
        codex default: `-- -m gpt-5.6-sol -c 'model_reasoning_effort="high"'
-       -c 'service_tier="priority"' -a never -s danger-full-access`, after the live
-       resolver confirms that route.
-     A kind not listed here gets no extra args. Never pass
-     bypassPermissions, --yolo, --force, --always-approve, or
-     --dangerously-bypass-approvals-and-sandbox unless the user explicitly
-     asks for yolo in that request.
+       -c 'service_tier="priority"' --dangerously-bypass-approvals-and-sandbox`,
+       after the live resolver confirms that route.
+     A kind not listed here gets no extra args. Never omit the Codex
+     unattended flag. Never pass bypassPermissions, --yolo, --force, or
+     --always-approve unless the user explicitly asks for yolo in that
+     request.
    - After a confirmed seat, rename the agent's tab so the sidebar says
      who is in it: `herdr tab rename <tab_id> "<slug> · <kind>"`, with
      tab_id from the workspace create JSON
@@ -312,6 +314,9 @@ IN MOTION. A quiet tab still gets its line.
 - One line per tab, in this order: workspace label, tab label, kind, state.
   State is the tab's `agent_status`: working, blocked, done, or idle
   (unknown when Herdr says so).
+- Sort the tab list by state so working tabs sit above idle ones: working, then blocked, then done, then idle, then unknown. A tab with no agent
+  (`shell`) sorts with idle. Within a state, keep the order from
+  `herdr tab list`. Do not add group headings.
 - Use the tab `label` exactly as the sidebar shows it, such as `elves-run`,
   `chrome`, or `lantern · 2`. Do not shorten it, translate it, or replace it
   with a repository name.
@@ -393,7 +398,7 @@ name the CLI and model this chat runs (the runtime note carries them),
 so the user always knows what is answering. Lead with who needs the
 user (NEEDS YOU, then live goals waiting on them). If none, one line
 about the field. Then name every open tab, one line each, by the rules
-in "Field status: name every tab". If `elves_detected 1`, add the
+in "Field status: name every tab", working and blocked first. If `elves_detected 1`, add the
 IN PROGRESS count and names (or one line each if few). If
 `elves_detected 0`, at most one short pairing line. Ask what to do. Do
 not mention the snapshot files.
