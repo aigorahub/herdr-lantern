@@ -162,9 +162,9 @@ fi
 grep -q 'CLAUDE.md' "$root/launch.sh" || fail "launch writes CLAUDE.md"
 
 # prompt.md is the other half of the gate: bin/herdr blocks the command, and
-# this file is what makes the lantern ask first. A ready-to-run prefixed line
-# next to an instruction that never mentions confirming is how an agent ends
-# up typing into other people's panes with nobody's permission.
+# this file says when the lantern may rerun it. A ready-to-run prefixed line
+# is how an agent ends up typing into other people's panes for a request
+# nobody made.
 if grep -q 'HERDR_HELPER_OK=1 herdr' "$root/prompt.md"; then
     fail "prompt.md should not hand out a prefixed herdr command to paste"
 fi
@@ -175,13 +175,37 @@ for gated_verb in prompt send-keys start focus close remove; do
         fail "the launch.sh appendix does not name $gated_verb as gated"
 done
 
+# A request is an instruction. The lantern acts on it and asks only when
+# the ask is genuinely unclear or the action destroys work. Both
+# instruction surfaces have to carry that rule and the short list of
+# cases that still stop for a question, or one of them quietly goes back
+# to asking permission for work the user already asked for.
 for route_file in prompt.md launch.sh; do
-    grep -qF 'Would you like me to open the tab?' "$root/$route_file" ||
-        fail "$route_file does not use the open-tab confirmation"
+    grep -qF 'Do what they asked' "$root/$route_file" ||
+        fail "$route_file does not tell the lantern to act on a request"
+    grep -qF 'A request is an instruction' "$root/$route_file" ||
+        fail "$route_file does not say a request is an instruction"
+    grep -qF 'Would you like me to?' "$root/$route_file" ||
+        fail "$route_file does not forbid asking permission for work"
+    for ask_case in 'does not resolve' 'clean up' 'destroys work'; do
+        grep -qF "$ask_case" "$root/$route_file" ||
+            fail "$route_file does not keep the $ask_case ask-first case"
+    done
+    if grep -qF 'Would you like me to open the tab?' "$root/$route_file"; then
+        fail "$route_file still asks permission to open a tab"
+    fi
     if grep -qiF 'Would you like me to walk you there?' "$root/$route_file"; then
         fail "$route_file still uses the old walk confirmation"
     fi
 done
+# Closing, killing, and removing are the actions a wrong guess cannot
+# undo. Those keep their question.
+for destructive in 'agent kill' 'worktree remove'; do
+    grep -qF "$destructive" "$root/prompt.md" ||
+        fail "prompt.md does not name $destructive as ask-first"
+done
+grep -qF 'Never close Lantern home' "$root/prompt.md" ||
+    fail "prompt.md must still protect the lantern home tab"
 grep -qF '"walk me there"' "$root/prompt.md" ||
     fail "prompt.md no longer accepts the old input alias"
 
@@ -2214,7 +2238,7 @@ grep -qF 'agent_not_ready' "$root/launch.sh" ||
     fail "the launch.sh appendix does not describe the Codex startup gate"
 grep -q 'helper_cursor_default_model' "$root/launch.sh" ||
     fail "launch.sh should take the cursor default model from lib.sh"
-# And what is supposed to be happening where: after a confirmed seat, each
+# And what is supposed to be happening where: after the seat is up, each
 # instruction surface has the lantern say slug, kind, model-only-if-chosen,
 # and the task.
 for seat_file in prompt.md launch.sh; do

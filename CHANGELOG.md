@@ -2,6 +2,26 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.9] - 2026-08-23
+
+### Changed
+
+- A request is an instruction. When the user names the action and the target
+  resolves to exactly one thing, the lantern runs it and reports what it did,
+  instead of answering with "Would you like me to?". Opening a tab, seating an
+  agent, relaying a message, resuming, splitting a pane, and creating a
+  worktree no longer wait for a second yes.
+- The lantern still asks one short question first when the target does not
+  resolve to exactly one thing or was never named ("clean up", "close that
+  one"), when the action destroys work that is hard to get back (closing a
+  workspace, tab, or pane, `agent kill`, `worktree remove`, a plugin install
+  or reinstall), or when a model, repository, or saved session does not
+  resolve. Lantern home is still never closed, and a model substitute still
+  needs the user's word.
+- The `HERDR_HELPER_OK=1` gate in `bin/herdr` is unchanged. What changed is
+  when the lantern needs a question before it reruns the command.
+- The plugin version is 0.9.9.
+
 ## [0.9.8] - 2026-08-23
 
 ### Fixed
