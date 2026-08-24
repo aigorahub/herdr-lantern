@@ -176,10 +176,10 @@ for gated_verb in prompt send-keys start focus close remove; do
 done
 
 # A request is an instruction. The lantern acts on it and asks only when
-# the ask is genuinely unclear or the action destroys work. Both
-# instruction surfaces have to carry that rule and the short list of
-# cases that still stop for a question, or one of them quietly goes back
-# to asking permission for work the user already asked for.
+# the ask itself is unclear. Both instruction surfaces have to carry that
+# rule and the short list of cases that still stop for a question, or one
+# of them quietly goes back to asking permission for work the user
+# already asked for.
 for route_file in prompt.md launch.sh; do
     grep -qF 'Do what they asked' "$root/$route_file" ||
         fail "$route_file does not tell the lantern to act on a request"
@@ -187,10 +187,20 @@ for route_file in prompt.md launch.sh; do
         fail "$route_file does not say a request is an instruction"
     grep -qF 'Would you like me to?' "$root/$route_file" ||
         fail "$route_file does not forbid asking permission for work"
-    for ask_case in 'does not resolve' 'clean up' 'destroys work'; do
+    for ask_case in 'does not resolve' 'clean up'; do
         grep -qF "$ask_case" "$root/$route_file" ||
             fail "$route_file does not keep the $ask_case ask-first case"
     done
+    # Unclear is the only reason to ask. A destructive action the user
+    # named is still a clear request, and this is the carve-out that
+    # grew back once already. One literal phrase is not enough of a
+    # guard: the same rule reworded reads the same to the lantern.
+    if grep -qiE 'destroys work|destructive|cannot be undone|hard to get back' \
+        "$root/$route_file"; then
+        fail "$route_file makes a destructive action its own reason to ask"
+    fi
+    grep -qF 'are not exceptions' "$root/$route_file" ||
+        fail "$route_file does not say closing and killing are not exceptions"
     if grep -qF 'Would you like me to open the tab?' "$root/$route_file"; then
         fail "$route_file still asks permission to open a tab"
     fi
@@ -205,14 +215,31 @@ for route_file in prompt.md launch.sh; do
         fail "$route_file still uses the old walk confirmation"
     fi
 done
-# Closing, killing, and removing are the actions a wrong guess cannot
-# undo. Those keep their question.
-for destructive in 'agent kill' 'worktree remove'; do
-    grep -qF "$destructive" "$root/prompt.md" ||
-        fail "prompt.md does not name $destructive as ask-first"
+# The routes a wrong guess used to stop on are the ones a rewrite puts
+# a confirmation back into, and they can grow one without ever saying
+# "destroys work". Pin the rows themselves.
+for route_row in '"close finances"' '"make a worktree"' '"list/install plugins"'; do
+    row=$(grep -F "$route_row" "$root/prompt.md") ||
+        fail "prompt.md lost the $route_row route"
+    case $row in
+    *"only after confirmation"* | *"confirm the resolved"* | *"Confirm the resolved"*)
+        fail "the $route_row route waits for a confirmation again"
+        ;;
+    esac
 done
+# The two rules that survive: an unnamed target is not a request, and
+# the lantern never closes its own home.
+grep -qF '"Clean up" / "I' "$root/prompt.md" ||
+    fail "prompt.md no longer refuses an unnamed clean up"
 grep -qF 'Never close Lantern home' "$root/prompt.md" ||
     fail "prompt.md must still protect the lantern home tab"
+# The walkthroughs describe the same posture to the user. Nothing kept
+# them honest before.
+for doc_file in README.md howto.html docs/index.html; do
+    if grep -qiE 'destroys work|destroy work' "$root/$doc_file"; then
+        fail "$doc_file still tells the user a destructive action asks first"
+    fi
+done
 grep -qF 'then run it' "$root/prompt.md" ||
     fail "prompt.md does not tell the lantern to run the seat plan"
 grep -qF '"walk me there"' "$root/prompt.md" ||
