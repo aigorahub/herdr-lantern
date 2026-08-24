@@ -242,7 +242,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.9.9 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.9.10 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -440,7 +440,7 @@ HELPER_EXTRA_ARGS=""</pre>
       <p class="note">Empty <code>HELPER_AGENT</code> picks the first of those CLIs on <code>PATH</code>. Conf is <code>KEY=value</code> only; it is never sourced. After an upgrade, copy repo <code>prompt.md</code> over the seeded file if you want the latest rules.</p>
 
       <h2>Trust</h2>
-      <p>Runs as you, with your environment. Read <code>launch.sh</code>, <code>lib.sh</code>, and <code>bin/herdr</code> first. Create / start / focus / close run through the helper with <code>HERDR_HELPER_OK=1</code>. The lantern acts on what you ask and stops to ask only when the target is unclear or the action destroys work you cannot get back.</p>
+      <p>Runs as you, with your environment. Read <code>launch.sh</code>, <code>lib.sh</code>, and <code>bin/herdr</code> first. Create / start / focus / close run through the helper with <code>HERDR_HELPER_OK=1</code>. The lantern acts on what you ask and stops to ask only when the ask itself is unclear: no target named, or a name that matches more than one.</p>
 
       <footer>
         Source: <a href="https://github.com/aigorahub/herdr-lantern">aigorahub/herdr-lantern</a>

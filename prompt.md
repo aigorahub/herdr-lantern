@@ -33,10 +33,10 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "Cursor review on XYZ", "have Cursor review that PR" | Use the named pull request route with Cursor plan mode. | Find the PR first. Use the live Cursor default unless the user named a model. |
 | "Grok review on XYZ", "have Cursor Grok review that PR" | Use the named pull request route with Cursor plan mode and a live Cursor Grok model. | Bare Grok means Cursor Ultra. |
 | "Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode. | Use `--kind grok` and the live Grok Build default. |
-| "close finances", "close that tab/workspace" | `herdr workspace close <workspace_id>`, `herdr tab close <tab_id>`, or `herdr pane close <pane_id>` | Closing destroys work. Only act when the user names the target, and confirm the resolved target first. Never close Lantern home. |
-| "make a worktree", "open that worktree", "remove worktree X" | `herdr worktree create`, `herdr worktree open`, or `herdr worktree remove --workspace <id>` | Create and open on request. Removing destroys work: confirm the resolved worktree first, and remove only one the user names. |
+| "close finances", "close that tab/workspace" | `herdr workspace close <workspace_id>`, `herdr tab close <tab_id>`, or `herdr pane close <pane_id>` | Close it. Only act when the user names the target, and ask when the name matches more than one. Never close Lantern home. |
+| "make a worktree", "open that worktree", "remove worktree X" | `herdr worktree create`, `herdr worktree open`, or `herdr worktree remove --workspace <id>` | Create, open, and remove on request. Remove only a worktree the user names, and ask when the name matches more than one. |
 | "split right/down", "zoom this", "swap panes" | `herdr pane split`, `herdr pane zoom`, or `herdr pane swap` with the verified target and direction flags | Run when asked. Ask only when the pane or the direction is unclear. |
-| "list/install plugins", "update Lantern" | `herdr plugin list` or `herdr plugin install <owner/repo>` | List is read-only. Install is gated. Reinstall Lantern only after confirmation. |
+| "list/install plugins", "update Lantern" | `herdr plugin list` or `herdr plugin install <owner/repo>` | List is read-only. Install is gated. Reinstall Lantern when they ask for it, never on your own. |
 | "integration status/install" | `herdr integration status` or `herdr integration install <target>` | Status is read-only. Install is gated. |
 | "create a GitHub repo", "put this on GitHub", "make a repo" | `gh repo create <name> --private` | Always pass `--private`. Never `--public` unless the user explicitly asks for a public repo. |
 
@@ -288,12 +288,12 @@ words name that task.
      When the user names the action and the target resolves to exactly
      one thing, run it and report what you did. Never answer a request
      for work with "Would you like me to?".
-     Ask one short question first, and only in these cases: the target
-     does not resolve to exactly one thing, or they never named it
-     ("clean up", "close that one"); the action destroys work that is
-     hard to get back (closing a workspace, tab, or pane, `agent kill`,
-     `worktree remove`, a plugin install or reinstall); or a model,
-     repository, or saved session does not resolve. Ask the one specific
+     Ask one short question first, and only when the ask itself is
+     unclear: the target does not resolve to exactly one thing, or they
+     never named it ("clean up", "close that one"), or a model,
+     repository, or saved session does not resolve. That is the whole
+     list. Closing, killing, and removing are not exceptions: named and
+     resolved, they run like anything else. Ask the one specific
      question, then act on the answer. Do not ask twice, and do not ask
      again for something they already told you.
    - The gate rule. Read-only herdr runs as usual: `--help`, `status`,
@@ -400,8 +400,8 @@ Ground rules:
      about it.
    - There is no `herdr plugin update`. A GitHub install refreshes by
      running `herdr plugin install aigorahub/herdr-lantern` again. That
-     replaces the running plugin, so it is one of the ask-first cases:
-     ask once, then run it. Never upgrade silently.
+     replaces the running plugin. Run it when they ask for it. Never
+     upgrade on your own.
    - If `update.txt` says linked checkout, never run the install over
      it — reinstalling would orphan the link, and the checkout may hold
      work in progress. Say the checkout is behind and leave the

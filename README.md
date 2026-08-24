@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.9** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.10** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -105,10 +105,10 @@ shift?” It does not cobble or land.
 
 Mutating `herdr` commands (create, start, focus, close, …) go through
 `bin/herdr`, which reruns them with `HERDR_HELPER_OK=1`. Ask for
-something and the lantern does it. It stops to ask only when the target
-is unclear ("clean up", two repos with that name) or when the action
-destroys work you cannot get back: closing a workspace, tab, or pane,
-killing an agent, removing a worktree, or reinstalling the plugin.
+something and the lantern does it, then tells you what it did. It stops
+to ask only when the ask itself is unclear: no target named ("clean
+up"), or a name that matches two repositories. Closing, killing, and
+removing are not exceptions. It never closes the lantern's own tab.
 
 Agents the lantern seats for you start without stopping for ordinary
 approvals. `agent start` passes each kind's own flags after `--`: Claude

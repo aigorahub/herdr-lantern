@@ -2,6 +2,23 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.10] - 2026-08-23
+
+### Changed
+
+- Unclear is the only reason to ask. 0.9.9 kept a second reason the rule was
+  never meant to have: the action being destructive. A named, resolved
+  "close finances" is a clear request, and it stopped for a question anyway.
+  Closing a workspace, tab, or pane, `agent kill`, `worktree remove`, and a
+  plugin install now run like every other named request.
+- What still asks: the target does not resolve to exactly one thing, or was
+  never named ("clean up", "close that one"), or a model, repository, or
+  saved session does not resolve. That is the whole list.
+- Unchanged: the lantern never closes its own home tab, never acts on a
+  target the user did not name, and never upgrades the plugin on its own.
+  The `HERDR_HELPER_OK=1` gate in `bin/herdr` is unchanged.
+- The plugin version is 0.9.10.
+
 ## [0.9.9] - 2026-08-23
 
 ### Changed
