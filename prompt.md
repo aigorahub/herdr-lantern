@@ -406,7 +406,7 @@ Ground rules:
      it — reinstalling would orphan the link, and the checkout may hold
      work in progress. Say the checkout is behind and leave the
      `git pull` to the user.
-   - After a confirmed install, tell the user to quit this chat and
+   - After the install, tell the user to quit this chat and
      reopen the lantern: the new version loads at the next open, and
      this tab may stop answering to focus until it is closed.
 
