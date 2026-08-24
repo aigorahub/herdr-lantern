@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.8** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.9** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -104,8 +104,11 @@ it also snapshots those runs (`bin/elves-floor`). Ask “how’s the night
 shift?” It does not cobble or land.
 
 Mutating `herdr` commands (create, start, focus, close, …) go through
-`bin/herdr`. After you confirm a path or target, the helper reruns with
-`HERDR_HELPER_OK=1`.
+`bin/herdr`, which reruns them with `HERDR_HELPER_OK=1`. Ask for
+something and the lantern does it. It stops to ask only when the target
+is unclear ("clean up", two repos with that name) or when the action
+destroys work you cannot get back: closing a workspace, tab, or pane,
+killing an agent, removing a worktree, or reinstalling the plugin.
 
 Agents the lantern seats for you start without stopping for ordinary
 approvals. `agent start` passes each kind's own flags after `--`: Claude
@@ -122,7 +125,7 @@ Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok" uses `--kind cursor`
 with a live Cursor Grok model. "Grok Build" and "SuperGrok" use `--kind
 grok`. Lantern checks the selected model with `bin/model-preflight` before it
-asks you to confirm a seat. It stops on a failed check or a model it knows
+seats anything. It stops on a failed check or a model it knows
 will not work, and names one live substitute. A usage line with no reset
 time is still valid. Missing quota info on a harness that has no usage
 command is not a failed check.
@@ -138,7 +141,7 @@ GitHub repositories Lantern creates are private. `gh repo create` always
 includes `--private`. It does not pass `--public` unless you explicitly ask
 for a public repo.
 
-After a confirmed seat the lantern renames the agent's tab to
+After a seat the lantern renames the agent's tab to
 `<slug> · <kind>` and says in one line what is running where: the slug, the
 kind, the live model, effort, fast state, and the task the agent was given, or
 that it has none yet.

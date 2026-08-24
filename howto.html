@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.9.8</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.9.9</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -246,7 +246,7 @@
       </tbody>
     </table>
     <p class="note"><code>HELPER_SPAWN_KIND</code> is separate: it is the default <code>--kind</code> when the helper starts an agent for your work (usually <code>claude</code>), not the CLI in the lantern chat.</p>
-    <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Before confirmation, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
+    <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
@@ -347,7 +347,7 @@ HELPER_EXTRA_ARGS=""</pre>
         <span>Optional. If Elves session files are around, it reads the floor. No Elves install required for the rest of Lantern.</span>
       </li>
     </ul>
-    <p class="note">Create / start / focus / close are blocked until you confirm the exact path or target. The helper then reruns with <code>HERDR_HELPER_OK=1</code>. “Clean everything up” should ask which workspaces.</p>
+    <p class="note">Create / start / focus / close go through the helper, which reruns them with <code>HERDR_HELPER_OK=1</code>. Ask for something and the lantern does it, then tells you what it did. It stops to ask only when the target is unclear or the action destroys work: “clean everything up” asks which workspaces, and closing, killing, or removing asks once first.</p>
 
     <p class="note">Source and README: <a href="https://github.com/aigorahub/herdr-lantern">aigorahub/herdr-lantern</a>.</p>
   </main>

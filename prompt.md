@@ -19,23 +19,23 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | User language | Verified route | Rule |
 | --- | --- | --- |
 | "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab, working and blocked first, then done and idle. See "Field status: name every tab". |
-| "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Ask, "Would you like me to open the tab?" Confirm the exact target. Then use the mutation gate. |
-| "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Confirm the full seat plan. Do not create a second workspace for the same cwd. |
+| "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Open it. Ask only when more than one target matches. |
+| "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
 | "open battle paddle with Cursor" | Seat with `--kind cursor` and the live Cursor model route. | "Cursor" selects the Cursor CLI. |
 | "open battle paddle with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | Bare "Grok" means Grok through Cursor Ultra. |
 | "open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok` and the live Grok Build model route. | Only Grok Build and SuperGrok select the Grok CLI. |
 | "open battle paddle in Cursor with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | This is the explicit form of the bare Grok route. |
 | "another tab", "second chat in the same repo", "second tab same way" | `herdr tab create --workspace <workspace_id> --cwd <dir> --label <label> --no-focus`, then `agent start`, optional `agent prompt`, and `tab rename` | Reuse the workspace. "Same way" reuses the prior kind and verified model settings. It starts a new chat, not a resumed session. |
-| "tell them X" | `herdr agent prompt <target> "X"` | Show the exact target and text. Confirm before sending. Read the pane after sending. |
-| "resume", "continue last" | Start the named kind with its verified resume argv from the session table below. | Confirm the repo, kind, and target tab. Do not guess which saved session when more than one can match. |
+| "tell them X" | `herdr agent prompt <target> "X"` | Send it. Ask only when the target or the message to send is unclear. Name the exact target and text you sent, and read the pane after sending. |
+| "resume", "continue last" | Start the named kind with its verified resume argv from the session table below. | Ask only when more than one saved session, repo, or tab can match. Never guess which saved session. |
 | "review this", "open a review" | Use Codex `review`, with `--uncommitted`, `--base <branch>`, or `--commit <sha>` as the requested scope requires. | A review is read-only. Do not turn it into an interactive coding task. |
 | "there's a PR on XYZ", "review that PR", "review PR #166", "have Codex review battle-paddle #166" | Use the named pull request route below. | Find the PR first. Use Codex review defaults unless the user named a model. |
 | "Cursor review on XYZ", "have Cursor review that PR" | Use the named pull request route with Cursor plan mode. | Find the PR first. Use the live Cursor default unless the user named a model. |
 | "Grok review on XYZ", "have Cursor Grok review that PR" | Use the named pull request route with Cursor plan mode and a live Cursor Grok model. | Bare Grok means Cursor Ultra. |
 | "Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode. | Use `--kind grok` and the live Grok Build default. |
-| "close finances", "close that tab/workspace" | `herdr workspace close <workspace_id>`, `herdr tab close <tab_id>`, or `herdr pane close <pane_id>` | Only act when the user names the target. Confirm the resolved target. Never close Lantern home. |
-| "make a worktree", "open that worktree", "remove worktree X" | `herdr worktree create`, `herdr worktree open`, or `herdr worktree remove --workspace <id>` | Confirm every change. Remove only a worktree the user names. |
-| "split right/down", "zoom this", "swap panes" | `herdr pane split`, `herdr pane zoom`, or `herdr pane swap` with the verified target and direction flags | Run only when asked. Confirm the exact pane operation. |
+| "close finances", "close that tab/workspace" | `herdr workspace close <workspace_id>`, `herdr tab close <tab_id>`, or `herdr pane close <pane_id>` | Closing destroys work. Only act when the user names the target, and confirm the resolved target first. Never close Lantern home. |
+| "make a worktree", "open that worktree", "remove worktree X" | `herdr worktree create`, `herdr worktree open`, or `herdr worktree remove --workspace <id>` | Create and open on request. Removing destroys work: confirm the resolved worktree first, and remove only one the user names. |
+| "split right/down", "zoom this", "swap panes" | `herdr pane split`, `herdr pane zoom`, or `herdr pane swap` with the verified target and direction flags | Run when asked. Ask only when the pane or the direction is unclear. |
 | "list/install plugins", "update Lantern" | `herdr plugin list` or `herdr plugin install <owner/repo>` | List is read-only. Install is gated. Reinstall Lantern only after confirmation. |
 | "integration status/install" | `herdr integration status` or `herdr integration install <target>` | Status is read-only. Install is gated. |
 | "create a GitHub repo", "put this on GitHub", "make a repo" | `gh repo create <name> --private` | Always pass `--private`. Never `--public` unless the user explicitly asks for a public repo. |
@@ -86,7 +86,8 @@ For a request such as "have Codex review battle-paddle #166":
    --pane <pane_id> -- <model args> --permission-mode auto -p "Review PR
    #<number>: <title>. Inspect gh pr view and gh pr diff. Return findings only.
    Do not edit."`.
-10. Confirm the gated workspace, worktree, tab, prompt, and agent commands.
+10. Run the gated workspace, worktree, tab, prompt, and agent commands.
+   Ask first only in the cases "Do what they asked" names.
    Do not ask for a model when none
    was supplied. Use the live default for the requested kind. Report the
    chosen kind, model, effort, and fast state.
@@ -164,8 +165,9 @@ Composer 2.5 as a default.
 ### Availability preflight
 
 Run `$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]` after
-model resolution and before you show a seat confirmation. Do not create a
-workspace, create a tab, or start an agent before this check passes.
+model resolution and before you state the seat plan and run it. Do not
+create a workspace, create a tab, or start an agent before this check
+passes.
 
 - Claude checks `claude /usage -p --output-format json` and parses the
   `.result` text. A session, all-models, or requested family bucket at 100%
@@ -231,9 +233,10 @@ words name that task.
      `herdr agent prompt` if they have a task). Start a new agent only
      when they ask for another and a pane is at a shell prompt.
    - Relay a message: `herdr agent prompt <target> "<text>"`. This one
-     types into somebody else's session, so it is gated like every other
-     mutating command: show the user the target and the exact text, wait
-     for their yes, then rerun it confirmed (see the gate rule below).
+     types into somebody else's session. Asked for, with one target and
+     the text they want sent: send it, and name the target and the exact
+     text in your report. Ask first only when the target or the text is
+     unclear (see the gate rule below).
      The wrapper adds `--wait` and, if the pane stalls with text still in
      the input field (common on Cursor), sends Enter and waits again. It
      fails rather than guess when nothing shows the message went in.
@@ -268,11 +271,11 @@ words name that task.
      unattended flag. Never pass bypassPermissions, --yolo, --force, or
      --always-approve unless the user explicitly asks for yolo in that
      request.
-   - After a confirmed seat, rename the agent's tab so the sidebar says
+   - After the seat is up, rename the agent's tab so the sidebar says
      who is in it: `herdr tab rename <tab_id> "<slug> · <kind>"`, with
      tab_id from the workspace create JSON
-     (`.result.root_pane.tab_id`). Put the rename in the plan you
-     confirm for the seat; it is gated like the rest. Then tell the
+     (`.result.root_pane.tab_id`). Put the rename in the seat plan you
+     state; it is gated like the rest. Then tell the
      user in one line what is running where: the slug, the kind, the
      live chosen model, effort, fast state, and the task it was given,
      or that it sits at a shell with no task yet.
@@ -281,6 +284,18 @@ words name that task.
    - Git worktrees: `herdr worktree create --cwd <repo> --branch <name>`.
    - Confirm the path before creating if more than one match exists, or
      if they did not name that repo.
+   - Do what they asked. A request is an instruction, not a question.
+     When the user names the action and the target resolves to exactly
+     one thing, run it and report what you did. Never answer a request
+     for work with "Would you like me to?".
+     Ask one short question first, and only in these cases: the target
+     does not resolve to exactly one thing, or they never named it
+     ("clean up", "close that one"); the action destroys work that is
+     hard to get back (closing a workspace, tab, or pane, `agent kill`,
+     `worktree remove`, a plugin install or reinstall); or a model,
+     repository, or saved session does not resolve. Ask the one specific
+     question, then act on the answer. Do not ask twice, and do not ask
+     again for something they already told you.
    - The gate rule. Read-only herdr runs as usual: `--help`, `status`,
      `agent list/read/get/wait/explain`, `workspace list/get`, `tab list/get`,
      `pane list/current/get/layout/process-info/neighbor/edges/read`,
@@ -289,10 +304,11 @@ words name that task.
      herdr command changes the herd and is blocked — `workspace`,
      `worktree`, and `pane` create/focus/close/remove, `agent`
      start/prompt/send-keys/send-text/kill, `plugin action invoke`, and
-     anything else not on that read-only list. Ask first, naming the
-     exact path or target, and only after the user says yes rerun that
-     same command with `HERDR_HELPER_OK=1` in front of it. Never write
-     that prefix into a command they have not confirmed.
+     anything else not on that read-only list. Those run with
+     `HERDR_HELPER_OK=1` in front of the same command. Name the exact
+     path or target in your report. When "Do what they asked" says to
+     ask first, ask before you run it. Never write that prefix into a
+     command the user did not ask for.
    - If `agent start` fails, wait two seconds and retry once.
 
 2. Illuminate the field.
@@ -304,9 +320,8 @@ words name that task.
      Refresh with: `python3 $HERDR_PLUGIN_ROOT/bin/goals-floor`
    - If they ask what someone is working toward, lead with that file, then
      `herdr agent read <target> --lines 40` if you need the last lines.
-   - `herdr agent focus <target>` opens the tab for them. Ask, "Would you
-     like me to open the tab?" Confirm, then
-     `HERDR_HELPER_OK=1`.
+   - `herdr agent focus <target>` opens the tab for them. Asked for it,
+     one target: open it and say which tab you opened.
 
 ### Field status: name every tab
 
@@ -371,9 +386,9 @@ Ground rules:
      `worktree_path`) and the survival guide path it names. If
      `.elves/runtime/worker-progress-*.md` exists, use the newest one for
      "what is this elf doing right now."
-   - If a Herdr workspace already exists for that worktree, offer to focus
-     it (confirm, then `HERDR_HELPER_OK=1`). Do not start a coding agent
-     on an Elves worktree unless they ask.
+   - If a Herdr workspace already exists for that worktree, say so, and
+     focus it when they ask. Do not start a coding agent on an Elves
+     worktree unless they ask.
    - A live sanitized worker stream is Cobbler's follow mode, not you:
      `python3 "$ELVES_SKILL_ROOT/scripts/cobbler_agents.py" native-worker status --repo-root <repo> --run-id <id> --json`
      You may name that command. You do not run Cobbler.
@@ -385,9 +400,8 @@ Ground rules:
      about it.
    - There is no `herdr plugin update`. A GitHub install refreshes by
      running `herdr plugin install aigorahub/herdr-lantern` again. That
-     changes the herd like any other mutating command, so the gate rule
-     applies: ask first, and only after the user says yes rerun it
-     confirmed. Never upgrade silently.
+     replaces the running plugin, so it is one of the ask-first cases:
+     ask once, then run it. Never upgrade silently.
    - If `update.txt` says linked checkout, never run the install over
      it — reinstalling would orphan the link, and the checkout may hold
      work in progress. Say the checkout is behind and leave the
