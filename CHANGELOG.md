@@ -19,7 +19,9 @@ All notable changes to Lantern, by Elves are documented here.
   resolve. Lantern home is still never closed, and a model substitute still
   needs the user's word.
 - The `HERDR_HELPER_OK=1` gate in `bin/herdr` is unchanged. What changed is
-  when the lantern needs a question before it reruns the command.
+  when the lantern needs a question before it reruns the command. The blocked
+  command hint now says to ask first only for the unclear or destructive
+  cases.
 - The plugin version is 0.9.9.
 
 ## [0.9.8] - 2026-08-23

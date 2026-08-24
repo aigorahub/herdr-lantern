@@ -189,7 +189,7 @@ Runtime (injected by launch.sh; do not ignore):
   in one line what is running where: the slug, the kind, the live chosen
   model, effort, fast state, and the task, or that it sits at a shell with no
   task yet. Rename the agent’s tab to
-  \`<slug> · <kind>\` as part of the seat plan you confirm
+  \`<slug> · <kind>\` as part of the seat plan you state
   (\`herdr tab rename\`, tab_id from the workspace create JSON), so the
   sidebar says who is in it.
 - A yolo request does not select every bypass. Name the one
@@ -244,7 +244,7 @@ Runtime (injected by launch.sh; do not ignore):
   -p\` and the live Grok Build default. Grok Build has no review subcommand.
 - After model resolution, run
   \`\$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]\`. Run it
-  before asking the user to confirm a seat. Do not create, start, or prompt
+  before you seat anything. Do not create, start, or prompt
   when it fails. A missing command, timeout, or unparseable check stops the
   route. A usage line with no reset time is still valid. A harness with no
   quota command is not a failed check. If the model is unavailable, report

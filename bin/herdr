@@ -35,6 +35,7 @@ esac
 
 printf 'lantern: blocked mutating herdr command:\n' >&2
 printf '  herdr %s\n' "$*" >&2
-printf 'Confirm the exact path or target with the user, then rerun as:\n' >&2
+printf 'Rerun with the prefix; ask the user first only when the target is\n' >&2
+printf 'unclear or the action destroys work:\n' >&2
 printf '  HERDR_HELPER_OK=1 herdr %s\n' "$*" >&2
 exit 2

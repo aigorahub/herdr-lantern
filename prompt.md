@@ -165,8 +165,9 @@ Composer 2.5 as a default.
 ### Availability preflight
 
 Run `$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]` after
-model resolution and before you show a seat confirmation. Do not create a
-workspace, create a tab, or start an agent before this check passes.
+model resolution and before you state the seat plan and run it. Do not
+create a workspace, create a tab, or start an agent before this check
+passes.
 
 - Claude checks `claude /usage -p --output-format json` and parses the
   `.result` text. A session, all-models, or requested family bucket at 100%

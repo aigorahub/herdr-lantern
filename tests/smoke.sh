@@ -194,6 +194,13 @@ for route_file in prompt.md launch.sh; do
     if grep -qF 'Would you like me to open the tab?' "$root/$route_file"; then
         fail "$route_file still asks permission to open a tab"
     fi
+    # Seating is the route the change names first, and it is the one
+    # with a preflight step in front of it, so it is the easiest place
+    # for confirm-first wording to survive the rewrite.
+    if grep -qiE 'confirm a seat|seat confirmation|seat plan you confirm' \
+        "$root/$route_file"; then
+        fail "$route_file still waits for a seat confirmation"
+    fi
     if grep -qiF 'Would you like me to walk you there?' "$root/$route_file"; then
         fail "$route_file still uses the old walk confirmation"
     fi
@@ -206,6 +213,8 @@ for destructive in 'agent kill' 'worktree remove'; do
 done
 grep -qF 'Never close Lantern home' "$root/prompt.md" ||
     fail "prompt.md must still protect the lantern home tab"
+grep -qF 'then run it' "$root/prompt.md" ||
+    fail "prompt.md does not tell the lantern to run the seat plan"
 grep -qF '"walk me there"' "$root/prompt.md" ||
     fail "prompt.md no longer accepts the old input alias"
 
