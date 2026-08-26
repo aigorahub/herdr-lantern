@@ -275,10 +275,10 @@
       <p class="note">The sidebar already marks working, blocked, done, or idle. Lantern adds goals and progress in words, then seats or focuses a pane when you ask.</p>
 
       <h2 id="agent-onboarding">New here? Paste this to your agent</h2>
-      <p>Open Claude Code, Codex, Cursor, Grok Build, or another helper you already have, paste the block, and let it install Lantern and walk you through first-run setup.</p>
+      <p>Open Claude Code, Codex, Cursor, Grok Build, or another helper you already have, paste the block, and let it install Lantern and open it. First-run setup happens in the new lantern chat.</p>
       <div class="paste">
         <button class="copy" type="button" data-copy="agent-onboard">Copy</button>
-        <pre><code id="agent-onboard">Install the Lantern Herdr plugin from aigorahub/herdr-lantern, open it, and walk me through first-run setup. Do not start a coding agent until I ask.
+        <pre><code id="agent-onboard">Install the Lantern Herdr plugin from aigorahub/herdr-lantern and open it. Do not start a coding agent until I ask.
 
 1. Confirm `herdr` is on PATH and reports 0.7.5 or newer. If it is missing, stop and tell me to install Herdr from https://herdr.dev first.
 
@@ -291,9 +291,9 @@
    herdr plugin action invoke aigora.lantern.open
    Or, from a checkout, `sh install.sh`.
 
-4. In the lantern chat, set my default spawn so I can later just name a repo. Ask me the harness, model, and setting I want (for example Cursor Grok 4.6 high fast, Claude Opus high, or Codex 5.6 sol high fast). Store that with `$HERDR_PLUGIN_ROOT/bin/onboard apply`. Then explain, briefly: Lantern lights the Herdr field; I talk; it runs herdr. "Open battle-paddle" uses the default I just set.
+4. Stop. Tell me to switch to the new Lantern tab and answer its first-run question there (harness, model, setting). Do not run onboard apply from this shell.
 
-5. Stop after install + orientation. Offer one short line I can paste later, such as: open battle-paddle.</code></pre>
+5. After I set the default in that chat, I can say things like: open battle-paddle.</code></pre>
       </div>
       <p class="note">Need Herdr 0.7.5+ and Python 3. Windows also needs Git for Windows. The shell one-liner below is enough if you prefer not to paste.</p>
 

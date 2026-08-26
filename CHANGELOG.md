@@ -24,6 +24,16 @@ All notable changes to Lantern, by Elves are documented here.
   in `helper.conf`. Empty model still means that kind’s live default.
 - The plugin version is 0.9.11.
 
+### Fixed
+
+- `helper.conf` writes reject quotes and line breaks, rewrite the spawn
+  keys in one pass, and parse the result before marking onboarded.
+- Grok Build stores as `--kind grok` with an empty model, not a model
+  phrase the Grok resolver cannot use.
+- The paste-to-your-agent block stops after opening Lantern. First-run
+  setup stays in that chat.
+- `install.sh` requires an exact `aigora.lantern` plugin-list token.
+
 ## [0.9.10] - 2026-08-23
 
 ### Changed

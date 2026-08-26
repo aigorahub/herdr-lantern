@@ -59,6 +59,13 @@ helper_parse_conf "$tmp" || fail "parse after conf set"
 if helper_conf_set "$tmp" HELPER_SPAWN_MODEL 'bad; rm' 2>/dev/null; then
     fail "conf set accepted an unsafe value"
 fi
+if helper_conf_set "$tmp" HELPER_SPAWN_MODEL 'foo"bar' 2>/dev/null; then
+    fail "conf set accepted a quote"
+fi
+if helper_conf_set "$tmp" HELPER_SPAWN_MODEL "$(printf 'foo\nHELPER_SPAWN_KIND=grok')" \
+    2>/dev/null; then
+    fail "conf set accepted a newline"
+fi
 if helper_conf_set "$tmp" EVIL 1 2>/dev/null; then
     fail "conf set accepted an unknown key"
 fi
@@ -67,6 +74,21 @@ fi
     fail "agent should normalize to cursor"
 [ "$(helper_normalize_spawn_kind grok-build)" = grok ] ||
     fail "grok-build should normalize to grok"
+[ "$(helper_normalize_spawn_kind 'Grok Build')" = grok ] ||
+    fail "Grok Build should normalize to grok"
+[ "$(helper_normalize_spawn_model grok 'Grok Build')" = "" ] ||
+    fail "Grok Build as a model should store the live default"
+[ "$(helper_normalize_spawn_model cursor 'cursor grok 4.6 high fast')" = \
+    "cursor grok 4.6 high fast" ] ||
+    fail "a Cursor model phrase should stay a phrase"
+helper_plugin_id_listed '{"id":"aigora.lantern"}' aigora.lantern ||
+    fail "plugin list JSON should match aigora.lantern"
+if helper_plugin_id_listed 'aigora.lantern-preview' aigora.lantern; then
+    fail "a longer plugin id should not match aigora.lantern"
+fi
+if helper_plugin_id_listed 'aigoraXlantern' aigora.lantern; then
+    fail "a regex wildcard should not match aigora.lantern"
+fi
 HELPER_SPAWN_KIND=cursor
 HELPER_SPAWN_MODEL="cursor grok 4.6 high fast"
 HELPER_SPAWN_EFFORT=""
@@ -97,8 +119,15 @@ grep -q '^model: cursor grok 4.6 high fast$' "$onboard_out" ||
     fail "onboard apply should store the model phrase"
 [ -f "$onboard_cli/state/onboarded" ] || fail "onboard apply should mark onboarded"
 sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/state" \
+    apply --kind "Grok Build" --model "Grok Build" >"$onboard_out" ||
+    fail "onboard apply Grok Build"
+grep -q '^kind: grok$' "$onboard_out" || fail "Grok Build should store kind grok"
+grep -q '^model: $' "$onboard_out" || fail "Grok Build should store an empty model"
+grep -q '^summary: grok · live default$' "$onboard_out" ||
+    fail "Grok Build should use the live Grok default"
+sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/state" \
     show >"$onboard_out" || fail "onboard show"
-grep -q '^summary: cursor · cursor grok 4.6 high fast$' "$onboard_out" ||
+grep -q '^summary: grok · live default$' "$onboard_out" ||
     fail "onboard show should print the stored default"
 sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/state" \
     plan >"$onboard_out" || fail "onboard plan"
@@ -274,6 +303,16 @@ grep -qF 'First-run setup is needed' "$root/launch.sh" ||
     fail "launch.sh does not carry the first-run interview"
 grep -qF 'id="agent-onboard"' "$root/docs/index.html" ||
     fail "docs/index.html is missing the paste-this-to-your-agent block"
+if awk '/id="agent-onboard"/,/<\/code>/' "$root/docs/index.html" |
+    grep -qF 'HERDR_PLUGIN_ROOT'; then
+    fail "the paste block must not use lantern-only env from the outer agent"
+fi
+grep -qF 'switch to the new Lantern tab' "$root/docs/index.html" ||
+    fail "the paste block does not hand first-run to the lantern chat"
+grep -qF 'Grok Build → `--kind grok`' "$root/launch.sh" ||
+    fail "launch.sh does not map Grok Build to --kind grok with no model"
+grep -qF 'Grok Build → `--kind grok`' "$root/prompt.md" ||
+    fail "prompt.md does not map Grok Build to --kind grok with no model"
 grep -qF 'HELPER_SPAWN_MODEL' "$root/helper.conf.example" ||
     fail "helper.conf.example does not include HELPER_SPAWN_MODEL"
 grep -qF 'herdr plugin install aigorahub/herdr-lantern' "$root/install.sh" ||

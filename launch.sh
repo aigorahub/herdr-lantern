@@ -114,13 +114,15 @@ if [ "$onboard_needed" = 1 ]; then
     onboard_note=$(
         cat <<'EOF'
 - First-run setup is needed. After the field snapshot, ask once what to
-  open when they just name a repo: harness, model, and setting. Examples
-  they can say: Cursor Grok 4.6 high fast; Claude Opus high; Codex 5.6
-  sol high fast; Grok Build; or keep the current default. Then run
-  `$HERDR_PLUGIN_ROOT/bin/onboard apply --kind <kind> --model "<phrase>"`
-  with optional `--effort`, or `onboard apply --keep`. Confirm the stored
-  summary. Until they answer, do not invent a spawn default beyond the
-  injected kind. Do not seat an agent as part of setup.
+  open when they just name a repo: harness, model, and setting. Map the
+  answer exactly, then run `$HERDR_PLUGIN_ROOT/bin/onboard apply` with
+  that mapping: Cursor Grok 4.6 high fast → `--kind cursor --model
+  "cursor grok 4.6 high fast"`; Claude Opus high → `--kind claude
+  --model opus --effort high`; Codex 5.6 sol high fast → `--kind
+  codex --model "5.6 sol high fast"`; Grok Build → `--kind grok` with
+  no `--model`; keep the current default → `onboard apply --keep`.
+  Confirm the stored summary. Until they answer, do not invent a spawn
+  default beyond the injected kind. Do not seat an agent as part of setup.
 EOF
     )
 fi
@@ -196,9 +198,9 @@ Runtime (injected by launch.sh; do not ignore):
   name a harness, model, or setting, use this default. Do not ask which
   model or kind. An explicit kind or model phrase always wins. Change
   the default when they say "make X my default spawn" or "set my default
-  spawn" by running \`\$HERDR_PLUGIN_ROOT/bin/onboard apply --kind <kind>
-  --model "<phrase>"\` with optional \`--effort\`. Show the stored
-  summary with \`onboard show\`.
+  spawn" by running \`\$HERDR_PLUGIN_ROOT/bin/onboard apply\` with the
+  same mapping as first-run (Grok Build is \`--kind grok\` with no
+  \`--model\`). Show the stored summary with \`onboard show\`.
 $onboard_note
 - Seat agents in the smart-auto permission tier, except Codex, which is
   unattended. Claude defaults to

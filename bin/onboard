@@ -5,6 +5,7 @@
 #   onboard plan
 #   onboard show
 #   onboard apply --kind cursor --model "cursor grok 4.6 high fast"
+#   onboard apply --kind grok
 #   onboard apply --keep
 #   onboard doctor
 set -eu
@@ -17,7 +18,8 @@ plugin_root=$(helper_posix_path "$plugin_root")
 usage() {
     printf '%s\n' "usage: onboard plan|show|apply|doctor" \
         "  apply --kind <kind> [--model <phrase>] [--effort <effort>]" \
-        "  apply --keep" >&2
+        "  apply --keep" \
+        "  Grok Build is --kind grok with no --model" >&2
     exit 2
 }
 
@@ -134,6 +136,12 @@ cmd_apply() {
         printf '%s\n' "onboard: could not create config directories" >&2
         exit 1
     }
+    lock_dir=$state_dir/apply.lock
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+        printf '%s\n' "onboard apply: another apply is already running" >&2
+        exit 1
+    fi
+    trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
     if [ ! -f "$conf" ]; then
         cp "$plugin_root/helper.conf.example" "$conf" || {
             printf '%s\n' "onboard: could not seed $conf" >&2
@@ -159,10 +167,12 @@ cmd_apply() {
         exit 2
         ;;
     esac
+    model=$(helper_normalize_spawn_model "$kind" "$model")
 
-    helper_conf_set "$conf" HELPER_SPAWN_KIND "$kind" || exit 1
-    helper_conf_set "$conf" HELPER_SPAWN_MODEL "$model" || exit 1
-    helper_conf_set "$conf" HELPER_SPAWN_EFFORT "$effort" || exit 1
+    helper_conf_set_keys "$conf" \
+        HELPER_SPAWN_KIND "$kind" \
+        HELPER_SPAWN_MODEL "$model" \
+        HELPER_SPAWN_EFFORT "$effort" || exit 1
     helper_onboard_mark "$state_dir" || exit 1
     load_conf || exit 1
     cmd_show
