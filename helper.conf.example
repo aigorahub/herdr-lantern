@@ -20,8 +20,14 @@ HELPER_EFFORT=""
 # Search root mentioned to the helper. Process cwd is a plugin state workdir.
 HELPER_CWD="~"
 
-# Default --kind for `herdr agent start` when the user does not name one.
+# Default seat when the user names a repo and no harness, model, or
+# setting. Kind is the herdr --kind (claude, cursor, grok, codex, …).
+# Model is a spoken phrase or catalog id; empty uses that kind’s live
+# default. Set these from the lantern chat ("make X my default spawn")
+# or with `bin/onboard apply`.
 HELPER_SPAWN_KIND="claude"
+HELPER_SPAWN_MODEL=""
+HELPER_SPAWN_EFFORT=""
 
 # Permission mode:
 #   devin: auto | accept-edits | smart (default) | dangerous

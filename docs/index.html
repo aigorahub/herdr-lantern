@@ -224,6 +224,26 @@
     .need { color: var(--wait); }
     .ok { color: var(--good); }
     .you { color: var(--gold); }
+    .paste {
+      position: relative;
+      margin: 0.75rem 0 0;
+    }
+    .paste pre { margin: 0; padding-right: 5.5rem; }
+    .copy {
+      position: absolute;
+      top: 0.55rem;
+      right: 0.55rem;
+      background: var(--gold);
+      color: oklch(0.14 0.02 70);
+      border: 0;
+      border-radius: 2px;
+      font-family: "Fragment Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.35rem 0.55rem;
+      cursor: pointer;
+    }
     footer {
       margin-top: 3rem;
       padding-top: 1.25rem;
@@ -242,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.9.10 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.9.11 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -254,13 +274,36 @@
       <p>A Herdr plugin from the team that brought you <a href="https://github.com/aigorahub/elves">Elves</a>. It opens as a chat tab in its own Herdr workspace and starts the CLI you already use — Cursor <code>agent</code>, Devin, Claude Code, Codex, or Grok. That CLI drives Herdr. It is not a new chat product, and it does not cobble or land PRs.</p>
       <p class="note">The sidebar already marks working, blocked, done, or idle. Lantern adds goals and progress in words, then seats or focuses a pane when you ask.</p>
 
+      <h2 id="agent-onboarding">New here? Paste this to your agent</h2>
+      <p>Open Claude Code, Codex, Cursor, Grok Build, or another helper you already have, paste the block, and let it install Lantern and walk you through first-run setup.</p>
+      <div class="paste">
+        <button class="copy" type="button" data-copy="agent-onboard">Copy</button>
+        <pre><code id="agent-onboard">Install the Lantern Herdr plugin from aigorahub/herdr-lantern, open it, and walk me through first-run setup. Do not start a coding agent until I ask.
+
+1. Confirm `herdr` is on PATH and reports 0.7.5 or newer. If it is missing, stop and tell me to install Herdr from https://herdr.dev first.
+
+2. If `herdr plugin list` already shows aigora.lantern from a local `herdr plugin link`, leave that checkout. Otherwise install from GitHub:
+   herdr plugin unlink aigora.lantern
+   herdr plugin install aigorahub/herdr-lantern
+   Skip unlink when nothing is installed. Do not link and GitHub-install the same id at once.
+
+3. Open it:
+   herdr plugin action invoke aigora.lantern.open
+   Or, from a checkout, `sh install.sh`.
+
+4. In the lantern chat, set my default spawn so I can later just name a repo. Ask me the harness, model, and setting I want (for example Cursor Grok 4.6 high fast, Claude Opus high, or Codex 5.6 sol high fast). Store that with `$HERDR_PLUGIN_ROOT/bin/onboard apply`. Then explain, briefly: Lantern lights the Herdr field; I talk; it runs herdr. "Open battle-paddle" uses the default I just set.
+
+5. Stop after install + orientation. Offer one short line I can paste later, such as: open battle-paddle.</code></pre>
+      </div>
+      <p class="note">Need Herdr 0.7.5+ and Python 3. Windows also needs Git for Windows. The shell one-liner below is enough if you prefer not to paste.</p>
+
       <h2>Install</h2>
       <ol class="steps">
         <li><div>Need Herdr 0.7.5+ and Python 3 on macOS, Linux, or Windows, already running. Windows also needs Git for Windows. Lantern accepts <code>python3</code>, <code>python</code>, or <code>py -3</code>.</div></li>
         <li>
           <div>
-            Install from GitHub:
-            <pre>herdr plugin install aigorahub/herdr-lantern</pre>
+            One command installs the plugin and opens it:
+            <pre>herdr plugin install aigorahub/herdr-lantern &amp;&amp; herdr plugin action invoke aigora.lantern.open</pre>
           </div>
         </li>
         <li>
@@ -270,7 +313,7 @@
           </div>
         </li>
       </ol>
-      <p class="note">Developers: <code>herdr plugin link /path/to/herdr-lantern</code>. Do not link and GitHub-install the same id at once.</p>
+      <p class="note">The first lantern chat asks what to open when you just name a repo. Developers: <code>herdr plugin link /path/to/herdr-lantern</code>. Do not link and GitHub-install the same id at once.</p>
 
       <h2>Open it</h2>
       <ol class="steps">
@@ -386,7 +429,8 @@ No Elves install required. If there are no
         <li>“Who is working, blocked, or done?”<span>Inspect-only. It reads <code>herdr agent list</code>.</span></li>
         <li>“What are they working toward?”<span>Titles, Claude <code>/goal</code> / recap lines, who is waiting on a merge. Status alone is not progress.</span></li>
         <li>“Jump me to the love-spark agent.”<span>Reuse the workspace. Unnamed agents use a pane id, e.g. <code>w1X:p1</code>.</span></li>
-        <li>“Open the image maker repo with claude.”<span>Reuse if they are already there. Slugs: <code>image-maker</code>, not “Image Maker”.</span></li>
+        <li>“Open battle paddle.”<span>No harness named: uses your spawn default. Set that on first run, or say “make Cursor Grok 4.6 high fast my default spawn”.</span></li>
+        <li>“Open the image maker repo with claude.”<span>Reuse if they are already there. An explicit kind or model always wins. Slugs: <code>image-maker</code>, not “Image Maker”.</span></li>
         <li>“There is a PR on battle-paddle. Get a Codex review.”<span>Resolve the repository and PR first. Check the model before any workspace or tab change. Lantern does not edit the repository.</span></li>
         <li>“Open battle paddle with Grok.”<span>Bare Grok means Cursor with a live Cursor Grok model. Say Grok Build to use the Grok CLI.</span></li>
         <li>“Create a GitHub repo for X.”<span>Always <code>gh repo create --private</code>. Public only when you ask for public.</span></li>
@@ -395,7 +439,7 @@ No Elves install required. If there are no
       </ul>
 
       <h2>Pick your helper CLI</h2>
-      <p>The lantern chat is one CLI. That is yours. It is not a shared team model. <code>HELPER_SPAWN_KIND</code> is separate: the default <code>--kind</code> when Lantern starts an agent for your work (usually <code>claude</code>).</p>
+      <p>The lantern chat is one CLI. That is yours. It is not a shared team model. The spawn default is separate: <code>HELPER_SPAWN_KIND</code>, <code>HELPER_SPAWN_MODEL</code>, and <code>HELPER_SPAWN_EFFORT</code> are what Lantern opens when you just name a repo.</p>
       <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
       <table>
         <thead>
@@ -435,6 +479,8 @@ HELPER_MODEL="cursor-grok-4.6-high-fast"
 HELPER_EFFORT=""
 HELPER_CWD="~"
 HELPER_SPAWN_KIND="claude"
+HELPER_SPAWN_MODEL=""
+HELPER_SPAWN_EFFORT=""
 HELPER_PERMISSION="smart"
 HELPER_EXTRA_ARGS=""</pre>
       <p class="note">Empty <code>HELPER_AGENT</code> picks the first of those CLIs on <code>PATH</code>. Conf is <code>KEY=value</code> only; it is never sourced. After an upgrade, copy repo <code>prompt.md</code> over the seeded file if you want the latest rules.</p>
@@ -449,5 +495,17 @@ HELPER_EXTRA_ARGS=""</pre>
       </footer>
     </div>
   </main>
+  <script>
+    document.querySelectorAll("[data-copy]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var node = document.getElementById(button.getAttribute("data-copy"));
+        if (!node) return;
+        navigator.clipboard.writeText(node.textContent).then(function () {
+          button.textContent = "Copied";
+          setTimeout(function () { button.textContent = "Copy"; }, 1500);
+        });
+      });
+    });
+  </script>
 </body>
 </html>

@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr bin/model-route bin/model-preflight hsh tests/smoke.sh; do
+for f in launch.sh open.sh lib.sh bin/herdr bin/model-route bin/model-preflight bin/onboard hsh install.sh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -18,6 +18,7 @@ done
 
 tmp=$(mktemp)
 err=$(mktemp)
+onboard_cli=
 fake=
 fake_prompt=
 fake_start=
@@ -30,14 +31,83 @@ open_dir=
 elves_tmp=
 update_dir=
 model_dir=
-trap 'rm -f "$tmp" "$err"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_start" ] && rm -rf "$fake_start"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"; [ -n "$model_dir" ] && rm -rf "$model_dir"' EXIT
+trap 'rm -f "$tmp" "$err"; [ -n "$onboard_cli" ] && rm -rf "$onboard_cli"; [ -n "$fake" ] && rm -rf "$fake"; [ -n "$fake_prompt" ] && rm -rf "$fake_prompt"; [ -n "$fake_start" ] && rm -rf "$fake_start"; [ -n "$fake_ws" ] && rm -rf "$fake_ws"; [ -n "$fake_cmd" ] && rm -rf "$fake_cmd"; [ -n "$fake_py" ] && rm -rf "$fake_py"; [ -n "$fake_agents" ] && rm -rf "$fake_agents"; [ -n "$argv_dir" ] && rm -rf "$argv_dir"; [ -n "$open_dir" ] && rm -rf "$open_dir"; [ -n "$elves_tmp" ] && rm -rf "$elves_tmp"; [ -n "$update_dir" ] && rm -rf "$update_dir"; [ -n "$model_dir" ] && rm -rf "$model_dir"' EXIT
 
-printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' >"$tmp"
+printf '%s\n' 'HELPER_AGENT="devin"' 'HELPER_SPAWN_KIND="claude"' \
+    'HELPER_SPAWN_MODEL="cursor grok 4.6 high fast"' \
+    'HELPER_SPAWN_EFFORT="high"' >"$tmp"
 HELPER_AGENT=""
 HELPER_SPAWN_KIND=""
+HELPER_SPAWN_MODEL=""
+HELPER_SPAWN_EFFORT=""
 helper_parse_conf "$tmp" || fail "parse good conf"
 [ "$HELPER_AGENT" = devin ] || fail "parsed HELPER_AGENT"
 [ "$HELPER_SPAWN_KIND" = claude ] || fail "parsed HELPER_SPAWN_KIND"
+[ "$HELPER_SPAWN_MODEL" = "cursor grok 4.6 high fast" ] ||
+    fail "parsed HELPER_SPAWN_MODEL"
+[ "$HELPER_SPAWN_EFFORT" = high ] || fail "parsed HELPER_SPAWN_EFFORT"
+
+helper_conf_set "$tmp" HELPER_SPAWN_KIND cursor || fail "conf set kind"
+helper_conf_set "$tmp" HELPER_SPAWN_MODEL "5.6 sol high fast" ||
+    fail "conf set model"
+HELPER_SPAWN_KIND=""
+HELPER_SPAWN_MODEL=""
+helper_parse_conf "$tmp" || fail "parse after conf set"
+[ "$HELPER_SPAWN_KIND" = cursor ] || fail "conf set did not replace kind"
+[ "$HELPER_SPAWN_MODEL" = "5.6 sol high fast" ] ||
+    fail "conf set did not replace model"
+if helper_conf_set "$tmp" HELPER_SPAWN_MODEL 'bad; rm' 2>/dev/null; then
+    fail "conf set accepted an unsafe value"
+fi
+if helper_conf_set "$tmp" EVIL 1 2>/dev/null; then
+    fail "conf set accepted an unknown key"
+fi
+
+[ "$(helper_normalize_spawn_kind agent)" = cursor ] ||
+    fail "agent should normalize to cursor"
+[ "$(helper_normalize_spawn_kind grok-build)" = grok ] ||
+    fail "grok-build should normalize to grok"
+HELPER_SPAWN_KIND=cursor
+HELPER_SPAWN_MODEL="cursor grok 4.6 high fast"
+HELPER_SPAWN_EFFORT=""
+[ "$(helper_spawn_summary)" = "cursor · cursor grok 4.6 high fast" ] ||
+    fail "spawn summary with a model"
+HELPER_SPAWN_MODEL=""
+[ "$(helper_spawn_summary)" = "cursor · live default" ] ||
+    fail "spawn summary without a model"
+
+onboard_dir=$(mktemp -d)
+onboard_state=$onboard_dir/state
+[ "$(helper_onboard_needed "$onboard_state")" = 1 ] ||
+    fail "a new install should need first-run setup"
+[ ! -f "$onboard_state/onboarded" ] ||
+    fail "first-run setup should not mark onboarded yet"
+helper_onboard_mark "$onboard_state" || fail "onboard mark"
+[ "$(helper_onboard_needed "$onboard_state")" = 0 ] ||
+    fail "a marked install should not interview again"
+rm -rf "$onboard_dir"
+
+onboard_cli=$(mktemp -d)
+onboard_out=$(mktemp)
+sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/state" \
+    apply --kind agent --model "cursor grok 4.6 high fast" >"$onboard_out" ||
+    fail "onboard apply"
+grep -q '^kind: cursor$' "$onboard_out" || fail "onboard apply should store cursor"
+grep -q '^model: cursor grok 4.6 high fast$' "$onboard_out" ||
+    fail "onboard apply should store the model phrase"
+[ -f "$onboard_cli/state/onboarded" ] || fail "onboard apply should mark onboarded"
+sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/state" \
+    show >"$onboard_out" || fail "onboard show"
+grep -q '^summary: cursor · cursor grok 4.6 high fast$' "$onboard_out" ||
+    fail "onboard show should print the stored default"
+sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/state" \
+    plan >"$onboard_out" || fail "onboard plan"
+grep -q '^onboarded: yes$' "$onboard_out" || fail "onboard plan should see the marker"
+sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/state" \
+    doctor >"$onboard_out" || true
+grep -q '^herdr:' "$onboard_out" || fail "onboard doctor should report herdr"
+grep -q '^python:' "$onboard_out" || fail "onboard doctor should report python"
+rm -f "$onboard_out"
 
 printf '%s\n' 'HELPER_AGENT="devin; rm -rf /"' >"$tmp"
 if helper_parse_conf "$tmp" 2>/dev/null; then
@@ -48,6 +118,18 @@ printf '%s\n' 'EVIL=1' >"$tmp"
 if helper_parse_conf "$tmp" 2>/dev/null; then
     fail "accepted unknown key"
 fi
+
+HELPER_AGENT=""
+HELPER_MODEL=""
+HELPER_EFFORT=""
+HELPER_CWD=""
+HELPER_SPAWN_KIND=""
+HELPER_SPAWN_MODEL=""
+HELPER_SPAWN_EFFORT=""
+HELPER_PERMISSION=""
+HELPER_EXTRA_ARGS=""
+helper_parse_conf "$root/helper.conf.example" ||
+    fail "helper.conf.example should parse"
 
 [ "$(helper_expand_tilde '~')" = "$HOME" ] || fail "expand ~"
 [ "$(helper_normalize_root '~/')" = "$HOME" ] || fail "normalize ~/"
@@ -180,6 +262,23 @@ done
 # rule and the short list of cases that still stop for a question, or one
 # of them quietly goes back to asking permission for work the user
 # already asked for.
+for route_file in prompt.md launch.sh; do
+    grep -qF 'bin/onboard apply' "$root/$route_file" ||
+        fail "$route_file does not tell the lantern how to store a spawn default"
+    grep -qF 'just name a repo' "$root/$route_file" ||
+        fail "$route_file does not say a nameless-kind open uses the spawn default"
+done
+grep -qF 'User spawn default is' "$root/launch.sh" ||
+    fail "launch.sh does not inject the user spawn default"
+grep -qF 'First-run setup is needed' "$root/launch.sh" ||
+    fail "launch.sh does not carry the first-run interview"
+grep -qF 'id="agent-onboard"' "$root/docs/index.html" ||
+    fail "docs/index.html is missing the paste-this-to-your-agent block"
+grep -qF 'HELPER_SPAWN_MODEL' "$root/helper.conf.example" ||
+    fail "helper.conf.example does not include HELPER_SPAWN_MODEL"
+grep -qF 'herdr plugin install aigorahub/herdr-lantern' "$root/install.sh" ||
+    fail "install.sh does not install from GitHub"
+
 for route_file in prompt.md launch.sh; do
     grep -qF 'Do what they asked' "$root/$route_file" ||
         fail "$route_file does not tell the lantern to act on a request"
@@ -607,7 +706,7 @@ fi
 for bridge_token in bridge.sh bridge.conf BRIDGE_ lantern-bridge \
     aigora.lantern.bridge slack-trial; do
     for bridge_file in README.md howto.html docs/index.html prompt.md \
-        launch.sh open.sh lib.sh herdr-plugin.toml; do
+        launch.sh open.sh lib.sh herdr-plugin.toml bin/onboard install.sh; do
         if grep -qF -- "$bridge_token" "$root/$bridge_file"; then
             fail "$bridge_file still carries $bridge_token"
         fi

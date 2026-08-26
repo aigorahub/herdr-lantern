@@ -67,6 +67,8 @@ HELPER_MODEL=""
 HELPER_EFFORT=""
 HELPER_CWD=""
 HELPER_SPAWN_KIND=""
+HELPER_SPAWN_MODEL=""
+HELPER_SPAWN_EFFORT=""
 HELPER_PERMISSION=""
 HELPER_EXTRA_ARGS=""
 helper_parse_conf "$conf" || die "could not parse $conf"
@@ -90,12 +92,38 @@ fi
 command -v "$helper_bin" >/dev/null 2>&1 ||
     die "agent program not found on PATH: $helper_bin"
 
-HELPER_SPAWN_KIND=${HELPER_SPAWN_KIND:-claude}
+HELPER_SPAWN_KIND=$(helper_normalize_spawn_kind "${HELPER_SPAWN_KIND:-claude}")
 case $HELPER_SPAWN_KIND in
 *[!a-z0-9_-]* | '')
     die "HELPER_SPAWN_KIND must match [a-z][a-z0-9_-]* (got '$HELPER_SPAWN_KIND')"
     ;;
 esac
+case $HELPER_SPAWN_EFFORT in
+*[\$\`\;\|\&\<\>\(\)\{\}]*)
+    die "HELPER_SPAWN_EFFORT is unsafe"
+    ;;
+esac
+
+state_dir=${HERDR_PLUGIN_STATE_DIR:-$config_dir/state}
+mkdir -p "$state_dir" || die "could not create $state_dir"
+onboard_needed=$(helper_onboard_needed "$state_dir") ||
+    die "could not check first-run state"
+spawn_summary=$(helper_spawn_summary)
+onboard_note=
+if [ "$onboard_needed" = 1 ]; then
+    onboard_note=$(
+        cat <<'EOF'
+- First-run setup is needed. After the field snapshot, ask once what to
+  open when they just name a repo: harness, model, and setting. Examples
+  they can say: Cursor Grok 4.6 high fast; Claude Opus high; Codex 5.6
+  sol high fast; Grok Build; or keep the current default. Then run
+  `$HERDR_PLUGIN_ROOT/bin/onboard apply --kind <kind> --model "<phrase>"`
+  with optional `--effort`, or `onboard apply --keep`. Confirm the stored
+  summary. Until they answer, do not invent a spawn default beyond the
+  injected kind. Do not seat an agent as part of setup.
+EOF
+    )
+fi
 
 HELPER_PERMISSION=${HELPER_PERMISSION:-smart}
 case $HELPER_PERMISSION in
@@ -110,7 +138,6 @@ chat_identity=$(helper_chat_identity "$HELPER_AGENT" \
     "$(helper_effective_model "$HELPER_MODEL" "$HELPER_EXTRA_ARGS")" \
     "$HELPER_EFFORT")
 
-state_dir=${HERDR_PLUGIN_STATE_DIR:-$config_dir/state}
 workdir=$state_dir/workdir
 mkdir -p "$workdir/.windsurf/rules" || die "could not create helper workdir"
 
@@ -163,7 +190,16 @@ Runtime (injected by launch.sh; do not ignore):
 - This chat runs $chat_identity. Name that in your light-up line — it is
   how the user tells which CLI and model is answering — and repeat it
   whenever they ask.
-- Default --kind for agent start is $HELPER_SPAWN_KIND unless the user names one.
+- User spawn default is $spawn_summary. Kind $HELPER_SPAWN_KIND. Model
+  phrase: ${HELPER_SPAWN_MODEL:-empty, use that kind’s live default}.
+  Effort: ${HELPER_SPAWN_EFFORT:-none}. When they name a repo and do not
+  name a harness, model, or setting, use this default. Do not ask which
+  model or kind. An explicit kind or model phrase always wins. Change
+  the default when they say "make X my default spawn" or "set my default
+  spawn" by running \`\$HERDR_PLUGIN_ROOT/bin/onboard apply --kind <kind>
+  --model "<phrase>"\` with optional \`--effort\`. Show the stored
+  summary with \`onboard show\`.
+$onboard_note
 - Seat agents in the smart-auto permission tier, except Codex, which is
   unattended. Claude defaults to
   \`--model opus --effort high --permission-mode auto\`. Cursor uses the live

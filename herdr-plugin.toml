@@ -1,6 +1,6 @@
 id = "aigora.lantern"
 name = "Lantern, by Elves"
-version = "0.9.10"
+version = "0.9.11"
 min_herdr_version = "0.7.5"
 description = "From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field."
 platforms = ["linux", "macos", "windows"]

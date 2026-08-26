@@ -12,6 +12,7 @@
 *.sh text eol=lf
 hsh text eol=lf
 bin/herdr text eol=lf
+bin/onboard text eol=lf
 bin/goals-floor text eol=lf
 bin/elves-floor text eol=lf
 

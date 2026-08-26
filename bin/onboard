@@ -1,0 +1,216 @@
+#!/bin/sh
+# First-run and later spawn-default helper. The lantern chat interviews;
+# this command inventories, writes helper.conf, and marks onboarding done.
+#
+#   onboard plan
+#   onboard show
+#   onboard apply --kind cursor --model "cursor grok 4.6 high fast"
+#   onboard apply --keep
+#   onboard doctor
+set -eu
+
+plugin_root=${HERDR_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)}
+# shellcheck disable=SC1091
+. "$plugin_root/lib.sh"
+plugin_root=$(helper_posix_path "$plugin_root")
+
+usage() {
+    printf '%s\n' "usage: onboard plan|show|apply|doctor" \
+        "  apply --kind <kind> [--model <phrase>] [--effort <effort>]" \
+        "  apply --keep" >&2
+    exit 2
+}
+
+config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
+state_dir=${HERDR_PLUGIN_STATE_DIR:-}
+while [ $# -gt 0 ]; do
+    case $1 in
+    --config-dir)
+        [ $# -ge 2 ] || usage
+        config_dir=$2
+        shift 2
+        ;;
+    --state-dir)
+        [ $# -ge 2 ] || usage
+        state_dir=$2
+        shift 2
+        ;;
+    *)
+        break
+        ;;
+    esac
+done
+
+[ -n "$config_dir" ] || {
+    printf '%s\n' "onboard: HERDR_PLUGIN_CONFIG_DIR is not set" >&2
+    exit 2
+}
+state_dir=${state_dir:-$config_dir/state}
+conf=$config_dir/helper.conf
+
+load_conf() {
+    HELPER_AGENT=""
+    HELPER_MODEL=""
+    HELPER_EFFORT=""
+    HELPER_CWD=""
+    HELPER_SPAWN_KIND=""
+    HELPER_SPAWN_MODEL=""
+    HELPER_SPAWN_EFFORT=""
+    HELPER_PERMISSION=""
+    HELPER_EXTRA_ARGS=""
+    if [ -f "$conf" ]; then
+        helper_parse_conf "$conf" || return 1
+    fi
+    HELPER_SPAWN_KIND=${HELPER_SPAWN_KIND:-claude}
+}
+
+cmd_plan() {
+    load_conf || exit 1
+    helpers=$(helper_list_helpers)
+    onboarded=no
+    [ -f "$state_dir/onboarded" ] && onboarded=yes
+    herdr_state=missing
+    if command -v herdr >/dev/null 2>&1; then
+        herdr_state=found
+    fi
+    python_cmd=$(helper_detect_python 2>/dev/null) || python_cmd=
+    printf '%s\n' "lantern onboard plan" \
+        "helpers: ${helpers:-none}" \
+        "herdr: $herdr_state" \
+        "python: ${python_cmd:-missing}" \
+        "onboarded: $onboarded" \
+        "spawn_kind: $HELPER_SPAWN_KIND" \
+        "spawn_model: ${HELPER_SPAWN_MODEL:-}" \
+        "spawn_effort: ${HELPER_SPAWN_EFFORT:-}" \
+        "spawn: $(helper_spawn_summary)"
+    printf '%s\n' "ask: What should I open when you just name a repo? Say the harness, model, and setting. Examples: Cursor Grok 4.6 high fast. Claude Opus high. Codex 5.6 sol high fast. Grok Build. Or: keep the current default."
+}
+
+cmd_show() {
+    load_conf || exit 1
+    onboarded=no
+    [ -f "$state_dir/onboarded" ] && onboarded=yes
+    printf '%s\n' "lantern spawn default" \
+        "kind: $HELPER_SPAWN_KIND" \
+        "model: ${HELPER_SPAWN_MODEL:-}" \
+        "effort: ${HELPER_SPAWN_EFFORT:-}" \
+        "summary: $(helper_spawn_summary)" \
+        "onboarded: $onboarded"
+}
+
+cmd_apply() {
+    keep=0
+    kind=
+    model=
+    effort=
+    while [ $# -gt 0 ]; do
+        case $1 in
+        --keep)
+            keep=1
+            shift
+            ;;
+        --kind)
+            [ $# -ge 2 ] || usage
+            kind=$2
+            shift 2
+            ;;
+        --model)
+            [ $# -ge 2 ] || usage
+            model=$2
+            shift 2
+            ;;
+        --effort)
+            [ $# -ge 2 ] || usage
+            effort=$2
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+        esac
+    done
+
+    mkdir -p "$config_dir" "$state_dir" || {
+        printf '%s\n' "onboard: could not create config directories" >&2
+        exit 1
+    }
+    if [ ! -f "$conf" ]; then
+        cp "$plugin_root/helper.conf.example" "$conf" || {
+            printf '%s\n' "onboard: could not seed $conf" >&2
+            exit 1
+        }
+    fi
+    load_conf || exit 1
+
+    if [ "$keep" = 1 ]; then
+        helper_onboard_mark "$state_dir" || exit 1
+        cmd_show
+        return 0
+    fi
+
+    [ -n "$kind" ] || {
+        printf '%s\n' "onboard apply: --kind is required (or use --keep)" >&2
+        exit 2
+    }
+    kind=$(helper_normalize_spawn_kind "$kind")
+    case $kind in
+    *[!a-z0-9_-]* | '')
+        printf '%s\n' "onboard apply: invalid kind '$kind'" >&2
+        exit 2
+        ;;
+    esac
+
+    helper_conf_set "$conf" HELPER_SPAWN_KIND "$kind" || exit 1
+    helper_conf_set "$conf" HELPER_SPAWN_MODEL "$model" || exit 1
+    helper_conf_set "$conf" HELPER_SPAWN_EFFORT "$effort" || exit 1
+    helper_onboard_mark "$state_dir" || exit 1
+    load_conf || exit 1
+    cmd_show
+}
+
+cmd_doctor() {
+    failed=0
+    if command -v herdr >/dev/null 2>&1; then
+        printf '%s\n' "herdr: ok"
+    else
+        printf '%s\n' "herdr: missing — install Herdr from https://herdr.dev first"
+        failed=1
+    fi
+    if python_cmd=$(helper_detect_python 2>/dev/null); then
+        printf '%s\n' "python: $python_cmd"
+    else
+        printf '%s\n' "python: missing — need python3, python, or py -3"
+        failed=1
+    fi
+    helpers=$(helper_list_helpers)
+    if [ -n "$helpers" ]; then
+        printf '%s\n' "helpers: $helpers"
+    else
+        printf '%s\n' "helpers: none — install one of agent, claude, codex, grok, or devin"
+        failed=1
+    fi
+    if [ -f "$conf" ]; then
+        printf '%s\n' "helper.conf: $conf"
+        load_conf || failed=1
+        printf '%s\n' "spawn: $(helper_spawn_summary)"
+    else
+        printf '%s\n' "helper.conf: will be seeded on first open"
+    fi
+    if [ -f "$state_dir/onboarded" ]; then
+        printf '%s\n' "onboarded: yes"
+    else
+        printf '%s\n' "onboarded: no — first open will ask for a spawn default"
+    fi
+    return "$failed"
+}
+
+[ $# -ge 1 ] || usage
+command=$1
+shift
+case $command in
+plan) cmd_plan ;;
+show) cmd_show ;;
+apply) cmd_apply "$@" ;;
+doctor) cmd_doctor ;;
+*) usage ;;
+esac
