@@ -20,7 +20,9 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | --- | --- | --- |
 | "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab, working and blocked first, then done and idle. See "Field status: name every tab". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Open it. Ask only when more than one target matches. |
+| "open battle paddle", "open the image maker repo" | Same seat route as a named-kind open, using the user spawn default launch injects | They just name a repo and no harness, model, or setting. Do not ask. Use `$HERDR_PLUGIN_ROOT/bin/onboard show` if the injected default is unclear. |
 | "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
+| "make Cursor Grok 4.6 high fast my default spawn", "set my default spawn to Codex sol high fast", "keep the current default" | `$HERDR_PLUGIN_ROOT/bin/onboard apply` with the mapping: Cursor Grok 4.6 high fast → `--kind cursor --model "cursor grok 4.6 high fast"`; Claude Opus high → `--kind claude --model opus --effort high`; Codex 5.6 sol high fast → `--kind codex --model "5.6 sol high fast"`; Grok Build → `--kind grok` and no `--model`; keep → `--keep` | Store it, then confirm with `onboard show`. Later opens that omit kind and model use this default. |
 | "open battle paddle with Cursor" | Seat with `--kind cursor` and the live Cursor model route. | "Cursor" selects the Cursor CLI. |
 | "open battle paddle with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | Bare "Grok" means Grok through Cursor Ultra. |
 | "open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok` and the live Grok Build model route. | Only Grok Build and SuperGrok select the Grok CLI. |
@@ -254,9 +256,11 @@ words name that task.
    - To seat: `herdr workspace create --cwd <dir> --label <label> --no-focus`
      (JSON: `.result.root_pane.pane_id`), then
      `herdr agent start <slug> --kind <kind> --pane <pane_id>`, optionally
-     `herdr agent prompt <slug> "<task>"`. Default --kind is whatever
-     launch injects (usually claude). Kinds include claude, devin, codex,
-     grok, gemini, cursor, opencode, and more.
+     `herdr agent prompt <slug> "<task>"`. When they name a repo and no
+     harness, model, or setting, use the user spawn default launch
+     injects (kind, model phrase, effort). Do not ask which model or
+     kind. An explicit phrase always wins. Kinds include claude, devin,
+     codex, grok, gemini, cursor, opencode, and more.
    - Seat agents in the smart-auto permission tier, except Codex, which is
      unattended. On `agent start`, pass the kind's own flags after `--`:
        claude default: `-- --model opus --effort high --permission-mode auto`
@@ -420,5 +424,8 @@ user (NEEDS YOU, then live goals waiting on them). If none, one line
 about the field. Then name every open tab, one line each, by the rules
 in "Field status: name every tab", working and blocked first. If `elves_detected 1`, add the
 IN PROGRESS count and names (or one line each if few). If
-`elves_detected 0`, at most one short pairing line. Ask what to do. Do
-not mention the snapshot files.
+`elves_detected 0`, at most one short pairing line. If the runtime note
+says first-run setup is needed, ask once for the default spawn
+(harness, model, setting) after that field readout, store it with
+`onboard apply`, and do not seat an agent as part of setup. Otherwise
+ask what to do. Do not mention the snapshot files.

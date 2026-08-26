@@ -3,13 +3,28 @@
 
 helper_known_key() {
     case $1 in
-    HELPER_AGENT | HELPER_MODEL | HELPER_EFFORT | HELPER_CWD | HELPER_SPAWN_KIND | HELPER_PERMISSION | HELPER_EXTRA_ARGS)
+    HELPER_AGENT | HELPER_MODEL | HELPER_EFFORT | HELPER_CWD | HELPER_SPAWN_KIND | HELPER_SPAWN_MODEL | HELPER_SPAWN_EFFORT | HELPER_PERMISSION | HELPER_EXTRA_ARGS)
         return 0
         ;;
     *)
         return 1
         ;;
     esac
+}
+
+helper_conf_value_ok() {
+    # Values are serialized as KEY="value". Reject shell metacharacters,
+    # quotes, and line breaks so a model phrase cannot inject another key.
+    # Do not use $(printf '\n'): command substitution strips the newline
+    # and the match then succeeds for every value.
+    _helper_cv=$1
+    case $_helper_cv in
+    *[\$\`\;\|\&\<\>\(\)\{\}\"\']*)
+        return 1
+        ;;
+    esac
+    _helper_cv_flat=$(printf '%s' "$_helper_cv" | tr -d '\n\r')
+    [ "$_helper_cv_flat" = "$_helper_cv" ]
 }
 
 helper_unquote() {
@@ -28,12 +43,7 @@ helper_unquote() {
         _helper_unquoted=$_helper_raw
         ;;
     esac
-    case $_helper_unquoted in
-    *[\$\`\;\|\&\<\>\(\)\{\}]*)
-        return 1
-        ;;
-    esac
-    return 0
+    helper_conf_value_ok "$_helper_unquoted"
 }
 
 helper_parse_conf() {
@@ -68,11 +78,191 @@ helper_parse_conf() {
         HELPER_EFFORT) HELPER_EFFORT=$_helper_unquoted ;;
         HELPER_CWD) HELPER_CWD=$_helper_unquoted ;;
         HELPER_SPAWN_KIND) HELPER_SPAWN_KIND=$_helper_unquoted ;;
+        HELPER_SPAWN_MODEL) HELPER_SPAWN_MODEL=$_helper_unquoted ;;
+        HELPER_SPAWN_EFFORT) HELPER_SPAWN_EFFORT=$_helper_unquoted ;;
         HELPER_PERMISSION) HELPER_PERMISSION=$_helper_unquoted ;;
         HELPER_EXTRA_ARGS) HELPER_EXTRA_ARGS=$_helper_unquoted ;;
         esac
     done <"$_helper_conf"
     return 0
+}
+
+helper_conf_set() {
+    # $1 file, $2 key, $3 unquoted value. Replaces the key’s line or
+    # appends it. Preserves comments and other keys. Never sources.
+    _helper_set_file=$1
+    _helper_set_key=$2
+    _helper_set_val=$3
+    helper_known_key "$_helper_set_key" || {
+        printf '%s\n' "unknown config key: $_helper_set_key" >&2
+        return 1
+    }
+    helper_conf_value_ok "$_helper_set_val" || {
+        printf '%s\n' "unsafe value for $_helper_set_key" >&2
+        return 1
+    }
+    _helper_set_line="${_helper_set_key}=\"${_helper_set_val}\""
+    _helper_set_dir=$(dirname "$_helper_set_file")
+    _helper_set_tmp=$(mktemp "${_helper_set_dir}/.helper.conf.XXXXXX") || return 1
+    _helper_set_found=0
+    if [ -f "$_helper_set_file" ]; then
+        while IFS= read -r _helper_set_old || [ -n "$_helper_set_old" ]; do
+            case $_helper_set_old in
+            "${_helper_set_key}="*)
+                printf '%s\n' "$_helper_set_line"
+                _helper_set_found=1
+                ;;
+            *)
+                printf '%s\n' "$_helper_set_old"
+                ;;
+            esac
+        done <"$_helper_set_file" >"$_helper_set_tmp" || {
+            rm -f "$_helper_set_tmp"
+            return 1
+        }
+    else
+        : >"$_helper_set_tmp" || {
+            rm -f "$_helper_set_tmp"
+            return 1
+        }
+    fi
+    if [ "$_helper_set_found" = 0 ]; then
+        printf '%s\n' "$_helper_set_line" >>"$_helper_set_tmp" || {
+            rm -f "$_helper_set_tmp"
+            return 1
+        }
+    fi
+    mv "$_helper_set_tmp" "$_helper_set_file" || {
+        rm -f "$_helper_set_tmp"
+        return 1
+    }
+}
+
+helper_conf_set_keys() {
+    # $1 file, then repeating KEY value. One rewrite: write to a temp
+    # copy, parse it, then replace the original. Does not source.
+    _helper_sk_file=$1
+    shift
+    _helper_sk_dir=$(dirname "$_helper_sk_file")
+    _helper_sk_tmp=$(mktemp "${_helper_sk_dir}/.helper.conf.XXXXXX") || return 1
+    if [ -f "$_helper_sk_file" ]; then
+        cp "$_helper_sk_file" "$_helper_sk_tmp" || {
+            rm -f "$_helper_sk_tmp"
+            return 1
+        }
+    else
+        : >"$_helper_sk_tmp" || {
+            rm -f "$_helper_sk_tmp"
+            return 1
+        }
+    fi
+    while [ $# -ge 2 ]; do
+        helper_conf_set "$_helper_sk_tmp" "$1" "$2" || {
+            rm -f "$_helper_sk_tmp"
+            return 1
+        }
+        shift 2
+    done
+    if [ $# -ne 0 ]; then
+        rm -f "$_helper_sk_tmp"
+        return 1
+    fi
+    helper_parse_conf "$_helper_sk_tmp" || {
+        rm -f "$_helper_sk_tmp"
+        return 1
+    }
+    mv "$_helper_sk_tmp" "$_helper_sk_file" || {
+        rm -f "$_helper_sk_tmp"
+        return 1
+    }
+}
+
+helper_spawn_summary() {
+    # Prints the user’s spawn default from the current shell vars.
+    _helper_ss_kind=${HELPER_SPAWN_KIND:-claude}
+    _helper_ss_model=${HELPER_SPAWN_MODEL:-}
+    _helper_ss_effort=${HELPER_SPAWN_EFFORT:-}
+    if [ -n "$_helper_ss_model" ] && [ -n "$_helper_ss_effort" ]; then
+        printf '%s · %s · %s' "$_helper_ss_kind" "$_helper_ss_model" "$_helper_ss_effort"
+    elif [ -n "$_helper_ss_model" ]; then
+        printf '%s · %s' "$_helper_ss_kind" "$_helper_ss_model"
+    else
+        printf '%s · live default' "$_helper_ss_kind"
+    fi
+}
+
+helper_onboard_needed() {
+    # $1 state_dir. Prints 1 when the helper should interview for a
+    # spawn default. One marker is the whole gate: a first open that
+    # seeded helper.conf and then died must still interview next time.
+    _helper_ob_state=$1
+    mkdir -p "$_helper_ob_state" || return 1
+    if [ -f "$_helper_ob_state/onboarded" ]; then
+        printf '0'
+        return 0
+    fi
+    printf '1'
+    return 0
+}
+
+helper_onboard_mark() {
+    _helper_ob_state=$1
+    mkdir -p "$_helper_ob_state" || return 1
+    printf 'user\n' >"$_helper_ob_state/onboarded"
+}
+
+helper_list_helpers() {
+    # Prints the helper CLIs on PATH, space-separated, or nothing.
+    _helper_list=
+    _helper_cand=
+    for _helper_cand in agent devin claude codex grok; do
+        if command -v "$_helper_cand" >/dev/null 2>&1; then
+            if [ -n "$_helper_list" ]; then
+                _helper_list="$_helper_list $_helper_cand"
+            else
+                _helper_list=$_helper_cand
+            fi
+        fi
+    done
+    printf '%s' "$_helper_list"
+}
+
+helper_normalize_spawn_kind() {
+    # $1 spoken or stored kind. Prints the herdr --kind token.
+    _helper_nk=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    case $_helper_nk in
+    agent | cursor) printf 'cursor' ;;
+    'grok build' | grok-build | supergrok) printf 'grok' ;;
+    *) printf '%s' "$_helper_nk" ;;
+    esac
+}
+
+helper_normalize_spawn_model() {
+    # $1 kind, $2 spoken model. A product name for that kind means the
+    # live default, not a resolver phrase.
+    _helper_nm_kind=$1
+    _helper_nm_model=$2
+    _helper_nm_lc=$(printf '%s' "$_helper_nm_model" | tr '[:upper:]' '[:lower:]')
+    case $_helper_nm_kind in
+    grok)
+        case $_helper_nm_lc in
+        '' | grok | 'grok build' | grok-build | supergrok)
+            printf ''
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+    printf '%s' "$_helper_nm_model"
+}
+
+helper_plugin_id_listed() {
+    # $1 plugin-list text, $2 plugin id. Exact token after splitting on
+    # whitespace and common JSON punctuation. A substring or regex
+    # wildcard must not count.
+    _helper_pl_id=$2
+    [ -n "$_helper_pl_id" ] || return 1
+    printf '%s\n' "$1" | tr ',:"[]{}' ' ' | tr ' ' '\n' | grep -Fx "$_helper_pl_id" >/dev/null
 }
 
 helper_prepend_path() {

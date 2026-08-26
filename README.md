@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.10** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.9.11** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -20,6 +20,19 @@ routing accepts `python3`, `python`, or the Windows `py -3` launcher. Windows
 also needs Git for Windows. See [Windows](#windows).
 
 ## Install the plugin
+
+One command after Herdr is installed (installs the plugin and opens it):
+
+```bash
+herdr plugin install aigorahub/herdr-lantern && herdr plugin action invoke aigora.lantern.open
+```
+
+Or run `install.sh` from a checkout. The first lantern chat asks what to
+open when you just name a repo (harness, model, setting). After that,
+"open battle-paddle" uses that default.
+
+If you already have a coding agent open, paste the block at the top of
+[the guide](https://aigorahub.github.io/herdr-lantern/).
 
 From the marketplace / GitHub (after this release is on `main`):
 
@@ -53,9 +66,10 @@ says nothing about updates.
 
 ## Pick your helper CLI
 
-The lantern chat runs **one** CLI. That is independent of
-`HELPER_SPAWN_KIND`, which is only the default `--kind` when the helper starts
-an agent for your work (usually `claude`).
+The lantern chat runs **one** CLI. That is independent of the spawn
+default (`HELPER_SPAWN_KIND`, `HELPER_SPAWN_MODEL`, `HELPER_SPAWN_EFFORT`),
+which is what Lantern opens when you name a repo and no harness, model, or
+setting.
 
 Leave `HELPER_AGENT` empty to use the first of `agent`, `devin`, `claude`, `codex`,
 `grok` on `PATH`. Launch prepends `~/.local/bin`, `~/bin`, and Homebrew.
@@ -79,7 +93,9 @@ HELPER_AGENT="agent"         # agent, devin, claude, codex, grok; empty = first 
 HELPER_MODEL="cursor-grok-4.6-high-fast"  # optional --model; leave empty for Devin
 HELPER_EFFORT=""             # unused for Devin and Cursor agent
 HELPER_CWD="~"               # search root mentioned to the helper
-HELPER_SPAWN_KIND="claude"   # default --kind for `herdr agent start`
+HELPER_SPAWN_KIND="claude"   # default --kind when you just name a repo
+HELPER_SPAWN_MODEL=""        # spoken phrase or id; empty = that kind's live default
+HELPER_SPAWN_EFFORT=""       # optional extra effort when the model id lacks one
 HELPER_PERMISSION="smart"    # devin / agent: auto | accept-edits | smart | dangerous
 HELPER_EXTRA_ARGS=""         # extra unquoted CLI tokens
 ```

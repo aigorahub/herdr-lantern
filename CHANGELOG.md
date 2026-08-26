@@ -2,6 +2,38 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.9.11] - 2026-08-26
+
+### Added
+
+- A user spawn default: harness, model, and setting. "Open battle-paddle"
+  with no named kind uses that default instead of asking. Store it with
+  `bin/onboard apply` or by saying "make X my default spawn".
+- First-run onboarding until `bin/onboard apply` (or `--keep`) writes the
+  marker. The lantern asks once what to open when they just name a repo.
+  Existing installs can say keep the current default.
+- One-command install after Herdr is present: `install.sh`, or
+  `herdr plugin install aigorahub/herdr-lantern` then open. The guide has
+  a paste-this-to-your-agent block, the same shape Elves uses.
+- `bin/onboard plan|show|apply|doctor` inventories helpers, writes the
+  spawn keys, and checks Herdr, Python, and a helper CLI.
+
+### Changed
+
+- `HELPER_SPAWN_MODEL` and `HELPER_SPAWN_EFFORT` join `HELPER_SPAWN_KIND`
+  in `helper.conf`. Empty model still means that kind’s live default.
+- The plugin version is 0.9.11.
+
+### Fixed
+
+- `helper.conf` writes reject quotes and line breaks, rewrite the spawn
+  keys in one pass, and parse the result before marking onboarded.
+- Grok Build stores as `--kind grok` with an empty model, not a model
+  phrase the Grok resolver cannot use.
+- The paste-to-your-agent block stops after opening Lantern. First-run
+  setup stays in that chat.
+- `install.sh` requires an exact `aigora.lantern` plugin-list token.
+
 ## [0.9.10] - 2026-08-23
 
 ### Changed
