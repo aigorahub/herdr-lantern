@@ -243,15 +243,21 @@
           <td>Grok CLI as <code>grok</code> (often <code>~/.grok/bin</code>)</td>
           <td><code>HELPER_AGENT="grok"</code>. Optional model and effort.</td>
         </tr>
+        <tr>
+          <td>Pi</td>
+          <td>Pi CLI on <code>PATH</code> as <code>pi</code> (typically <code>~/.local/bin/pi</code>)</td>
+          <td><code>HELPER_AGENT="pi"</code>. Optional <code>HELPER_PROVIDER</code> (<code>--provider</code>), <code>HELPER_MODEL</code> (<code>--model</code>; supports <code>provider/id</code>), and <code>HELPER_EFFORT</code> (<code>--thinking</code>).</td>
+        </tr>
       </tbody>
     </table>
     <p class="note">The spawn default is separate from the lantern chat CLI: <code>HELPER_SPAWN_KIND</code>, <code>HELPER_SPAWN_MODEL</code>, and <code>HELPER_SPAWN_EFFORT</code> are what Lantern opens when someone just names a repo.</p>
-    <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
+    <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Pi has no permission modes: <code>HELPER_PERMISSION</code> is accepted and ignored for Pi, and Lantern never passes any approval-bypass flag to it. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
     <pre>HELPER_AGENT="agent"
 HELPER_MODEL="cursor-grok-4.6-high-fast"
+HELPER_PROVIDER=""
 HELPER_EFFORT=""
 HELPER_CWD="~"
 HELPER_SPAWN_KIND="claude"
@@ -259,7 +265,7 @@ HELPER_SPAWN_MODEL=""
 HELPER_SPAWN_EFFORT=""
 HELPER_PERMISSION="smart"
 HELPER_EXTRA_ARGS=""</pre>
-    <p class="note">Empty <code>HELPER_AGENT</code> picks the first of <code>agent</code> / Devin / Claude / Codex / Grok on <code>PATH</code>. Cursor with an empty model defaults to Grok 4.6 High Fast. Leave Devin’s model blank.</p>
+    <p class="note">Empty <code>HELPER_AGENT</code> picks the first of <code>agent</code> / Devin / Claude / Codex / Grok / Pi on <code>PATH</code>. Cursor with an empty model defaults to Grok 4.6 High Fast. Leave Devin’s model blank.</p>
 
     <h2>Open it</h2>
     <ol class="steps">

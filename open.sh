@@ -172,6 +172,7 @@ fi
 # keeps the label it was seated with.
 if [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ]; then
     HELPER_AGENT=
+    HELPER_PROVIDER=
     HELPER_MODEL=
     HELPER_EFFORT=
     HELPER_CWD=
@@ -191,10 +192,10 @@ if [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ]; then
     fi
     if [ -n "$conf_ok" ]; then
         case $HELPER_AGENT in
-        codex | claude | grok | devin | agent | cursor)
+        codex | claude | grok | devin | agent | cursor | pi)
             tab_label="home · $(helper_chat_identity "$HELPER_AGENT" \
                 "$(helper_effective_model "$HELPER_MODEL" "$HELPER_EXTRA_ARGS")" \
-                "$HELPER_EFFORT")"
+                "$HELPER_EFFORT" "$(helper_effective_flag provider "$HELPER_PROVIDER" "$HELPER_EXTRA_ARGS")")"
             ;;
         esac
     fi

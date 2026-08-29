@@ -3,7 +3,7 @@
 
 helper_known_key() {
     case $1 in
-    HELPER_AGENT | HELPER_MODEL | HELPER_EFFORT | HELPER_CWD | HELPER_SPAWN_KIND | HELPER_SPAWN_MODEL | HELPER_SPAWN_EFFORT | HELPER_PERMISSION | HELPER_EXTRA_ARGS)
+    HELPER_AGENT | HELPER_PROVIDER | HELPER_MODEL | HELPER_EFFORT | HELPER_CWD | HELPER_SPAWN_KIND | HELPER_SPAWN_MODEL | HELPER_SPAWN_EFFORT | HELPER_PERMISSION | HELPER_EXTRA_ARGS)
         return 0
         ;;
     *)
@@ -74,6 +74,7 @@ helper_parse_conf() {
         }
         case $_helper_key in
         HELPER_AGENT) HELPER_AGENT=$_helper_unquoted ;;
+        HELPER_PROVIDER) HELPER_PROVIDER=$_helper_unquoted ;;
         HELPER_MODEL) HELPER_MODEL=$_helper_unquoted ;;
         HELPER_EFFORT) HELPER_EFFORT=$_helper_unquoted ;;
         HELPER_CWD) HELPER_CWD=$_helper_unquoted ;;
@@ -215,7 +216,7 @@ helper_list_helpers() {
     # Prints the helper CLIs on PATH, space-separated, or nothing.
     _helper_list=
     _helper_cand=
-    for _helper_cand in agent devin claude codex grok; do
+    for _helper_cand in agent devin claude codex grok pi; do
         if command -v "$_helper_cand" >/dev/null 2>&1; then
             if [ -n "$_helper_list" ]; then
                 _helper_list="$_helper_list $_helper_cand"
@@ -315,7 +316,7 @@ helper_extend_user_path() {
 
 helper_detect_agent() {
     _helper_cand=
-    for _helper_cand in agent devin claude codex grok; do
+    for _helper_cand in agent devin claude codex grok pi; do
         if command -v "$_helper_cand" >/dev/null 2>&1; then
             printf '%s' "$_helper_cand"
             return 0
@@ -332,15 +333,16 @@ helper_cursor_default_model() {
 }
 
 helper_chat_identity() {
-    # $1 HELPER_AGENT, $2 HELPER_MODEL, $3 HELPER_EFFORT. Prints what the
-    # chat actually runs — "claude · opus · high" — for the tab label and
-    # the light-up line. It mirrors launch.sh rather than echoing the conf:
-    # Cursor agent's empty model means the documented default, Devin's
-    # model lives in Devin's own config so none is claimed for it, and
-    # effort only reaches the CLIs launch.sh passes it to.
+    # $1 HELPER_AGENT, $2 HELPER_MODEL, $3 HELPER_EFFORT, $4 HELPER_PROVIDER
+    # (Pi). Prints what the chat actually runs — "claude · opus · high" —
+    # for the tab label and the light-up line. It mirrors launch.sh rather
+    # than echoing the conf: Cursor agent's empty model means the documented
+    # default, Devin's model lives in Devin's own config so none is claimed
+    # for it, and effort only reaches the CLIs launch.sh passes it to.
     _helper_ci_agent=$1
     _helper_ci_model=${2:-}
     _helper_ci_effort=${3:-}
+    _helper_ci_provider=${4:-}
     case $_helper_ci_agent in
     agent | cursor)
         _helper_ci='cursor agent'
@@ -350,6 +352,12 @@ helper_chat_identity() {
     devin)
         _helper_ci=devin
         _helper_ci_model=
+        ;;
+    pi)
+        _helper_ci=pi
+        if [ -n "$_helper_ci_provider" ]; then
+            _helper_ci_model="$_helper_ci_provider${_helper_ci_model:+/$_helper_ci_model}"
+        fi
         ;;
     *) _helper_ci=$_helper_ci_agent ;;
     esac
@@ -467,30 +475,36 @@ helper_agent_takes_effort() {
     # string consults the same membership, so the label can never claim an
     # effort the CLI was not given.
     case $1 in
-    claude | codex | grok) return 0 ;;
+    claude | codex | grok | pi) return 0 ;;
     *) return 1 ;;
     esac
 }
 
-helper_effective_model() {
-    # $1 HELPER_MODEL, $2 HELPER_EXTRA_ARGS. Prints the model that will
-    # actually run: launch.sh appends the extra args after its own flags,
-    # a later flag wins in these CLIs, so a --model there overrides the
-    # conf field, and the identity has to follow the winner.
-    _helper_em=$1
-    _helper_em_prev=
+helper_effective_flag() {
+    # $1 flag name without dashes, $2 conf value, $3 HELPER_EXTRA_ARGS.
+    # Prints the value that will actually run: launch.sh appends the extra
+    # args after its own flags, a later flag wins in these CLIs, so a
+    # --<flag> there overrides the conf field, and the identity has to
+    # follow the winner.
+    _helper_ef_flag=$1
+    _helper_ef=$2
+    _helper_ef_prev=
     set -f
-    for _helper_em_tok in $2; do
-        if [ "$_helper_em_prev" = --model ]; then
-            _helper_em=$_helper_em_tok
+    for _helper_ef_tok in $3; do
+        if [ "$_helper_ef_prev" = "--$_helper_ef_flag" ]; then
+            _helper_ef=$_helper_ef_tok
         fi
-        case $_helper_em_tok in
-        --model=*) _helper_em=${_helper_em_tok#--model=} ;;
+        case $_helper_ef_tok in
+        --$_helper_ef_flag=*) _helper_ef=${_helper_ef_tok#--$_helper_ef_flag=} ;;
         esac
-        _helper_em_prev=$_helper_em_tok
+        _helper_ef_prev=$_helper_ef_tok
     done
     set +f
-    printf '%s' "$_helper_em"
+    printf '%s' "$_helper_ef"
+}
+
+helper_effective_model() {
+    helper_effective_flag model "$1" "$2"
 }
 
 helper_version_is_xyz() {

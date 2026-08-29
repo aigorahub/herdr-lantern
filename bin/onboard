@@ -196,7 +196,7 @@ cmd_doctor() {
     if [ -n "$helpers" ]; then
         printf '%s\n' "helpers: $helpers"
     else
-        printf '%s\n' "helpers: none — install one of agent, claude, codex, grok, or devin"
+        printf '%s\n' "helpers: none — install one of agent, claude, codex, grok, devin, or pi"
         failed=1
     fi
     if [ -f "$conf" ]; then

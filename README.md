@@ -72,7 +72,7 @@ which is what Lantern opens when you name a repo and no harness, model, or
 setting.
 
 Leave `HELPER_AGENT` empty to use the first of `agent`, `devin`, `claude`, `codex`,
-`grok` on `PATH`. Launch prepends `~/.local/bin`, `~/bin`, and Homebrew.
+`grok`, `pi` on `PATH`. Launch prepends `~/.local/bin`, `~/bin`, and Homebrew.
 
 | Helper you want | Install that CLI | `helper.conf` |
 | --- | --- | --- |
@@ -81,6 +81,7 @@ Leave `HELPER_AGENT` empty to use the first of `agent`, `devin`, `claude`, `code
 | Claude Code | [Claude Code](https://code.claude.com/docs) on `PATH` as `claude` | `HELPER_AGENT="claude"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`--effort`) |
 | Codex | [Codex CLI](https://github.com/openai/codex) on `PATH` as `codex` | `HELPER_AGENT="codex"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`model_reasoning_effort`) |
 | Grok | Grok CLI on `PATH` as `grok` (often `~/.grok/bin`) | `HELPER_AGENT="grok"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`--reasoning-effort`) |
+| Pi | Pi CLI on `PATH` as `pi` (typically `~/.local/bin/pi`) | `HELPER_AGENT="pi"` · optional `HELPER_PROVIDER` (`--provider`) · optional `HELPER_MODEL` (`--model`; supports `provider/id`) · optional `HELPER_EFFORT` (`--thinking`) |
 
 Each person on the team sets their own file. Nobody shares one model string.
 
@@ -89,14 +90,15 @@ $EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"
 ```
 
 ```sh
-HELPER_AGENT="agent"         # agent, devin, claude, codex, grok; empty = first on PATH
+HELPER_AGENT="agent"         # agent, devin, claude, codex, grok, pi; empty = first on PATH
 HELPER_MODEL="cursor-grok-4.6-high-fast"  # optional --model; leave empty for Devin
-HELPER_EFFORT=""             # unused for Devin and Cursor agent
+HELPER_PROVIDER=""           # pi only: --provider; unused by other helpers
+HELPER_EFFORT=""             # unused for Devin and Cursor agent; pi -> --thinking <value>
 HELPER_CWD="~"               # search root mentioned to the helper
 HELPER_SPAWN_KIND="claude"   # default --kind when you just name a repo
 HELPER_SPAWN_MODEL=""        # spoken phrase or id; empty = that kind's live default
 HELPER_SPAWN_EFFORT=""       # optional extra effort when the model id lacks one
-HELPER_PERMISSION="smart"    # devin / agent: auto | accept-edits | smart | dangerous
+HELPER_PERMISSION="smart"    # devin / agent: auto | accept-edits | smart | dangerous; pi: accepted and ignored — no flags
 HELPER_EXTRA_ARGS=""         # extra unquoted CLI tokens
 ```
 
@@ -136,6 +138,8 @@ immediately after `--`, including when the seat omitted it or placed it
 after resume or review. Kinds without a listed tier get no extra flags.
 bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
 unless the user asks for yolo and confirms the exact flag and the protections it removes.
+Pi has no permission modes: `HELPER_PERMISSION` is accepted and ignored for
+Pi, and Lantern never passes any approval-bypass flag to it.
 
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok" uses `--kind cursor`

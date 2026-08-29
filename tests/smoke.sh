@@ -1058,6 +1058,14 @@ export OPEN_CONF_DIR
 run_open || fail "open with a helper.conf should succeed"
 logged 'tab rename w9:t2 home · claude · opus · high' ||
     fail "the chat tab should say which CLI and model it runs"
+reset_open
+printf '%s\n' 'HELPER_AGENT="pi"' 'HELPER_PROVIDER="google"' \
+    'HELPER_MODEL="gemini-2.5-pro"' >"$open_dir/conf/helper.conf"
+OPEN_CONF_DIR=$open_dir/conf
+export OPEN_CONF_DIR
+run_open || fail "open with a pi helper.conf should succeed"
+logged 'tab rename w9:t2 home · pi · google/gemini-2.5-pro' ||
+    fail "the chat tab should name the pi provider and model"
 
 # A conf the parser refuses must not break the open, and must not label the
 # tab with a guess.
@@ -1104,8 +1112,8 @@ logged "tab rename w9:t2 home · cursor agent · $(helper_cursor_default_model)"
     fail "a first open should label from the same detection launch.sh uses"
 OPEN_CONF_DIR=
 
-# helper_detect_agent picks the first of agent, devin, claude, codex, grok on
-# PATH. This used to assert that one of them was installed on the machine
+# helper_detect_agent picks the first of agent, devin, claude, codex, grok, pi
+# on PATH. This used to assert that one of them was installed on the machine
 # running the suite, which is a fact about the machine and not about the code:
 # it can never hold on a CI runner or in a bare container. Test the order
 # against a PATH the test controls, which also covers preference, something the
@@ -1118,6 +1126,11 @@ done
 picked=$(PATH="$fake_agents"; export PATH; helper_detect_agent) ||
     fail "detect should find a stub on a controlled PATH"
 [ "$picked" = claude ] || fail "detect should prefer claude over codex (got $picked)"
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$fake_agents/pi"
+chmod +x "$fake_agents/pi"
+picked=$(PATH="$fake_agents"; export PATH; helper_detect_agent) ||
+    fail "detect should still find a stub with pi present"
+[ "$picked" = claude ] || fail "detect should prefer claude over pi (got $picked)"
 
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fake_agents/agent"
 chmod +x "$fake_agents/agent"
@@ -1125,11 +1138,18 @@ picked=$(PATH="$fake_agents"; export PATH; helper_detect_agent) ||
     fail "detect should still find a stub"
 [ "$picked" = agent ] || fail "detect should prefer agent first (got $picked)"
 
+pi_only=$(mktemp -d)
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$pi_only/pi"
+chmod +x "$pi_only/pi"
+picked=$(PATH="$pi_only"; export PATH; helper_detect_agent) ||
+    fail "detect should find a lone pi stub"
+[ "$picked" = pi ] || fail "detect should pick pi when it is alone (got $picked)"
+
 empty_agents=$(mktemp -d)
 if picked=$(PATH="$empty_agents"; export PATH; helper_detect_agent); then
     fail "detect should fail when nothing is on PATH (got $picked)"
 fi
-rm -rf "$fake_agents" "$empty_agents"
+rm -rf "$fake_agents" "$empty_agents" "$pi_only"
 fake_agents=
 
 # The real machine is reported, never asserted. launch.sh is where a missing
@@ -2114,7 +2134,7 @@ argv_dir=$(mktemp -d)
 argv_home=$argv_dir/home
 argv_bin=$argv_home/.local/bin
 mkdir -p "$argv_bin" "$argv_dir/config" "$argv_dir/state"
-for stub_bin in agent devin claude codex grok herdr; do
+for stub_bin in agent devin claude codex grok pi herdr; do
     printf '%s\n' '#!/bin/sh' 'printf "ARGV:"' 'for a in "$@"; do printf " [%s]" "$a"; done' \
         'printf "\n"' 'exit 0' >"$argv_bin/$stub_bin"
     chmod +x "$argv_bin/$stub_bin"
@@ -2166,6 +2186,35 @@ argv_is "grok" 'HELPER_AGENT="grok"
 HELPER_MODEL="grok-x"
 HELPER_EFFORT="high"
 HELPER_CWD="~"' ' [--model] [grok-x] [--reasoning-effort] [high] [--no-subagents]'
+
+# Pi: provider before model (pi's own option order), effort is --thinking.
+argv_is "pi" 'HELPER_AGENT="pi"
+HELPER_PROVIDER="anthropic"
+HELPER_MODEL="claude-sonnet-4"
+HELPER_EFFORT="high"
+HELPER_CWD="~"' ' [--provider] [anthropic] [--model] [claude-sonnet-4] [--thinking] [high]'
+
+argv_is "pi model only" 'HELPER_AGENT="pi"
+HELPER_MODEL="m"
+HELPER_CWD="~"' " [--model] [m] [$(printf '\342\200\213')]"
+
+# No -- separator for pi: its parser rejects it (Unknown option: --), so
+# the invisible first turn rides as a plain message.
+argv_is "pi bare" 'HELPER_AGENT="pi"
+HELPER_CWD="~"' " [$(printf '\342\200\213')]"
+
+# Pi gets no permission flags at all: HELPER_PERMISSION is accepted and
+# ignored — dangerous must not map to --permission-mode, --auto-review,
+# --force, --dangerously*, --yolo, --always-approve, or bypassPermissions.
+argv_is "pi ignores permission" 'HELPER_AGENT="pi"
+HELPER_PERMISSION="dangerous"
+HELPER_CWD="~"' " [$(printf '\342\200\213')]"
+
+# HELPER_PROVIDER is pi-only; other helpers must not grow a --provider flag.
+argv_is "claude ignores provider" 'HELPER_AGENT="claude"
+HELPER_PROVIDER="x"
+HELPER_MODEL="opus"
+HELPER_CWD="~"' ' [--model] [opus]'
 
 # Devin rejects --model on the free tier, so launch.sh drops it on purpose.
 argv_is "devin" 'HELPER_AGENT="devin"
@@ -2387,6 +2436,16 @@ ident=$(helper_chat_identity devin opus '')
 [ "$ident" = devin ] || fail "identity devin claims no model (got $ident)"
 ident=$(helper_chat_identity codex gpt-x high)
 [ "$ident" = 'codex · gpt-x · high' ] || fail "identity codex (got $ident)"
+ident=$(helper_chat_identity pi m high)
+[ "$ident" = 'pi · m · high' ] || fail "identity pi effort (got $ident)"
+ident=$(helper_chat_identity pi '' '')
+[ "$ident" = pi ] || fail "identity bare pi (got $ident)"
+ident=$(helper_chat_identity pi m high anthropic)
+[ "$ident" = 'pi · anthropic/m · high' ] || fail "identity pi provider+model (got $ident)"
+ident=$(helper_chat_identity pi '' '' google)
+[ "$ident" = 'pi · google' ] || fail "identity pi provider only (got $ident)"
+ident=$(helper_chat_identity claude opus high google)
+[ "$ident" = 'claude · opus · high' ] || fail "identity must ignore provider for non-pi (got $ident)"
 
 # A --model in the extra args lands after the built flags and the later
 # flag wins, so it is the model the identity must name.
@@ -2398,6 +2457,12 @@ ident=$(helper_chat_identity codex gpt-x high)
     fail "extra args without --model keep the conf model"
 [ -z "$(helper_effective_model '' '')" ] ||
     fail "no model anywhere is no model"
+[ "$(helper_effective_flag provider google '--verbose --provider anthropic')" = anthropic ] ||
+    fail "effective provider should follow a --provider in the extra args"
+[ "$(helper_effective_flag provider google '--provider=openai --verbose')" = openai ] ||
+    fail "effective provider should follow a --provider= in the extra args"
+[ "$(helper_effective_flag provider google '--verbose --foo')" = google ] ||
+    fail "extra args without --provider keep the conf provider"
 grep -q 'helper_effective_model' "$root/launch.sh" ||
     fail "launch.sh identity should use the effective model"
 grep -q 'helper_effective_model' "$root/open.sh" ||
@@ -2410,6 +2475,16 @@ grep -qF 'agent_not_ready' "$root/prompt.md" ||
     fail "prompt.md does not describe the Codex startup gate"
 grep -qF 'agent_not_ready' "$root/launch.sh" ||
     fail "the launch.sh appendix does not describe the Codex startup gate"
+grep -qF '`pi -c`' "$root/prompt.md" ||
+    fail "prompt.md does not carry the Pi session route"
+grep -qF 'Pi \`--continue\` or \`--session <id>\`' "$root/launch.sh" ||
+    fail "the launch.sh appendix does not carry the Pi resume route"
+grep -qF 'skip `model-route` and `model-preflight`' "$root/prompt.md" ||
+    fail "prompt.md does not exempt Pi from model routing"
+grep -qF 'HELPER_AGENT="pi"' "$root/README.md" ||
+    fail "README does not document Pi"
+grep -q 'HELPER_PROVIDER' "$root/helper.conf.example" ||
+    fail "helper.conf.example does not document HELPER_PROVIDER"
 grep -q 'helper_cursor_default_model' "$root/launch.sh" ||
     fail "launch.sh should take the cursor default model from lib.sh"
 # And what is supposed to be happening where: after the seat is up, each
