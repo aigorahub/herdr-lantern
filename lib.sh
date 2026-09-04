@@ -355,9 +355,18 @@ helper_chat_identity() {
         ;;
     pi)
         _helper_ci=pi
-        if [ -n "$_helper_ci_provider" ]; then
-            _helper_ci_model="$_helper_ci_provider${_helper_ci_model:+/$_helper_ci_model}"
-        fi
+        # Fold provider into the label only when a model is present and
+        # not already provider/id. Provider with no model is not what Pi
+        # names, and prefixing a qualified id would print
+        # google/google/gemini-....
+        case $_helper_ci_model in
+        '' | */*) ;;
+        *)
+            if [ -n "$_helper_ci_provider" ]; then
+                _helper_ci_model="$_helper_ci_provider/$_helper_ci_model"
+            fi
+            ;;
+        esac
         ;;
     *) _helper_ci=$_helper_ci_agent ;;
     esac

@@ -2198,8 +2198,7 @@ argv_is "pi model only" 'HELPER_AGENT="pi"
 HELPER_MODEL="m"
 HELPER_CWD="~"' " [--model] [m] [$(printf '\342\200\213')]"
 
-# No -- separator for pi: its parser rejects it (Unknown option: --), so
-# the invisible first turn rides as a plain message.
+# No -- separator for pi: the first turn is a positional message.
 argv_is "pi bare" 'HELPER_AGENT="pi"
 HELPER_CWD="~"' " [$(printf '\342\200\213')]"
 
@@ -2443,7 +2442,10 @@ ident=$(helper_chat_identity pi '' '')
 ident=$(helper_chat_identity pi m high anthropic)
 [ "$ident" = 'pi · anthropic/m · high' ] || fail "identity pi provider+model (got $ident)"
 ident=$(helper_chat_identity pi '' '' google)
-[ "$ident" = 'pi · google' ] || fail "identity pi provider only (got $ident)"
+[ "$ident" = pi ] || fail "identity must not claim a provider with no model (got $ident)"
+ident=$(helper_chat_identity pi google/gemini-2.5-pro '' google)
+[ "$ident" = 'pi · google/gemini-2.5-pro' ] ||
+    fail "identity must not double-prefix a qualified model (got $ident)"
 ident=$(helper_chat_identity claude opus high google)
 [ "$ident" = 'claude · opus · high' ] || fail "identity must ignore provider for non-pi (got $ident)"
 

@@ -11,8 +11,7 @@ All notable changes to Lantern, by Elves are documented here.
   `--model`, `HELPER_EFFORT` to `--thinking`, the session table gains
   `pi -c` / `pi -r` / `pi --session` / `pi --fork` routes, and Pi gets no
   permission flags — Lantern never passes an approval bypass to it. The
-  invisible first-turn prompt reaches Pi as a plain message; its CLI
-  rejects a bare `--`.
+  invisible first-turn prompt reaches Pi as a positional message.
 
 ## [0.9.11] - 2026-08-26
 

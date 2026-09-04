@@ -186,9 +186,9 @@ passes.
 - If a command is missing, times out, or returns unparseable data, stop and
   report that the availability check failed. Do not seat on a guess. A
   harness with no usage or quota command is not a failed check.
-- Pi has no model catalog or quota command: for `--kind pi`
+- Lantern's route and preflight wrappers do not cover Pi: for `--kind pi`
   skip `model-route` and `model-preflight` and pass the configured
-  `--provider`/`--model` argv through.
+  `--provider`/`--model` argv through. Pi resolves those itself.
 - The route wrappers require a working Python 3 command. They use `python3`,
   `python`, or the Windows `py -3` launcher. If none works, stop and report
   that Python 3 is required for model routing.

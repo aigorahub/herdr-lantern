@@ -290,8 +290,8 @@ $onboard_note
   quota command is not a failed check. If the model is unavailable, report
   its bucket and reset time when known. Name the one live substitute from
   the result and ask the user to confirm it. Never switch models in silence.
-  Pi is that: skip both wrappers for \`--kind pi\` and pass the configured
-  model through.
+  The route wrappers do not cover Pi: skip both for \`--kind pi\` and pass
+  the configured model through.
 - Model routing requires a working Python 3 command. The wrappers try
   \`python3\`, \`python\`, and Windows \`py -3\`. A missing interpreter stops
   the route before any herd change.
@@ -442,10 +442,8 @@ if [ -n "$HELPER_EXTRA_ARGS" ]; then
     set +f
 fi
 # Invisible first turn so the CLI starts work without painting
-# instructions. Pi is the exception in form only: its parser rejects a
-# bare -- ("Unknown option: --"), and its usage is
-# "pi [options] [@files...] [messages...]", so the same invisible prompt
-# rides as a plain message.
+# instructions. Pi takes the same prompt as a positional message;
+# do not pass --.
 if [ "$HELPER_AGENT" = "pi" ]; then
     set -- "$@" "$(printf '\342\200\213')"
 else
