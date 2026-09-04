@@ -271,7 +271,7 @@
 
     <div class="wrap">
       <h2>What it is</h2>
-      <p>A Herdr plugin from the team that brought you <a href="https://github.com/aigorahub/elves">Elves</a>. It opens as a chat tab in its own Herdr workspace and starts the CLI you already use — Cursor <code>agent</code>, Devin, Claude Code, Codex, or Grok. That CLI drives Herdr. It is not a new chat product, and it does not cobble or land PRs.</p>
+      <p>A Herdr plugin from the team that brought you <a href="https://github.com/aigorahub/elves">Elves</a>. It opens as a chat tab in its own Herdr workspace and starts the CLI you already use — Cursor <code>agent</code>, Devin, Claude Code, Codex, Grok, or Pi. That CLI drives Herdr. It is not a new chat product, and it does not cobble or land PRs.</p>
       <p class="note">The sidebar already marks working, blocked, done, or idle. Lantern adds goals and progress in words, then seats or focuses a pane when you ask.</p>
 
       <h2 id="agent-onboarding">New here? Paste this to your agent</h2>
@@ -440,7 +440,7 @@ No Elves install required. If there are no
 
       <h2>Pick your helper CLI</h2>
       <p>The lantern chat is one CLI. That is yours. It is not a shared team model. The spawn default is separate: <code>HELPER_SPAWN_KIND</code>, <code>HELPER_SPAWN_MODEL</code>, and <code>HELPER_SPAWN_EFFORT</code> are what Lantern opens when you just name a repo.</p>
-      <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
+      <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Pi has no permission modes: <code>HELPER_PERMISSION</code> is accepted and ignored for Pi, and Lantern never passes any approval-bypass flag to it. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
       <table>
         <thead>
           <tr><th>Helper</th><th>Install</th><th>Your helper.conf</th></tr>
@@ -471,11 +471,17 @@ No Elves install required. If there are no
             <td>Grok CLI as <code>grok</code></td>
             <td><code>HELPER_AGENT="grok"</code> · optional model and effort</td>
           </tr>
+          <tr>
+            <td>Pi</td>
+            <td>Pi CLI as <code>pi</code> (typically <code>~/.local/bin/pi</code>)</td>
+            <td><code>HELPER_AGENT="pi"</code> · optional <code>HELPER_PROVIDER</code> (<code>--provider</code>) · optional <code>HELPER_MODEL</code> (<code>--model</code>; supports <code>provider/id</code>) · optional <code>HELPER_EFFORT</code> (<code>--thinking</code>)</td>
+          </tr>
         </tbody>
       </table>
       <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
       <pre>HELPER_AGENT="agent"
 HELPER_MODEL="cursor-grok-4.6-high-fast"
+HELPER_PROVIDER=""
 HELPER_EFFORT=""
 HELPER_CWD="~"
 HELPER_SPAWN_KIND="claude"

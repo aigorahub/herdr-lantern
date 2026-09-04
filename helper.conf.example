@@ -1,19 +1,23 @@
 # Lantern configuration. launch.sh parses KEY=value lines only;
 # it does not source this file as shell.
 
-# Which agent CLI runs the helper chat. One of: agent, devin, claude, codex, grok.
+# Which agent CLI runs the helper chat. One of: agent, devin, claude, codex, grok, pi.
 # `cursor` is an alias for `agent` (Cursor CLI). Empty: first of agent, devin,
-# claude, codex, grok on PATH.
+# claude, codex, grok, pi on PATH.
 HELPER_AGENT=""
 
 # Optional --model. For devin, leave empty (uses ~/.config/devin/config.json).
 # For Cursor `agent`, empty defaults to cursor-grok-4.6-high-fast.
 HELPER_MODEL=""
 
+# Optional provider. pi only: passed as --provider <value>. Unused by the other helpers.
+HELPER_PROVIDER=""
+
 # Optional reasoning effort. Mapped per agent:
 #   codex  -> --config model_reasoning_effort="<value>"
 #   claude -> --effort <value>
 #   grok   -> --reasoning-effort <value>
+#   pi     -> --thinking <value>
 #   devin / agent -> unused (pick a model id that already includes effort)
 HELPER_EFFORT=""
 
@@ -32,6 +36,7 @@ HELPER_SPAWN_EFFORT=""
 # Permission mode:
 #   devin: auto | accept-edits | smart (default) | dangerous
 #   agent:   smart/accept-edits -> --auto-review; dangerous -> --force
+#   pi: accepted and ignored — Pi has no permission flags; Lantern passes none
 # Mutating herdr still requires HERDR_HELPER_OK=1 after the user confirms.
 HELPER_PERMISSION="smart"
 

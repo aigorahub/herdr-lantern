@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `HELPER_AGENT="pi"` support: Pi joins empty-selection detection after the
+  existing five, `HELPER_PROVIDER` maps to `--provider`, `HELPER_MODEL` to
+  `--model`, `HELPER_EFFORT` to `--thinking`, the session table gains
+  `pi -c` / `pi -r` / `pi --session` / `pi --fork` routes, and Pi gets no
+  permission flags — Lantern never passes an approval bypass to it. The
+  invisible first-turn prompt reaches Pi as a positional message.
+
 ## [0.9.11] - 2026-08-26
 
 ### Added

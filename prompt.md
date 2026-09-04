@@ -186,6 +186,9 @@ passes.
 - If a command is missing, times out, or returns unparseable data, stop and
   report that the availability check failed. Do not seat on a guess. A
   harness with no usage or quota command is not a failed check.
+- Lantern's route and preflight wrappers do not cover Pi: for `--kind pi`
+  skip `model-route` and `model-preflight` and pass the configured
+  `--provider`/`--model` argv through. Pi resolves those itself.
 - The route wrappers require a working Python 3 command. They use `python3`,
   `python`, or the Windows `py -3` launcher. If none works, stop and report
   that Python 3 is required for model routing.
@@ -219,6 +222,7 @@ The preflight uses this substitute order. It skips absent or exhausted models:
 | Gemini | `gemini --resume latest` or `gemini --resume <index>` |
 | OpenCode | `opencode --continue` or `opencode --session <id>`; add `--fork` only when asked. |
 | Devin | `devin --continue` or `devin --resume <id>` |
+| Pi | `pi -c` or `pi --continue`; `pi -r` to pick a session; `pi --session <path-or-id>` for a named one; add `pi --fork <path-or-id>` only when asked to fork. |
 
 Interactive chat is the normal seat. Use a task route only when the user's
 words name that task.
@@ -275,6 +279,8 @@ words name that task.
      unattended flag. Never pass bypassPermissions, --yolo, --force, or
      --always-approve unless the user explicitly asks for yolo in that
      request.
+     Pi is one of those kinds: it has no permission flags of its own, and
+     Lantern never invents an approval bypass for it.
    - After the seat is up, rename the agent's tab so the sidebar says
      who is in it: `herdr tab rename <tab_id> "<slug> · <kind>"`, with
      tab_id from the workspace create JSON

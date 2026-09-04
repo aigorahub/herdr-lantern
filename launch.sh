@@ -63,6 +63,7 @@ if [ ! -f "$prompt_file" ]; then
 fi
 
 HELPER_AGENT=""
+HELPER_PROVIDER=""
 HELPER_MODEL=""
 HELPER_EFFORT=""
 HELPER_CWD=""
@@ -75,13 +76,13 @@ helper_parse_conf "$conf" || die "could not parse $conf"
 
 if [ -z "$HELPER_AGENT" ]; then
     HELPER_AGENT=$(helper_detect_agent) ||
-        die "set HELPER_AGENT in $conf (agent, devin, claude, codex, or grok)"
+        die "set HELPER_AGENT in $conf (agent, devin, claude, codex, grok, or pi)"
     printf 'lantern: HELPER_AGENT empty; using %s from PATH\n' "$HELPER_AGENT" >&2
 fi
 
 case $HELPER_AGENT in
-codex | claude | grok | devin | agent | cursor) ;;
-*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use agent, devin, claude, codex, or grok)" ;;
+codex | claude | grok | devin | agent | cursor | pi) ;;
+*) die "unsupported HELPER_AGENT '$HELPER_AGENT' in $conf (use agent, devin, claude, codex, grok, or pi)" ;;
 esac
 
 helper_bin=$HELPER_AGENT
@@ -135,10 +136,11 @@ esac
 
 # The identity follows what actually runs: a --model in HELPER_EXTRA_ARGS
 # lands after the built flags and the later flag wins, so it is the model
-# the label and the light-up line must name.
+# the label and the light-up line must name. For Pi the same is true of
+# --provider.
 chat_identity=$(helper_chat_identity "$HELPER_AGENT" \
     "$(helper_effective_model "$HELPER_MODEL" "$HELPER_EXTRA_ARGS")" \
-    "$HELPER_EFFORT")
+    "$HELPER_EFFORT" "$(helper_effective_flag provider "$HELPER_PROVIDER" "$HELPER_EXTRA_ARGS")")
 
 workdir=$state_dir/workdir
 mkdir -p "$workdir/.windsurf/rules" || die "could not create helper workdir"
@@ -257,7 +259,7 @@ $onboard_note
   CLI: Codex \`--dangerously-bypass-approvals-and-sandbox resume --last\`, Claude \`--continue\`, OMP \`--continue\` or
   \`-r <id>\`, Cursor \`--continue\` or \`--resume <id>\`, Grok
   \`--continue\` or \`--resume <id>\`, Gemini \`--resume latest\`, OpenCode
-  \`--continue\`, and Devin \`--continue\`.
+  \`--continue\`, Devin \`--continue\`, and Pi \`--continue\` or \`--session <id>\`.
 - "Cursor" means \`--kind cursor\` with the live Sol default. "Grok" also
   means \`--kind cursor\`, but with a live Cursor Grok model. "Grok Build" and
   "SuperGrok" mean \`--kind grok\` with the live Grok Build default. "In
@@ -288,6 +290,8 @@ $onboard_note
   quota command is not a failed check. If the model is unavailable, report
   its bucket and reset time when known. Name the one live substitute from
   the result and ask the user to confirm it. Never switch models in silence.
+  The route wrappers do not cover Pi: skip both for \`--kind pi\` and pass
+  the configured model through.
 - Model routing requires a working Python 3 command. The wrappers try
   \`python3\`, \`python\`, and Windows \`py -3\`. A missing interpreter stops
   the route before any herd change.
@@ -391,6 +395,10 @@ if [ "$helper_bin" = "agent" ] && [ -z "$HELPER_MODEL" ]; then
 fi
 
 set -- "$helper_bin"
+# Provider before model: pi's own option order.
+if [ "$HELPER_AGENT" = "pi" ] && [ -n "$HELPER_PROVIDER" ]; then
+    set -- "$@" --provider "$HELPER_PROVIDER"
+fi
 if [ -n "$HELPER_MODEL" ]; then
     if [ "$HELPER_AGENT" = "devin" ]; then
         printf 'lantern: ignoring HELPER_MODEL for devin (use devin config)\n' >&2
@@ -405,6 +413,7 @@ if [ -n "$HELPER_EFFORT" ] && helper_agent_takes_effort "$HELPER_AGENT"; then
     codex) set -- "$@" --config "model_reasoning_effort=\"$HELPER_EFFORT\"" ;;
     claude) set -- "$@" --effort "$HELPER_EFFORT" ;;
     grok) set -- "$@" --reasoning-effort "$HELPER_EFFORT" ;;
+    pi) set -- "$@" --thinking "$HELPER_EFFORT" ;;
     esac
 fi
 if [ "$HELPER_AGENT" = "grok" ]; then
@@ -423,6 +432,8 @@ fi
 if [ "$HELPER_AGENT" = "codex" ]; then
     set -- "$@" --dangerously-bypass-approvals-and-sandbox
 fi
+# Pi has no permission flags: HELPER_PERMISSION is validated above and
+# ignored here.
 if [ -n "$HELPER_EXTRA_ARGS" ]; then
     set -f
     for _helper_extra in $HELPER_EXTRA_ARGS; do
@@ -430,8 +441,14 @@ if [ -n "$HELPER_EXTRA_ARGS" ]; then
     done
     set +f
 fi
-# Invisible first turn so the CLI starts work without painting instructions.
-set -- "$@" -- "$(printf '\342\200\213')"
+# Invisible first turn so the CLI starts work without painting
+# instructions. Pi takes the same prompt as a positional message;
+# do not pass --.
+if [ "$HELPER_AGENT" = "pi" ]; then
+    set -- "$@" "$(printf '\342\200\213')"
+else
+    set -- "$@" -- "$(printf '\342\200\213')"
+fi
 
 cd "$workdir" || die "could not change to $workdir"
 # The wrapper finds the real binary itself. Do not leak HERDR_REAL to the agent.
