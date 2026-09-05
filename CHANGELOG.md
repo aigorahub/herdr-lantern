@@ -2,15 +2,49 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [Unreleased]
+## [0.10.0] - 2026-09-05
 
 ### Added
+
+- Seven herd invokes: sweep, issue harvest, stage, landable loop, parallel
+  pack, cutoff resume, and close bar. Each run has one Elves driver.
+  Lantern monitors through authorized merge and deployment checks.
+- Permission monitoring grants routine approvals within the named run scope.
+  It checks the blocked prompt and result. Login and broad bypass gates stay separate.
+- A shared herd contract loads at each launch, including with custom prompts.
+- Astra routes and all six efforts. Codex defaults to live Astra at medium
+  with Fast off. Bare gpt-6 requires a model choice.
+- Claude model routing from the live SDK initialization catalog. The fable
+  alias pins to claude-fable-5-1. Help examples are not a model allowlist.
+  Cursor Fable 5.1 uses exact live IDs. No Cursor Astra ID is invented.
+
+### Fixed
+
+- Fable 5.1 no longer fails because CLI help shows an old model example.
+  Routing and preflight use resolved model IDs and per-model effort levels.
+- Normal Codex routes override inherited Fast settings with the default tier.
+- Model parsing now keeps integer generations and distinguishes 5 from 5.1.
+  Codex preflight checks effort. Claude rejects unparseable usage results.
+- The prompt wrapper blocks working, blocked, and unknown seats. It checks
+  readiness again before a stalled prompt receives Enter.
+- Login pickers cannot match first run trust or new chat key handlers.
+- Repo paths and task text that contain login no longer block valid trust
+  prompts or stalled prompt submission.
+- Review guidance separates model availability from socket, state, auth,
+  and sandbox access. Named harnesses stay bound to their review routes.
+
+### Changed
+
+- The plugin version is 0.10.0. README and both HTML guides describe the
+  herd invokes, live model routes, permission scope, and upgrade behavior.
+
+### Included
 
 - `HELPER_AGENT="pi"` support: Pi joins empty-selection detection after the
   existing five, `HELPER_PROVIDER` maps to `--provider`, `HELPER_MODEL` to
   `--model`, `HELPER_EFFORT` to `--thinking`, the session table gains
   `pi -c` / `pi -r` / `pi --session` / `pi --fork` routes, and Pi gets no
-  permission flags — Lantern never passes an approval bypass to it. The
+  permission flags. Lantern never passes an approval bypass to it. The
   invisible first-turn prompt reaches Pi as a positional message.
 
 ## [0.9.11] - 2026-08-26

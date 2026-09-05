@@ -85,7 +85,7 @@ cmd_plan() {
         "spawn_model: ${HELPER_SPAWN_MODEL:-}" \
         "spawn_effort: ${HELPER_SPAWN_EFFORT:-}" \
         "spawn: $(helper_spawn_summary)"
-    printf '%s\n' "ask: What should I open when you just name a repo? Say the harness, model, and setting. Examples: Cursor Grok 4.6 high fast. Claude Opus high. Codex 5.6 sol high fast. Grok Build. Or: keep the current default."
+    printf '%s\n' "ask: What should I open when you just name a repo? Say the harness, model, and setting. Examples: Cursor Grok 4.6 high fast. Claude Opus high. Codex Astra high. Claude Fable high. Grok Build. Or: keep the current default."
 }
 
 cmd_show() {

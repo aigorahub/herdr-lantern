@@ -9,7 +9,10 @@ import re
 import shutil
 import subprocess
 import sys
+
 from dataclasses import dataclass
+
+from model_catalog import claude_model_catalog, listed_codex_models, model_words
 
 
 class CheckError(RuntimeError):
@@ -48,7 +51,7 @@ def resolve_command(name: str) -> list[str]:
     return command
 
 
-def run(command: list[str]) -> str:
+def run(command: list[str], *, input_text: str | None = None) -> str:
     prefix = resolve_command(command[0])
     if len(prefix) > 1:
         command_line = subprocess.list2cmdline([prefix[-1], *command[1:]])
@@ -59,6 +62,7 @@ def run(command: list[str]) -> str:
         result = subprocess.run(
             process_command,
             check=True,
+            input=input_text,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -72,7 +76,7 @@ def run(command: list[str]) -> str:
 
 
 def words(value: str) -> set[str]:
-    return set(re.findall(r"\d+(?:\.\d+)+|[a-z][a-z0-9]*", value.lower()))
+    return set(model_words(value))
 
 
 def cursor_models() -> list[str]:
@@ -97,16 +101,11 @@ def grok_models() -> list[str]:
     return models
 
 
-def codex_models() -> list[str]:
+def codex_models() -> list[dict[str, object]]:
     try:
-        catalog = json.loads(run(["codex", "debug", "models"]))
-        models = [
-            str(model["slug"])
-            for model in catalog["models"]
-            if model.get("visibility") == "list" and model.get("slug")
-        ]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
-        fail(f"availability check failed: Codex returned an unparseable catalog ({error})")
+        models = listed_codex_models(run(["codex", "debug", "models"]))
+    except ValueError as error:
+        fail(f"availability check failed: {error}")
     if not models:
         fail("availability check failed: Codex returned an empty catalog")
     return models
@@ -190,36 +189,20 @@ def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | No
     return None
 
 
-def claude_capabilities() -> tuple[set[str], set[str]]:
-    help_text = run(["claude", "--help"])
-    model_block = re.search(
-        r"^[ \t]*--model\s+<model>.*?(?=^[ \t]*--[a-zA-Z]|\Z)",
-        help_text,
-        re.MULTILINE | re.DOTALL,
-    )
-    effort_block = re.search(
-        r"^[ \t]*--effort\s+<level>.*?(?=^[ \t]*--[a-zA-Z]|\Z)",
-        help_text,
-        re.MULTILINE | re.DOTALL,
-    )
-    if model_block is None or effort_block is None:
-        fail("availability check failed: Claude help has no model or effort choices")
-    models = {value.lower() for value in re.findall(r"'([a-zA-Z0-9.-]+)'", model_block.group(0))}
-    effort_choices = re.search(r"\((low(?:\s*,\s*(?:medium|high|xhigh|max))+?)\)", effort_block.group(0))
-    efforts = set(re.findall(r"low|medium|high|xhigh|max", effort_choices.group(1))) if effort_choices else set()
-    if not models or not efforts:
-        fail("availability check failed: Claude returned unparseable model or effort choices")
-    return models, efforts
+def claude_capabilities() -> dict[str, tuple[str, set[str]]]:
+    try:
+        return claude_model_catalog(run)
+    except ValueError as error:
+        fail(f"availability check failed: {error}")
 
 
 def claude_alias_available(
     alias: str,
     effort: str,
-    models: set[str],
-    efforts: set[str],
+    models: dict[str, tuple[str, set[str]]],
     buckets: list[UsageBucket],
 ) -> bool:
-    return alias in models and effort in efforts and exhausted_bucket(alias, buckets) is None
+    return alias in models and effort in models[alias][1] and exhausted_bucket(models[alias][0], buckets) is None
 
 
 def claude_global_exhausted(buckets: list[UsageBucket]) -> bool:
@@ -237,15 +220,14 @@ def claude_global_exhausted(buckets: list[UsageBucket]) -> bool:
 def claude_substitute(
     model: str,
     buckets: list[UsageBucket],
-    models: set[str],
-    efforts: set[str],
+    models: dict[str, tuple[str, set[str]]],
 ) -> dict[str, object] | None:
     if not claude_global_exhausted(buckets) and "fable" in model.lower() and claude_alias_available(
-        "opus", "xhigh", models, efforts, buckets
+        "opus", "xhigh", models, buckets
     ):
         return {"kind": "claude", "model": "opus", "effort": "xhigh", "fast": False, "argv": ["--model", "opus", "--effort", "xhigh"]}
     if not claude_global_exhausted(buckets) and "opus" in model.lower() and claude_alias_available(
-        "sonnet", "high", models, efforts, buckets
+        "sonnet", "high", models, buckets
     ):
         return {"kind": "claude", "model": "sonnet", "effort": "high", "fast": False, "argv": ["--model", "sonnet", "--effort", "high"]}
     return cursor_sol_substitute()
@@ -264,29 +246,31 @@ def report_unavailable(kind: str, model: str, reason: str, substitute: dict[str,
 
 def check(kind: str, model: str, effort: str) -> int:
     if kind == "claude":
-        models, efforts = claude_capabilities()
+        models = claude_capabilities()
         _, buckets = parse_claude_usage()
+        if not buckets:
+            fail("availability check failed: Claude returned no usage buckets")
         if model.lower() not in models:
             return report_unavailable(
                 kind,
                 model,
-                f"Claude model {model} is not verified by claude --help",
-                claude_substitute(model, buckets, models, efforts),
+                f"Claude model {model} is absent from the Claude initialization catalog",
+                claude_substitute(model, buckets, models),
             )
-        if effort and effort.lower() not in efforts:
+        if effort and effort.lower() not in models[model.lower()][1]:
             return report_unavailable(
                 kind,
                 model,
-                f"Claude effort {effort} is not verified by claude --help",
-                claude_substitute(model, buckets, models, efforts),
+                f"Claude effort {effort} is absent from the Claude initialization catalog",
+                claude_substitute(model, buckets, models),
             )
-        exhausted = exhausted_bucket(model, buckets)
+        exhausted = exhausted_bucket(models[model.lower()][0], buckets)
         if exhausted:
             return report_unavailable(
                 kind,
                 model,
                 exhausted_reason(exhausted),
-                claude_substitute(model, buckets, models, efforts),
+                claude_substitute(model, buckets, models),
             )
         return report_available(kind, model, effort)
     if kind == "cursor":
@@ -304,8 +288,12 @@ def check(kind: str, model: str, effort: str) -> int:
             return report_unavailable(kind, model, f"{model} is absent from grok models", substitute)
         return report_available(kind, model, effort)
     models = codex_models()
-    if model not in models:
+    entry = next((entry for entry in models if entry["slug"] == model), None)
+    if entry is None:
         return report_unavailable(kind, model, f"{model} is absent from codex debug models", None)
+    levels = {level.get("effort") for level in entry.get("supported_reasoning_levels", [])}
+    if effort and effort not in levels:
+        return report_unavailable(kind, model, f"{model} does not support effort {effort}", None)
     return report_available(kind, model, effort)
 
 

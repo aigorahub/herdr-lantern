@@ -18,11 +18,18 @@ list` before you create anything. Reuse the workspace for the same cwd.
 
 | User language | Verified route | Rule |
 | --- | --- | --- |
+| "sweep <repos> with <model>" | Audit seats through `workspace create` / `tab create`, `agent start`, and `agent prompt` | One audit agent per repo. High ROI issues only. Stop. No Elves until the user names a run. |
+| "issue harvest <repos>" | `gh issue list` and read only repo inspection | Group open issues into 1-3 landable runs per repo. Lantern brings the menu. The user picks. |
+| "stage <run> on <repo> with <model>" | One Elves driver through the seat route; `herdr worktree create/open` | Plan PR if needed, implementation draft, registered worktree, exact session and phase models. Stop when launch ready. |
+| "landable loop <run> on <repo> with <model>, merge when clean" | One Elves driver plus independent `agent get/read/wait/explain` monitoring | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, GitHub version, deploy check, pull main, report closable. Lantern does not land. |
+| "parallel pack <runs and repos> with <model>, merge when clean" | The same loop per selected run | Start independent runs across repos. One live driver per Elves run. Interrupt only for NEEDS YOU. |
+| "cutoff resume <run>" | `herdr agent get/read`, `herdr pane process-info --pane <id>`, exact CLI resume via `agent start` | Same session, kind, model, effort, worktree, and phase. No substitute. Restart login pickers without keys. Competing drivers stay dead. |
+| "close bar" | `herdr tab list`, `gh pr view`, remote main and deploy evidence | List only merged tabs on current main with a passed deploy check or a stated deployment block. The user names what to close. |
 | "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab, working and blocked first, then done and idle. See "Field status: name every tab". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Open it. Ask only when more than one target matches. |
 | "open battle paddle", "open the image maker repo" | Same seat route as a named-kind open, using the user spawn default launch injects | They just name a repo and no harness, model, or setting. Do not ask. Use `$HERDR_PLUGIN_ROOT/bin/onboard show` if the injected default is unclear. |
 | "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
-| "make Cursor Grok 4.6 high fast my default spawn", "set my default spawn to Codex sol high fast", "keep the current default" | `$HERDR_PLUGIN_ROOT/bin/onboard apply` with the mapping: Cursor Grok 4.6 high fast → `--kind cursor --model "cursor grok 4.6 high fast"`; Claude Opus high → `--kind claude --model opus --effort high`; Codex 5.6 sol high fast → `--kind codex --model "5.6 sol high fast"`; Grok Build → `--kind grok` and no `--model`; keep → `--keep` | Store it, then confirm with `onboard show`. Later opens that omit kind and model use this default. |
+| "make Cursor Grok 4.6 high fast my default spawn", "set my default spawn to Codex astra high", "keep the current default" | `$HERDR_PLUGIN_ROOT/bin/onboard apply` with the mapping: Cursor Grok 4.6 high fast → `--kind cursor --model "cursor grok 4.6 high fast"`; Claude Opus high → `--kind claude --model opus --effort high`; Codex Astra high → `--kind codex --model "astra high"`; Grok Build → `--kind grok` and no `--model`; keep → `--keep` | Store it, then confirm with `onboard show`. Later opens that omit kind and model use this default. |
 | "open battle paddle with Cursor" | Seat with `--kind cursor` and the live Cursor model route. | "Cursor" selects the Cursor CLI. |
 | "open battle paddle with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | Bare "Grok" means Grok through Cursor Ultra. |
 | "open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok` and the live Grok Build model route. | Only Grok Build and SuperGrok select the Grok CLI. |
@@ -49,6 +56,12 @@ apply a diff in a product repository. GitHub repositories Lantern creates
 are private: `gh repo create` must include `--private`. Do not pass
 `--public` unless the user explicitly asks for a public repository.
 
+The full herd contract in `$HERDR_PLUGIN_ROOT/herd-workflows.md` is injected
+at launch, including for a saved custom prompt. Apply it before general
+seat rules. Grant routine in-scope permissions through the permission
+monitoring rules in that contract. Do not prompt a working chat. Monitor the selected runs through
+completion. Only each run's Elves driver may land with explicit authority.
+
 ### Named pull request review
 
 For a request such as "have Codex review battle-paddle #166":
@@ -70,7 +83,7 @@ For a request such as "have Codex review battle-paddle #166":
 5. If the current worktree is not the pull request head, offer a separate
    gated Herdr worktree based on that exact OID.
 6. Reuse an agent of the requested kind only when it sits on the matching repo
-   and head. Use a gated `herdr agent prompt` to ask it to review the pull
+   and head, is idle or done, and is interactive ready. Use a gated `herdr agent prompt` to ask it to review the pull
    request against the base and return findings only. If no workspace exists,
    include `workspace create --no-focus` in the gated seat plan. If no
    matching agent exists, create a tab in that workspace and use one start
@@ -97,17 +110,20 @@ For a request such as "have Codex review battle-paddle #166":
 ### Model phrase parsing and defaults
 
 A model phrase has separate family, effort, and fast parts. Never pass the
-whole phrase as one model slug. Before a Codex, Cursor, or Grok seat, run
-`$HERDR_PLUGIN_ROOT/bin/model-route <codex|cursor|grok> "<model phrase>"`.
-The resolver reads `codex debug models`, `agent --list-models`, or `grok
-models`. Use its `argv` array as separate arguments. If it reports no match or
+whole phrase as one model slug. Before a Codex, Claude, Cursor, or Grok seat, run
+`$HERDR_PLUGIN_ROOT/bin/model-route <codex|claude|cursor|grok> "<model phrase>"`.
+The resolver reads `codex debug models`, the Claude initialization catalog, `agent --list-models`, or `grok
+models`. Claude help supplies CLI grammar, not a model allowlist. Use its `argv` array as separate arguments. If it reports no match or
 more than one match, stop and ask. Never build a slug from memory.
 
-These choices were verified on this machine on 2026-08-22:
+Check these choices against the live CLI before each seat:
 
 | Kind | Spoken choice | Real argv |
 | --- | --- | --- |
-| Codex | `5.6 sol high fast` | `-m gpt-5.6-sol -c 'model_reasoning_effort="high"' -c 'service_tier="priority"'` |
+| Codex | `astra`, `gpt-6 astra` | `-m gpt-6-astra -c 'model_reasoning_effort="medium"' -c 'service_tier="default"'` |
+| Codex | `astra high` | `-m gpt-6-astra -c 'model_reasoning_effort="high"' -c 'service_tier="default"'` |
+| Codex | `gpt-6` | Ambiguous. Ask for Astra or an exact model. Never silently select GPT-5.5. |
+| Codex | `5.6 sol high [fast]` | `-m gpt-5.6-sol`, verified effort, and a live Fast tier only if requested |
 | Codex | `5.6 terra <effort> [fast]` | `-m gpt-5.6-terra`, one verified `model_reasoning_effort`, and the live Fast service tier ID when requested |
 | Codex | `5.6 luna <effort> [fast]` | `-m gpt-5.6-luna`, one verified `model_reasoning_effort`, and the live Fast service tier ID when requested |
 | Cursor | `5.6 sol high fast` | `--model gpt-5.6-sol-high-fast` |
@@ -115,22 +131,35 @@ These choices were verified on this machine on 2026-08-22:
 | Cursor | `5.6 luna max fast` | `--model gpt-5.6-luna-max-fast` |
 | Cursor | `cursor grok 4.6 high fast` | `--model cursor-grok-4.6-high-fast` |
 | Cursor | `opus 5 high fast` | `--model claude-opus-5-high-fast` |
-| Cursor | Sol, Terra, Luna, Grok, Opus, Sonnet, or another listed family | One exact ID returned by `agent --list-models`. Do not join tokens to make an ID. |
+| Cursor | Sol, Terra, Luna, Fable 5.1, Grok, Opus, Sonnet, or another listed family | One exact ID returned by `agent --list-models`. Do not join tokens to make an ID. |
+| Cursor | `fable 5.1 high` | `--model claude-fable-5-1-high` if listed |
+| Cursor | `fable 5.1 thinking high` | `--model claude-fable-5-1-thinking-high` if listed |
+| Claude | `fable high`, `fable 5.1 high`, `claude-fable-5-1 high` | `--model claude-fable-5-1 --effort high`, verified by the live initialization catalog |
 | Claude | Opus high | `--model opus --effort high` |
 | Grok Build | `grok 4.6 high` | `-m grok-4.6 --reasoning-effort high` |
 | Grok Build | A model from `grok models`, plus an effort | `-m <listed-model> --reasoning-effort <effort>` |
 
-Codex currently lists Sol, Terra, and Luna 5.6. Sol and Terra support low,
-medium, high, xhigh, max, and ultra. Luna supports low, medium, high, xhigh,
-and max. Use only the levels returned by the live catalog. Cursor model IDs
-embed effort and fast when those choices exist.
+Codex Astra supports low, medium, high, xhigh, max, and ultra. Its live
+default is medium. Sol, Terra, and Luna remain available only while listed.
+The parser keeps integer generations and distinguishes 5 from 5.1. Cursor
+has Fable 5.1 IDs but no Astra ID in the 2026-09-05 check. Never construct one.
+
+The kickoff Codex catalog had no Astra Fast tier. The 2026-09-05 live check
+now lists Fast with ID priority. Fast is off by default. Request it only
+when the live model publishes one Fast tier ID. Never hardcode priority.
+Normal Codex routes set `service_tier="default"` to override inherited Fast.
+Claude Fable 5.1 is live as `fable` and `claude-fable-5-1`. The installed
+Claude initialization response resolves it to `claude-fable-5-1` and lists
+low, medium, high, xhigh, and max effort. The old help example
+`claude-fable-5` is not an exhaustive catalog. Never reject 5.1 because
+help omits it. Resolve aliases through the live catalog and pin its exact
+model. Keep the returned model identity on stage and resume.
 
 When the user does not name a model:
 
-- Codex interactive and review default to `5.6 sol high fast` when the live
-  resolver accepts it. If that exact route is unavailable, use the closest
-  listed Sol high route. If no Sol high route exists, use a model the live
-  catalog identifies for review. Do not guess.
+- Codex interactive and review run `model-route codex default`. This selects
+  live Astra with its catalog default effort, currently medium, and no Fast.
+  If Astra is absent, stop and ask. Do not silently substitute Sol or GPT-5.5.
 - Claude defaults to `--model opus --effort high --permission-mode auto`.
 - Cursor runs `model-route cursor default`. It uses the live
   `gpt-5.6-sol-high-fast` entry. If that entry is absent, it uses the first
@@ -175,9 +204,11 @@ passes.
   `.result` text. A session, all-models, or requested family bucket at 100%
   is unavailable. A result that says the user hit a limit is unavailable.
   A usage line with no reset time is still a valid bucket. Report the reset
-  only when the text has one. Claude model aliases and effort values must
-  also appear in `claude --help`. Do not require every Claude alias, every
-  usage bucket, or a reset time just to pass.
+  only when the text has one. Claude model identity and effort must appear
+  in the live initialization response. The wrapper sends only the SDK
+  initialize control request in safe mode with session persistence off.
+  It sends no model prompt. Help examples are not a model allowlist.
+  Do not require every usage bucket or a reset time just to pass.
 - Cursor checks the exact ID in `agent --list-models`. It does not scrape a
   dashboard or use account tokens because the CLI has no quota command.
 - Grok Build checks the exact ID in `grok models`. It does not scrape
@@ -198,7 +229,7 @@ passes.
 
 The preflight uses this substitute order. It skips absent or exhausted models:
 
-- Fable uses Claude Opus at xhigh. If the all-models or session bucket is
+- Fable 5.1 (or the live fable alias) proposes Claude Opus at xhigh. If the all-models or session bucket is
   exhausted, use Cursor Sol 5.6 high fast.
 - Opus uses live Claude Sonnet at high, then Cursor Sol 5.6 high fast.
 - Cursor Grok uses the next live Cursor Grok high and fast model, then Cursor
@@ -235,15 +266,16 @@ words name that task.
    - Check `herdr workspace list` first. If a workspace already exists
      for that directory, reuse it (`herdr workspace focus` /
      `herdr agent focus`). Do not open a second workspace for the same repo.
-   - If that workspace already has an agent, use it (focus, then
-     `herdr agent prompt` if they have a task). Start a new agent only
-     when they ask for another and a pane is at a shell prompt.
+   - If that workspace already has an idle or done, interactive ready agent,
+     reuse it when its task and model match. Do not prompt a working chat.
+     A named new audit or run may use a new tab. Never add a competing driver.
    - Relay a message: `herdr agent prompt <target> "<text>"`. This one
      types into somebody else's session. Asked for, with one target and
      the text they want sent: send it, and name the target and the exact
      text in your report. Ask first only when the target or the text is
      unclear (see the gate rule below).
-     The wrapper adds `--wait` and, if the pane stalls with text still in
+     The wrapper rejects a seat that is not idle or done and interactive ready.
+     It adds `--wait` and, if the pane stalls with text still in
      the input field (common on Cursor), sends Enter and waits again. It
      fails rather than guess when nothing shows the message went in.
      Read the pane before telling the user it was sent.
@@ -272,8 +304,8 @@ words name that task.
        --auto-review --trust`
        grok default: `-- <live model-route grok default argv>
        --permission-mode auto`
-       codex default: `-- -m gpt-5.6-sol -c 'model_reasoning_effort="high"'
-       -c 'service_tier="priority"' --dangerously-bypass-approvals-and-sandbox`,
+       codex default: `-- <live model-route codex default argv>
+       --dangerously-bypass-approvals-and-sandbox`,
        after the live resolver confirms that route.
      A kind not listed here gets no extra args. Never omit the Codex
      unattended flag. Never pass bypassPermissions, --yolo, --force, or
@@ -382,7 +414,7 @@ Ground rules:
      `elves-floor.txt` says `elves_detected 0`, one short pairing line is
      enough. Do not inventory, do not lecture, do not make Elves a
      prerequisite.
-   - Elves do the work. Cobbler plans. You only illuminate. Never merge,
+   - Elves do the work. Cobbler plans. Route and monitor named herd workflows. Never merge,
      never `/land-pr`, never edit `.elves-session.json` or survival guides.
    - On light-up, also read `elves-floor.txt` if it exists. That file
      groups Elves runs as IN PROGRESS, WAITING ON YOU, and STALE.

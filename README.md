@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.9.11** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.10.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -34,7 +34,7 @@ open when you just name a repo (harness, model, setting). After that,
 If you already have a coding agent open, paste the block at the top of
 [the guide](https://aigorahub.github.io/herdr-lantern/).
 
-From the marketplace / GitHub (after this release is on `main`):
+From the marketplace / GitHub:
 
 ```bash
 # If you previously used `herdr plugin link` for this repo, unlink first.
@@ -169,6 +169,77 @@ that it has none yet.
 How to use it (GitHub Pages, after this lands on `main`):
 [aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).
 Team setup notes: [howto.html](howto.html). Changelog: [CHANGELOG.md](CHANGELOG.md).
+
+## Run a herd of work
+
+Lantern starts and monitors selected work across many repos through clean
+merge. Each Elves run has one live driver. That driver owns changes, run
+records, independent review, fixes, and authorized merge. Lantern monitors
+from its home tab and raises only decisions that need you.
+
+| Say this | Result |
+| --- | --- |
+| `sweep battle-paddle, image-maker with astra high` | One audit agent per repo. High ROI issues only. Stop before Elves. |
+| `issue harvest battle-paddle, image-maker` | Read open issues. Bring a menu of 1-3 landable runs per repo. You pick. |
+| `stage relay recovery on battle-paddle with astra high` | Plan PR if needed, implementation draft PR, worktree, and exact phase routes. Stop before execution. |
+| `landable loop relay recovery on battle-paddle with astra high, merge when clean` | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, GitHub version, deploy check, pull main, report closable. |
+| `parallel pack relay recovery on battle-paddle and export fixes on image-maker with astra high, merge when clean` | Start the selected independent runs. Continue healthy runs when another blocks. |
+| `cutoff resume relay recovery` | Exact session, same kind and model, same worktree and phase. No silent substitute. |
+| `close bar` | List merged tabs on current main with a passed deploy check or a stated deployment block. You name what to close. |
+
+Omit `merge when clean` to stop at a landable PR unless you already gave merge
+authority for that run. A sweep, harvest, or stage never grants merge authority.
+Lantern never merges or edits product repositories. It never prompts a working
+chat. A login picker gets one exact process restart, with no input keys.
+Lantern grants routine permissions within the selected run's scope. It reads
+the blocked prompt, selects a visible allow once option, and checks progress.
+It does not enable broad bypass settings or approve work outside that scope.
+Lantern never closes its home tab. See [the herd contract](herd-workflows.md).
+
+Run ownership and phase records come from the installed Elves skill. Prewalk
+uses one worker session and one packet. Its supervisor resumes the same session
+on the bound execute route. Review uses an independent session. Parallel
+batches within a repo belong to that repo's driver and Elves lane checks.
+
+`herd-workflows.md` loads on each launch, even with a saved custom prompt.
+Reopen Lantern after an upgrade to load it.
+
+## Live model routes
+
+`bin/model-route` reads the installed catalogs and returns separate argv.
+`bin/model-preflight` checks the resolved route before a herd change.
+
+- Codex: `astra`, `gpt-6 astra`, and `astra high` select `gpt-6-astra`.
+  The default is live Astra at its catalog effort, currently medium, with
+  Fast off. The route sets `service_tier="default"` to override inherited
+  priority settings. Efforts are low, medium, high, xhigh, max, and ultra. Bare
+  `gpt-6` requires a choice. It never silently selects GPT-5.5.
+- Claude: `fable high`, `fable 5.1 high`, and `claude-fable-5-1 high`
+  resolve to `claude-fable-5-1`. The live initialization response supplies
+  the exact model and its effort levels. Fable 5.1 supports low, medium,
+  high, xhigh, and max. It keeps the Fable quota check and substitute consent.
+- Cursor: `fable 5.1 high` and `fable 5.1 thinking high` select the exact
+  `claude-fable-5-1-*` entries. Cursor Astra remains unavailable unless
+  `agent --list-models` adds it. The Cursor default remains live Sol high Fast.
+
+The 2026-09-05 check differs from the kickoff catalog. Codex now lists Astra
+Fast with tier ID `priority`. The default keeps it off. A Fast request needs
+one live Fast tier ID. Tests also cover catalogs with no Fast tier. Claude
+Code 2.1.257 help still gives `claude-fable-5` as an example. Its live SDK
+initialization response lists `claude-fable-5-1[1m]` with
+`resolvedModel: claude-fable-5-1`. The wrapper reads that response in safe
+mode with session persistence off. It sends no model prompt. Help examples
+are not a model allowlist. Cursor lists Fable 5.1 and does not list Astra.
+
+Anthropic confirms the [Fable 5.1 model ID](https://www.anthropic.com/claude/fable).
+The [Agent SDK reference](https://code.claude.com/docs/en/agent-sdk/typescript)
+describes model discovery through its initialization response.
+
+A model check does not prove transport access. Agy needs local state and a
+localhost port. Elves Grok review needs its runner sandbox. OMP needs its
+state directory and configured auth broker. Report a denied resource as a
+transport block. Do not change models to fix it. A named Claude Code review
+must not become an OMP or Cursor review without a user choice.
 
 ## Open it
 

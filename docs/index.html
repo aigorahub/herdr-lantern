@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.9.11 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.10.0 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -424,6 +424,29 @@ No Elves install required. If there are no
     </div>
 
     <div class="wrap">
+      <h2>Run a herd with Elves</h2>
+      <p>Name the repos, run, and model. Lantern reuses one workspace per checkout and keeps one live Elves driver per run. The driver owns changes, reviews, fixes, and authorized merges. Lantern monitors each run.</p>
+      <ul class="says">
+        <li><code>sweep battle-paddle and image-maker with astra high</code><span>One audit agent per repo. Report high value issues, then stop. No Elves run starts until you name it.</span></li>
+        <li><code>issue harvest battle-paddle</code><span>Read open issues and group them into 1-3 landable runs. Lantern brings the menu. You pick.</span></li>
+        <li><code>stage relay recovery on battle-paddle with fable high</code><span>Prepare a plan PR if needed, an implementation draft, a worktree, and session records. Bind prewalk, execution, and independent review to the named routes. Stop when ready to start.</span></li>
+        <li><code>landable loop relay recovery on battle-paddle with astra high, merge when clean</code><span>Audit, stage, execute, review, fix, and review again. The driver updates docs, changelog, and version, then merges, publishes the GitHub version, checks deployment, and pulls main.</span></li>
+        <li><code>parallel pack relay recovery on battle-paddle and export fixes on image-maker with astra high, merge when clean</code><span>Start independent runs across repos. Keep healthy runs moving. Interrupt you only for NEEDS YOU: a real question, exhausted quota, or a review with unresolved findings.</span></li>
+        <li><code>cutoff resume relay recovery</code><span>Resume the exact session, kind, model, effort, worktree, and phase. A login picker gets one restart with no keypress. Competing drivers stay stopped.</span></li>
+        <li><code>close bar</code><span>List only tabs with merged work and current main. Each needs a passed deploy check or a stated deployment block. You name what to close. Lantern keeps its home tab open.</span></li>
+      </ul>
+      <p>Omit <code>merge when clean</code> to stop at a landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage does not grant merge authority. Lantern never merges, edits product repos, or prompts a working chat.</p>
+      <p>Lantern can grant routine permissions within the named run scope. It reads the blocked prompt, selects a visible allow once option, and checks progress. It does not grant access outside the run scope or turn on broad bypass settings. Yolo stays off unless you name it.</p>
+      <p>Herd runs need the installed Elves skill. The driver controls parallel batches within its repo. The herd rules load on every Lantern launch, including with a saved custom prompt. Reopen Lantern after an upgrade.</p>
+
+      <h2>Choose a live model</h2>
+      <ul>
+        <li><code>astra</code>, <code>gpt-6 astra</code>, and <code>astra high</code> select Codex <code>gpt-6-astra</code>. The default effort is medium. Supported efforts are low, medium, high, xhigh, max, and ultra. Bare <code>gpt-6</code> needs a model choice.</li>
+        <li><code>fable</code>, <code>fable 5.1 high</code>, and <code>claude-fable-5-1 high</code> select Claude Code Fable 5.1. Routing reads the live initialization response and pins <code>claude-fable-5-1</code>. Supported efforts are low, medium, high, xhigh, and max. Old CLI help examples do not limit the model list.</li>
+        <li>An explicit Cursor request uses its own live model list. Fable 5.1 IDs are listed. No Cursor Astra ID was listed in the 2026-09-05 check.</li>
+      </ul>
+      <p>Codex Fast is off by default. An explicit Fast request needs a listed Fast tier. Codex seats keep <code>--dangerously-bypass-approvals-and-sandbox</code>, including on resume. A model check does not prove that a review ran. Review launch checks also cover local files, sockets, login, and sandbox access. A named review kind cannot change without your choice.</p>
+
       <h2>What to say</h2>
       <ul class="says">
         <li>“Who is working, blocked, or done?”<span>Inspect-only. It reads <code>herdr agent list</code>.</span></li>
