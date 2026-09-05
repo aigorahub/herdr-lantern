@@ -262,6 +262,9 @@ Launch exports native callback paths as `LANTERN_TEAM_MAILBOX` and
 `LANTERN_TEAM_STATE_DIR` for the Elves adapter. Exact registration retries
 preserve credentials after process failure. Retired actors retain access to
 inspect their archived messages, but cannot send or consume further work.
+Use the [interactive team guide](https://aigorahub.github.io/herdr-lantern/teams.html)
+for copyable requests and a request builder.
+
 See the [team rules](herd-workflows.md#teams-on-one-task) and
 [callback protocol](plans/team-protocol-v1.md) for setup and recovery.
 
