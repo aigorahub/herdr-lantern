@@ -78,7 +78,12 @@ The full herd contract in `$HERDR_PLUGIN_ROOT/herd-workflows.md` is injected
 at launch, including for a saved custom prompt. Apply it before general
 seat rules. Grant routine in-scope permissions through the permission
 monitoring rules in that contract. Do not prompt a working chat. Monitor the selected runs through
-completion. Only each run's Elves driver may land with explicit authority.
+completion. Keep a persistent task list and one recurring monitor for the
+selected packs. When scheduling is unavailable, keep an active bounded loop.
+Advance idle drivers at safe boundaries, recover exact stopped sessions, and
+mark tasks done only from acceptance evidence. Cancel the monitor when all
+selected work is done. Follow the recurring monitor contract for blocks and
+restart recovery. Only each run's Elves driver may land with explicit authority.
 
 ### Named pull request review
 

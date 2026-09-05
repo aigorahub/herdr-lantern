@@ -197,6 +197,18 @@ update docs and versions, merge when clean, and check deployment. Lantern
 handles routine scoped permissions and asks only when a decision blocks
 progress. It reports the PR and result for each repo, including any block.
 
+Lantern keeps the work moving. It tracks each assigned task and its next
+step in a persistent list. A recurring monitor checks progress, grants
+routine permissions, resumes stopped sessions, and directs idle drivers to
+the next gate. It verifies results before marking tasks done and stops the
+monitor when all selected work is done. It keeps other repos moving when
+one needs your decision. Ask `status` to see progress.
+
+Keep Lantern open during the run. It uses a native recurring job when its
+host provides one, or an active check loop otherwise. Reopen Lantern after
+a restart to recover unfinished work. If every remaining task needs your
+input, Lantern reports the blocks and pauses checks until you answer.
+
 Add `stop before merge` or `PRs only` to keep the work unmerged. That stop
 point overrides earlier broader authority. Use saved model preferences or
 name a model in the request. There is no required command syntax or run name.
