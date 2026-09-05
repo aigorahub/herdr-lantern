@@ -17,6 +17,11 @@ team-mailbox --state-dir STATE register --input ACTOR.json --output CREDENTIAL.j
 Actor fields: `actor_id`, `run_id`, `role` (`driver`, `helper`, `reviewer`, or
 `lantern`), `server_id`, `pane_id`, `session_id`, `kind`, `model`, `generation`,
 `task_ids` (nonempty array), and `peers` (array of permitted recipient actor IDs).
+`generation` is the shared coordination generation recorded by the driver for
+this run. It is not a per-pane process start count or a field copied from Herdr.
+All communicating actors must share `server_id` and `generation`; their pane
+and native session IDs remain distinct. The driver verifies live identities
+before registration. Recovery uses new actor IDs for a new generation.
 All identity fields are nonempty strings. Registration cannot replace an existing
 actor ID. The output file contains protocol version, actor identity, and a private
 random token. Treat it as a scoped local credential. Do not put it in Git or logs.
@@ -52,11 +57,16 @@ Message fields: `schema_version: 1`, `message_id`, `run_id`, `task_id`,
 `review_result`, `blocked`, `completion`, `cancellation`.
 Sender identity is derived from the credential, not trusted from the message.
 Sender and recipient must share the run and task, and sender.peers must contain
-the recipient. Only driver or lantern actors can send assignments or cancellation;
+the recipient. Both actors must also share server and coordination generation.
+A mismatch returns `generation_mismatch`. Only driver or lantern actors can send assignments or cancellation;
 lantern assignments target drivers only. Messages do not alter task acceptance.
 
 `post` stores once per message ID and returns `message_id` and `status`.
 Repeating identical content is safe. Reusing an ID with different content fails.
+One state directory permits at most 10000 pending messages across all runs.
+Queued, claimed, and unresolved messages count toward this limit. A new post
+returns `queue_full` at the limit; exact duplicate posts remain idempotent.
+Consume or reconcile pending reports before retrying the same message ID.
 `receive` atomically claims queued messages for that actor and returns `messages`.
 Each message includes the original fields plus `sender` (registered identity),
 `receipt`, and `status: claimed`. A receipt expires after 120 seconds. Expired
@@ -95,5 +105,7 @@ from a worker report can overwrite driver configuration.
 Herdr observation is separate: `team-mailbox observe --socket PATH --pane ID
 --seconds 10`. It uses only `events.subscribe` and `session.snapshot`. It returns
 bounded event hints and a snapshot for reconciliation. It never wakes a model.
-An unsupported socket platform returns an explicit error so the existing CLI
-monitor remains available.
+An unsupported socket platform or failed socket connection returns an explicit
+error so the existing CLI monitor remains available. The code can be
+`socket_platform_unsupported` or `observer_connect_failed`, depending on the
+Python runtime and transport. Neither error grants automatic wake support.

@@ -181,7 +181,8 @@ Runtime (injected by launch.sh; do not ignore):
   Protocol 1 delivers at checkpoints and never wakes or prompts a chat.
   Give the Elves driver this path and native callback state path
   $LANTERN_TEAM_STATE_DIR (environment: LANTERN_TEAM_STATE_DIR) in its kickoff.
-  Register only identities verified in live Herdr records. On identity drift,
+  Verify live server, pane and session identity. The driver records one shared
+  coordination generation per run. On identity drift,
   retire the old actor before registering a new one. Do not reuse an actor ID.
 
 - Prefer \$HERDR_BIN_PATH when calling Herdr. A wrapper is first on PATH.

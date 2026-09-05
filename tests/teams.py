@@ -51,12 +51,13 @@ class Mailbox(unittest.TestCase):
         path.write_text(json.dumps(data), encoding="utf-8")
         return path
 
-    def actor(self, name, role="helper", run="run-a", tasks=None, peers=None):
+    def actor(self, name, role="helper", run="run-a", tasks=None, peers=None, **identity):
         data = {"actor_id": name, "run_id": run, "role": role,
                 "server_id": "server-a", "pane_id": f"pane-{name}",
                 "session_id": f"session-{name}", "kind": "codex",
                 "model": "gpt-6-astra", "generation": "1",
                 "task_ids": tasks or ["task-a"], "peers": peers or []}
+        data.update(identity)
         credential = self.state / f"credential-{name}.json"
         result = self.invoke("register", "--input", self.fixture(data), "--output", credential)
         token = json.loads(credential.read_text())["token"]
@@ -424,6 +425,41 @@ box.register(team_mailbox.read_json(sys.argv[3]), sys.argv[4])
             list(pool.map(lambda _: self.invoke("post", "--actor", driver,
                                                 "--input", source), range(6)))
         self.assertEqual(len(self.receive(helper)["messages"]), 1)
+
+    def test_peers_require_shared_server_and_coordination_generation(self):
+        driver = self.actor("driver", "driver", peers=["helper", "remote", "stale"])
+        helper = self.actor("helper")
+        remote = self.actor("remote", server_id="server-b")
+        stale = self.actor("stale", generation="2")
+        self.post(driver)
+        self.assertEqual(len(self.receive(helper)["messages"]), 1)
+        for name, actor in (("remote", remote), ("stale", stale)):
+            result = self.post(driver, self.message(message_id=name, recipient=name), ok=False)
+            self.assertEqual(result["error"], "generation_mismatch")
+            self.assertEqual(self.receive(actor)["messages"], [])
+
+    def test_pending_cap_keeps_duplicates_safe_and_consumption_frees_capacity(self):
+        driver, helper = self.pair()
+        spec = importlib.util.spec_from_file_location("team_capacity_fixture", CLI)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(module.MAX_PENDING, 10000)
+        # Exercise the boundary without filling the production-sized queue.
+        module.MAX_PENDING = 2
+        sender, receiver = json.loads(driver.read_text()), json.loads(helper.read_text())
+        box = module.Mailbox(self.state)
+        self.addCleanup(box.close)
+        first = self.message(message_id="first")
+        box.post(sender, first)
+        box.post(sender, self.message(message_id="second"))
+        with self.assertRaisesRegex(module.MailboxError, "queue_full"):
+            box.post(sender, self.message(message_id="third"))
+        self.assertTrue(box.post(sender, first)["duplicate"])
+        claimed = box.receive(receiver)["messages"]
+        with self.assertRaisesRegex(module.MailboxError, "queue_full"):
+            box.post(sender, self.message(message_id="third"))
+        box.ack(receiver, claimed[0]["message_id"], claimed[0]["receipt"])
+        self.assertEqual(box.post(sender, self.message(message_id="third"))["status"], "queued")
 
     def test_large_pack_prioritizes_blockers_without_duplicate_claims(self):
         tasks = [f"task-{i}" for i in range(100)]

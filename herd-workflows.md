@@ -238,6 +238,8 @@ claims, not automatic agent wake-up or exactly once external actions.
 Each receive call claims at most 512 KiB of message JSON encoded as ASCII.
 Additional messages stay queued for the next checkpoint. CLI output uses
 ASCII JSON escapes so Unicode report text survives Windows code pages.
+The state directory holds at most 10000 pending messages across runs. At
+`queue_full`, consume or reconcile pending reports before retrying the same ID.
 The full CLI contract is in `plans/team-protocol-v1.md`.
 
 Use an absolute helper path and the private `LANTERN_HERD_STATE_DIR`. Keep
@@ -245,7 +247,10 @@ the database on a local disk outside product repos. The driver registers each
 actor with `register --input ACTOR.json --output CREDENTIAL.json`. The output
 credential file must be directly inside that state directory. Bind the
 actor to its exact run, role, Herdr server, pane, native session, kind, model,
-generation, task IDs, and permitted peers. Registration cannot replace an
+generation, task IDs, and permitted peers. The driver records one shared
+coordination generation for the run. This is not a per-pane start count from
+Herdr. Communicating actors share that generation and server ID; their pane
+and native session IDs remain distinct. Registration cannot replace an
 existing actor ID. An exact registration retry with the same identity and
 credential path returns the existing credential. It also recovers a credential
 saved before a process died at database commit. Do not delete or replace that

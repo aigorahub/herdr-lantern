@@ -28,6 +28,8 @@ All notable changes to Lantern, by Elves are documented here.
 - Updated the prompt, README, and both guides for teams, callback delivery,
   scoped permissions, and final review outside the contributor group. Added
   a request example that limits active repos and helpers per driver.
+- Defined shared coordination generations and the pending queue limit. Added
+  tests for peer generation boundaries, full queues, and injected callback paths.
 
 ## [0.11.0] - 2026-09-05
 
