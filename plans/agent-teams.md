@@ -1,6 +1,6 @@
 # Plan: Agent teams and reliable coordination
 
-Status: implemented in Lantern PR 37 and Elves PR 275. Final checks in progress.
+Status: implemented and independently reviewed in Lantern PR 37 and Elves PR 275. Both PRs remain unmerged.
 Date: 2026-09-05.
 
 ## Outcome
