@@ -2,6 +2,28 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.12.0] - 2026-09-05
+
+### Added
+
+- Teams on one task through Elves 2.37.0: one lead, bounded helpers,
+  independent proposals followed by critique, and separate writer worktrees.
+  Saved role routes remain in Elves.
+- A private SQLite mailbox for scoped team reports. Registration binds actor
+  credentials to the run, tasks, session, model, and permitted peers. Message
+  IDs prevent duplicate storage. Claims require receipts and explicit recovery
+  after expiry. Delivery occurs at checkpoints and does not wake agent chats.
+- Bounded Herdr socket observation for event hints and a reconciliation
+  snapshot. Observation uses read only API methods. The recurring monitor
+  remains responsible for checks and progress.
+- CLI process tests for message scope, credentials, receipts, retirement,
+  recovery, and concurrent delivery on Linux, macOS, and Windows.
+
+### Changed
+
+- Updated the prompt, README, and both guides for teams, callback delivery,
+  scoped permissions, and final review outside the contributor group.
+
 ## [0.11.0] - 2026-09-05
 
 ### Added

@@ -7,7 +7,8 @@ Work driver: host-native. Risk: high. Cobbler: enabled.
 Stop Gate: reviewed landable PR. Merge policy: never-merge.
 Plan: plans/agent-teams-run.md. Branch: feat/agent-teams.
 Linked Elves run: /Users/john/aigora/dev/elves-agent-teams.
-Next action: validate staging, open draft PR, implement B1.
+PR: https://github.com/aigorahub/herdr-lantern/pull/37.
+Next action: verify full checks, review transport, and test linked Elves integration.
 
 ## Non-negotiables
 

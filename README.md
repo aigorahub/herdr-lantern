@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.11.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.12.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -214,6 +214,48 @@ input, Lantern reports the blocks and pauses checks until you answer.
 Add `stop before merge` or `PRs only` to keep the work unmerged. That stop
 point overrides earlier broader authority. Use saved model preferences or
 name a model in the request. There is no required command syntax or run name.
+
+### Put a team on one task
+
+Ask for a lead with helpers, or compare proposals from several models:
+
+```text
+Brainstorm ways to simplify onboarding. Have three models compare approaches.
+Investigate slow checkout. Give the driver database and frontend helpers.
+Ship saved carts in storefront. Use helpers where useful.
+Have Claude and Codex propose solutions independently, then compare them.
+```
+
+The lead assigns bounded work and combines the results. For brainstorming,
+agents prepare separate first proposals. They then critique the proposals
+before the lead makes a recommendation. Missing evidence and unresolved
+differences remain in the report. Brainstorming and investigation stop with
+findings. They do not authorize edits or merge.
+
+Use Elves 2.37.0 or later for team assignments and the callback adapter.
+Saved model routes and substitute choices belong to Elves. Lantern reuses
+them. Named models and team limits take priority. Without a requested count,
+a comparison starts with a lead and two proposers. Helpers cannot expand
+the team or change their own scope.
+
+Writers use separate worktrees and assigned paths. The Elves driver owns
+dependencies and integration. Contributors can discuss findings, but an
+author or substantive design contributor cannot provide the final independent
+review. Prefer another model family. A separate qualified agent from the
+same family is valid when no other family is available under the saved choices.
+
+Agents send persistent reports through `bin/team-mailbox`. The Elves adapter
+consumes reports at safe checkpoints. Messages survive a busy chat or process
+exit, but they do not wake an agent automatically. Herdr event observation
+provides hints for the existing monitor. It does not prompt chats. Lantern
+continues scheduled checks and verifies evidence before it marks work done.
+
+Each local credential binds one actor to its run, tasks, session, model, and
+permitted peers. Credentials stay outside repos and logs. A report can request
+help; it cannot grant permission, replace a model, or authorize merge.
+The transport uses Python's standard library and a private local SQLite store.
+See the [team rules](herd-workflows.md#teams-on-one-task) and
+[callback protocol](plans/team-protocol-v1.md) for setup and recovery.
 
 ### Other workflow phrases
 

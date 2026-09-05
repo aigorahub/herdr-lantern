@@ -22,11 +22,16 @@ actor ID. The output file contains protocol version, actor identity, and a priva
 random token. Treat it as a scoped local credential. Do not put it in Git or logs.
 The driver passes only an actor's own credential to that actor. Same-user local
 processes are not an adversarial security boundary.
+The credential file must live directly in STATE. The launch environment exposes
+`LANTERN_TEAM_MAILBOX` as the absolute Python entry point. Portable adapters call
+that `.py` file with their Python interpreter. The shell shim remains available
+for interactive shell commands.
 
 ```
 team-mailbox --state-dir STATE post --actor CREDENTIAL.json --input MESSAGE.json
 team-mailbox --state-dir STATE receive --actor CREDENTIAL.json --limit 20
 team-mailbox --state-dir STATE ack --actor CREDENTIAL.json --message-id ID --receipt RECEIPT
+team-mailbox --state-dir STATE inspect --actor CREDENTIAL.json --message-id ID
 team-mailbox --state-dir STATE reconcile --actor CREDENTIAL.json --message-id ID --outcome consumed
 team-mailbox --state-dir STATE retire --actor CREDENTIAL.json
 ```
@@ -48,7 +53,9 @@ Each message includes the original fields plus `sender` (registered identity),
 `receipt`, and `status: claimed`. A receipt expires after 120 seconds. Expired
 claims become `unresolved`; they are never automatically sent again. `receive`
 also reports `unresolved` message IDs. A consumer acknowledges only after recording
-the result. `reconcile` supports `consumed` or `retry` after inspecting actual
+the result. `inspect` returns the addressed message body and status without
+claiming it, so the consumer can inspect an unresolved delivery before acting on
+it. `reconcile` supports `consumed` or `retry` after inspecting actual
 effects. Only the addressed recipient can acknowledge or reconcile its message.
 
 Receive is a pull at a safe checkpoint. The helper never prompts a pane, executes

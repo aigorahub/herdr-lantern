@@ -27,3 +27,8 @@ jobs:
       - name: Smoke test
         shell: bash
         run: sh tests/smoke.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Team transport tests
+        run: python tests/teams.py
