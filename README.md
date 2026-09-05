@@ -6,6 +6,10 @@
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
+**[Use Lantern teams](https://aigorahub.github.io/herdr-lantern/teams.html)**
+for parallel repo work, model discussions, and drivers with helpers. The guide
+includes copyable examples and a request builder for work through review and merge.
+
 Herdr manages the herd. The herd is in the field. Lantern illuminates
 the field: who needs you, what they are working toward, jump to a pane,
 start a new agent. The sidebar already marks working, blocked, done, or
