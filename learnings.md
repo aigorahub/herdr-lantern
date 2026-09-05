@@ -99,3 +99,20 @@ the usage result and the installed CLI help before a seat is available.
 Fail only when a parsed bucket is exhausted, the model is absent, or the
 usage command itself failed. Do not require every bucket or a reset just
 to pass. Harnesses with no quota command stay catalog-only.
+
+
+## Team reports
+
+Herdr event subscriptions own their socket connection. Subscribe first, then
+request the reconciliation snapshot on a separate connection. Retain bounded
+events while the snapshot arrives. Events do not prove task completion.
+
+A durable claim must fit the consumer response limit before storage changes.
+Bound the complete serialized batch, including sender identity and receipt.
+Use ASCII JSON escapes for portable redirected output.
+
+Registration spans the credential file and SQLite. Test process exit between
+those writes. Retry must preserve the original token and output file.
+
+Retirement needs a retained inspection path. Remove delivery authority without
+removing the evidence needed to resolve unfinished work.
