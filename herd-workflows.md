@@ -259,11 +259,22 @@ Configure the Elves callback adapter in its run state with protocol version,
 absolute executable path, state directory, and actor credential path. Use
 `LANTERN_TEAM_MAILBOX` and `LANTERN_TEAM_STATE_DIR` from launch for native
 paths. Invoke that Python file with the detected Python 3 command. Pass those
-paths in the driver's kickoff because another pane may not inherit them. Use
+paths in the driver's kickoff because another pane may not inherit them. The
+driver must run Elves `team configure-callback --input callback.json`; this
+qualifies the endpoint and records local authorization outside the checkout.
+A saved session alone cannot authorize execution. Use
 argument arrays, closed stdin, captured output, and a timeout. Worker reports
 cannot replace this configuration. If delivery fails, retain the same message
 ID and inspect the stored result before retry. Do not retry an ambiguous post
 under a fresh ID.
+
+Before launching a helper, the driver uses Elves `team helper-packet --task-id
+ID --output PATH` to generate its original assignment. Include the helper's
+own callback configuration and the verified driver return address. The packet
+contains `team-report` instructions for progress, questions, blocks, and
+completion. Do not give a helper the driver credential. Routes without local
+transport access return evidence through their existing adapter; the driver
+publishes it. Do not add a second kickoff or prewalk prompt for reporting.
 
 Agents publish assignments, progress, questions, answers, decisions, PR links,
 review requests and results, blockers, completion reports, or cancellation.

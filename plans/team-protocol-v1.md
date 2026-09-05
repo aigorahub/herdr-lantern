@@ -84,7 +84,10 @@ requires external effect reconciliation and a new registered identity.
 
 Elves stores callback configuration in run state: protocol, absolute executable
 path, state directory, and actor credential path. It probes capabilities before
-use. It publishes through this CLI and consumes at existing safe checkpoints.
+use. Explicit `team configure-callback --input callback.json` records private
+local authorization outside the checkout. A saved session alone cannot execute
+a callback. Elves sends a minimal subprocess environment without provider keys.
+It publishes through this CLI and consumes at existing safe checkpoints.
 Capture subprocess output, use closed stdin and a timeout. Do not retry an
 ambiguous post with a new message ID. No executable or callback configuration
 from a worker report can overwrite driver configuration.
