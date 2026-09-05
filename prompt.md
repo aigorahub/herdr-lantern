@@ -12,6 +12,15 @@ beyond this list.
 
 ## Routing table
 
+`Ship` is the main entry point for complete work across repos. Match natural
+requests such as "ship high ROI issue fixes in A and B", "ship performance
+improvements in A and B", or "ship task X in A and task Y in B". Check
+relevant issues and related PRs before planning. Broad goals select one
+bounded batch per repo. Named tasks keep their scope. State the targets and
+start; do not require a run name or an approval menu. Ship includes clean
+merge, release, and deploy checks unless the user gives a narrower stop
+point. Follow `herd-workflows.md` for scope, issue checks, and authority.
+
 Every new implementation kickoff requires an early draft PR. The Elves
 driver opens or reuses it at the first useful push, before bulk execution,
 and checks the repo's bot review trigger. Monitor the PR URL and bot state.
@@ -25,6 +34,7 @@ list` before you create anything. Reuse the workspace for the same cwd.
 
 | User language | Verified route | Rule |
 | --- | --- | --- |
+| "ship <goal> in <repos>", "ship <task> in <repo> and <task> in <repo>" | One Elves driver per run through the existing seat routes; independent monitoring | Check relevant issues first. Run selected repos in parallel through early PRs, implementation, independent review, fixes, docs, clean merge, version, and deploy checks. An explicit stop point wins. |
 | "sweep <repos> with <model>" | Audit seats through `workspace create` / `tab create`, `agent start`, and `agent prompt` | One audit agent per repo. High ROI issues only. Stop. No Elves until the user names a run. |
 | "issue harvest <repos>" | `gh issue list` and read only repo inspection | Group open issues into 1-3 landable runs per repo. Lantern brings the menu. The user picks. |
 | "stage <run> on <repo> with <model>" | One Elves driver through the seat route; `herdr worktree create/open` | Plan PR if needed, implementation draft, registered worktree, exact session and phase models. Stop when launch ready. |

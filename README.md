@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.10.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.11.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -170,7 +170,38 @@ How to use it (GitHub Pages, after this lands on `main`):
 [aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).
 Team setup notes: [howto.html](howto.html). Changelog: [CHANGELOG.md](CHANGELOG.md).
 
-## Run a herd of work
+## Ship work across repos
+
+Name the repos and the result you want. Ask Lantern to choose useful work:
+
+```text
+Ship high ROI issue fixes in battle-paddle, image-maker, and herdr.
+Ship performance improvements in battle-paddle and image-maker.
+```
+
+Or name the changes:
+
+```text
+Ship reconnect recovery in battle-paddle and faster exports in image-maker.
+```
+
+Ship means the full job through clean merge. Agents check relevant issues,
+comments, docs, and related PRs before they plan. They use existing issues
+when available and check for work already in progress or already fixed.
+Broad goals select one bounded batch per repo. Named tasks keep their scope.
+Performance work needs a baseline and evidence of improvement.
+
+Lantern states the targets and starts the repos in parallel within available
+capacity. Drivers open draft PRs early, handle independent reviews and fixes,
+update docs and versions, merge when clean, and check deployment. Lantern
+handles routine scoped permissions and asks only when a decision blocks
+progress. It reports the PR and result for each repo, including any block.
+
+Add `stop before merge` or `PRs only` to keep the work unmerged. That stop
+point overrides earlier broader authority. Use saved model preferences or
+name a model in the request. There is no required command syntax or run name.
+
+### Other workflow phrases
 
 Lantern starts and monitors selected work across many repos through clean
 merge. Each Elves run has one live driver. That driver owns changes, run
@@ -187,8 +218,8 @@ from its home tab and raises only decisions that need you.
 | `cutoff resume relay recovery` | Exact session, same kind and model, same worktree and phase. No silent substitute. |
 | `close bar` | List merged tabs on current main with a passed deploy check or a stated deployment block. You name what to close. |
 
-Omit `merge when clean` to stop at a landable PR unless you already gave merge
-authority for that run. A sweep, harvest, or stage never grants merge authority.
+For `landable loop` and `parallel pack`, omit `merge when clean` to stop at a
+landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage never grants merge authority.
 Lantern never merges or edits product repositories. It never prompts a working
 chat. A login picker gets one exact process restart, with no input keys.
 Lantern grants routine permissions within the selected run's scope. It reads

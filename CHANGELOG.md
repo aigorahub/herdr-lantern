@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.11.0] - 2026-09-05
+
+### Added
+
+- Natural Ship requests for issue fixes, performance improvements, and named
+  tasks across repos. Ship includes clean merge unless the user names an
+  earlier stop point.
+- Required issue and related PR checks before planning. Broad goals select
+  one bounded batch per repo. Performance work requires measured evidence.
+- Updated the prompt, README, and both guides with the new requests.
+
 ## [0.10.1] - 2026-09-05
 
 ### Changed

@@ -2252,7 +2252,9 @@ argv_is() {
 printf '%s\n' 'Saved custom prompt' >"$argv_dir/config/prompt.md"
 run_launch 'HELPER_AGENT="codex"' >/dev/null || fail "workflow injection launch"
 for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rules/lantern.md; do
-    for invoke in 'sweep <repos>' 'issue harvest <repos>' 'stage <run>' \
+    for invoke in 'ship high ROI issue fixes in <repos>' \
+        'ship performance improvements in <repos>' 'ship <task> in <repo>' \
+        'sweep <repos>' 'issue harvest <repos>' 'stage <run>' \
         'landable loop <run>' 'parallel pack <runs and repos>' 'cutoff resume <run>' 'close bar'; do
         grep -qF "$invoke" "$argv_dir/state/workdir/$rendered_file" ||
             fail "$rendered_file lacks workflow $invoke with a custom prompt"

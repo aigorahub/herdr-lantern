@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.10.1 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.11.0 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -424,19 +424,17 @@ No Elves install required. If there are no
     </div>
 
     <div class="wrap">
-      <h2>Run a herd with Elves</h2>
-      <p>Name the repos, run, and model. Lantern reuses one workspace per checkout and keeps one live Elves driver per run. The driver owns changes, reviews, fixes, and authorized merges. Lantern monitors each run.</p>
+      <h2>Ship work across repos</h2>
+      <p>Name the repos and the result you want. Lantern states the targets and starts. Ship means the full job through clean merge.</p>
       <ul class="says">
-        <li><code>sweep battle-paddle and image-maker with astra high</code><span>One audit agent per repo. Report high value issues, then stop. No Elves run starts until you name it.</span></li>
-        <li><code>issue harvest battle-paddle</code><span>Read open issues and group them into 1-3 landable runs. Lantern brings the menu. You pick.</span></li>
-        <li><code>stage relay recovery on battle-paddle with fable high</code><span>Prepare a plan PR if needed, an implementation draft, a worktree, and session records. Bind prewalk, execution, and independent review to the named routes. Stop when ready to start.</span></li>
-        <li><code>landable loop relay recovery on battle-paddle with astra high, merge when clean</code><span>Audit, stage, execute, review, fix, and review again. The driver updates docs, changelog, and version, then merges, publishes the GitHub version, checks deployment, and pulls main.</span></li>
-        <li><code>parallel pack relay recovery on battle-paddle and export fixes on image-maker with astra high, merge when clean</code><span>Start independent runs across repos. Keep healthy runs moving. Interrupt you only for NEEDS YOU: a real question, exhausted quota, or a review with unresolved findings.</span></li>
-        <li><code>cutoff resume relay recovery</code><span>Resume the exact session, kind, model, effort, worktree, and phase. A login picker gets one restart with no keypress. Competing drivers stay stopped.</span></li>
-        <li><code>close bar</code><span>List only tabs with merged work and current main. Each needs a passed deploy check or a stated deployment block. You name what to close. Lantern keeps its home tab open.</span></li>
+        <li><code>Ship high ROI issue fixes in battle-paddle, image-maker, and herdr.</code><span>Agents read relevant issues and choose a bounded batch of valuable fixes per repo.</span></li>
+        <li><code>Ship performance improvements in battle-paddle and image-maker.</code><span>Agents check relevant issues, measure a baseline, and verify the improvement.</span></li>
+        <li><code>Ship reconnect recovery in battle-paddle and faster exports in image-maker.</code><span>Name the changes and their repos. Agents check related issues and PRs, then keep the work within your scope.</span></li>
       </ul>
+      <p>Agents read issue bodies, comments, acceptance details, and relevant docs before planning. They check for related PRs and work already fixed. Lantern runs repos in parallel within available capacity. Drivers open PRs early, implement, get independent reviews, fix findings, update docs and versions, merge when clean, and check deployment. Lantern handles routine scoped permissions and reports each repo's result.</p>
+      <p>Add <code>stop before merge</code> or <code>PRs only</code> to keep the work unmerged. That stop point overrides earlier broader authority. Use your saved model choices or name a model. No internal workflow name is required. <a href="https://github.com/aigorahub/herdr-lantern/blob/main/herd-workflows.md">Other workflow phrases and full rules</a>.</p>
       <p>New implementation work gets a draft PR at the first useful push, before bulk execution. The driver checks the configured bot review trigger and reads findings at safe batch boundaries. Lantern tracks the PR and bot state. If bots skip drafts, record the block and continue authorized work. Keep incomplete work in draft. Early bot reviews do not replace final independent review.</p>
-      <p>Omit <code>merge when clean</code> to stop at a landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage does not grant merge authority. Lantern never merges, edits product repos, or prompts a working chat.</p>
+      <p>For the older <code>landable loop</code> and <code>parallel pack</code> phrases, omit <code>merge when clean</code> to stop at a landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage does not grant merge authority. Lantern never merges, edits product repos, or prompts a working chat.</p>
       <p>Lantern can grant routine permissions within the named run scope. It reads the blocked prompt, selects a visible allow once option, and checks progress. It does not grant access outside the run scope or turn on broad bypass settings. Yolo stays off unless you name it.</p>
       <p>Herd runs need the installed Elves skill. The driver controls parallel batches within its repo. The herd rules load on every Lantern launch, including with a saved custom prompt. Reopen Lantern after an upgrade.</p>
 
