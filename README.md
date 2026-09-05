@@ -233,6 +233,9 @@ differences remain in the report. Brainstorming and investigation stop with
 findings. They do not authorize edits or merge.
 
 Use Elves 2.37.0 or later for team assignments and the callback adapter.
+Lantern supports native Windows. Elves team execution on Windows requires
+WSL2. The executable, state, and credential paths must be valid inside the
+Elves environment; native Windows paths cannot be used unchanged in WSL2.
 Saved model routes and substitute choices belong to Elves. Lantern reuses
 them. Named models and team limits take priority. Without a requested count,
 a comparison starts with a lead and two proposers. Helpers cannot expand

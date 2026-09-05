@@ -32,6 +32,9 @@ that `.py` file with their Python interpreter. The shell shim remains available
 for interactive shell commands.
 `LANTERN_TEAM_STATE_DIR` gives the native absolute state path for callback JSON
 on Windows. `LANTERN_HERD_STATE_DIR` remains the existing shell state path.
+Elves team execution on Windows uses WSL2. Its callback executable, state, and
+credential paths must resolve inside WSL2. Native Windows transport tests do
+not qualify cross-environment path mapping; validate that configuration locally.
 
 ```
 team-mailbox --state-dir STATE post --actor CREDENTIAL.json --input MESSAGE.json

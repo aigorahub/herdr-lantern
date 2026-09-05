@@ -188,6 +188,9 @@ a competing driver. Read the installed Elves skill and team references. The
 callback and team adapter requires Elves 2.37.0 or later. Probe its installed
 capabilities before use. If the adapter is missing, report that limit and keep
 the existing monitor. Do not claim that chat prompts provide queued delivery.
+Elves team execution on Windows requires WSL2. Validate the executable, state,
+and credential paths inside that environment before configuring callbacks.
+Do not pass native Windows paths unchanged into WSL2.
 
 Reuse Elves saved role routes, substitutes, and provider qualification. Do not
 create a second helper route list in Lantern's `helper.conf`. Explicit user
