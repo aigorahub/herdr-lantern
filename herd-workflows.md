@@ -275,6 +275,10 @@ has stopped. A permission timeout is not a clean review.
 Record the parent conversation ID, model, head, Boost activation, child
 completion evidence, and final findings. A delegation notice, exit code zero,
 or parent `SUCCESS` is not a completed review. Required reads must succeed.
+Bind the parent ID from the launch record and root CLI events. During the live
+Herdr test, `agent get` reported a Boost child ID as `agent_session`. Do not
+replace the recorded parent with that value. Cross-check the launch or resume
+argv with `herdr pane process-info --pane <pane_id>` before recovery.
 Resume a stopped Agy review with `--conversation <exact-id>` and the same
 model, effort, and plan mode. Verify that competing processes are dead first.
 
