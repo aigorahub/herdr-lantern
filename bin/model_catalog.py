@@ -56,3 +56,45 @@ def parse_claude_capabilities(help_text: str) -> tuple[set[str], set[str]]:
     if not models or not efforts:
         raise ValueError("Claude returned unparseable model or effort choices")
     return models, efforts
+
+
+def claude_model_catalog(run) -> dict[str, tuple[str, set[str]]]:
+    # Help supplies grammar and alias examples, not a model allowlist.
+    aliases, _ = parse_claude_capabilities(run(["claude", "--help"]))
+    request_id = "lantern-model-catalog"
+    request = {"type": "control_request", "request_id": request_id,
+               "request": {"subtype": "initialize"}}
+    output = run(
+        ["claude", "--safe-mode", "--print", "--input-format", "stream-json",
+         "--output-format", "stream-json", "--verbose", "--no-session-persistence"],
+        input_text=json.dumps(request) + "\n",
+    )
+    # This is the SDK initialization exchange. No user message or model turn.
+    try:
+        responses = [json.loads(line) for line in output.splitlines() if line.strip()]
+        response = next(
+            row["response"] for row in responses
+            if isinstance(row, dict) and row.get("type") == "control_response"
+            and isinstance(row.get("response"), dict)
+            and row["response"].get("request_id") == request_id
+        )
+        if response.get("subtype") != "success":
+            raise ValueError("initialization failed")
+        rows = response["response"]["models"]
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("models is not a nonempty list")
+        catalog = {}
+        for row in rows:
+            value, model = row["value"], row["resolvedModel"]
+            levels = row.get("supportedEffortLevels", [])
+            if (not isinstance(value, str) or not value or not isinstance(model, str) or not model
+                    or not isinstance(levels, list) or any(not isinstance(level, str) for level in levels)):
+                raise ValueError("invalid model identity or effort levels")
+            catalog[model] = (model, set(levels))
+            catalog[value] = (value if "[" in value else model, set(levels))
+            alias = row.get("displayName", "").lower()
+            if alias in aliases:
+                catalog[alias] = (model, set(levels))
+        return catalog
+    except (ValueError, KeyError, TypeError, AttributeError, StopIteration) as error:
+        raise ValueError(f"Claude returned an unparseable initialization catalog ({error})") from error

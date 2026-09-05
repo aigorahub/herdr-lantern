@@ -14,11 +14,14 @@ All notable changes to Lantern, by Elves are documented here.
 - A shared herd contract loads at each launch, including with custom prompts.
 - Astra routes and all six efforts. Codex defaults to live Astra at medium
   with Fast off. Bare gpt-6 requires a model choice.
-- Claude model phrase routing from live help. Fable 5.1 works when listed.
+- Claude model routing from the live SDK initialization catalog. The fable
+  alias pins to claude-fable-5-1. Help examples are not a model allowlist.
   Cursor Fable 5.1 uses exact live IDs. No Cursor Astra ID is invented.
 
 ### Fixed
 
+- Fable 5.1 no longer fails because CLI help shows an old model example.
+  Routing and preflight use resolved model IDs and per-model effort levels.
 - Normal Codex routes override inherited Fast settings with the default tier.
 - Model parsing now keeps integer generations and distinguishes 5 from 5.1.
   Codex preflight checks effort. Claude rejects unparseable usage results.

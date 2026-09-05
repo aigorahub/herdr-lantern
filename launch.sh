@@ -341,8 +341,10 @@ $onboard_note
   gpt-6 is ambiguous. Never silently pick GPT-5.5. Fast is off unless requested
   and the live catalog publishes one Fast tier ID. Cursor Fable 5.1 IDs come
   from agent --list-models. No Cursor Astra ID was listed on 2026-09-05.
-  Claude fable aliases and claude-fable-5-1 must pass claude --help. That help
-  still names claude-fable-5 here; never claim its full 5.1 ID is verified.
+  Claude fable and claude-fable-5-1 resolve to Fable 5.1 through the live
+  initialization catalog. Pin its resolvedModel and supportedEffortLevels.
+  The old claude-fable-5 help example is not a model allowlist. The resolver
+  sends only an SDK initialize request, with no model prompt or saved session.
 
 $herd_workflows
 EOF

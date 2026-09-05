@@ -214,9 +214,10 @@ Reopen Lantern after an upgrade to load it.
   Fast off. The route sets `service_tier="default"` to override inherited
   priority settings. Efforts are low, medium, high, xhigh, max, and ultra. Bare
   `gpt-6` requires a choice. It never silently selects GPT-5.5.
-- Claude: `fable high` uses the live `fable` alias. `fable 5.1 high` and
-  `claude-fable-5-1 high` use the full ID only when `claude --help` lists it.
-  Fable 5.1 shares the Fable quota check and substitute consent rules.
+- Claude: `fable high`, `fable 5.1 high`, and `claude-fable-5-1 high`
+  resolve to `claude-fable-5-1`. The live initialization response supplies
+  the exact model and its effort levels. Fable 5.1 supports low, medium,
+  high, xhigh, and max. It keeps the Fable quota check and substitute consent.
 - Cursor: `fable 5.1 high` and `fable 5.1 thinking high` select the exact
   `claude-fable-5-1-*` entries. Cursor Astra remains unavailable unless
   `agent --list-models` adds it. The Cursor default remains live Sol high Fast.
@@ -224,8 +225,15 @@ Reopen Lantern after an upgrade to load it.
 The 2026-09-05 check differs from the kickoff catalog. Codex now lists Astra
 Fast with tier ID `priority`. The default keeps it off. A Fast request needs
 one live Fast tier ID. Tests also cover catalogs with no Fast tier. Claude
-Code 2.1.257 help still names `claude-fable-5` here. The full 5.1 ID remains
-unverified on that CLI. Cursor does list Fable 5.1 and does not list Astra.
+Code 2.1.257 help still gives `claude-fable-5` as an example. Its live SDK
+initialization response lists `claude-fable-5-1[1m]` with
+`resolvedModel: claude-fable-5-1`. The wrapper reads that response in safe
+mode with session persistence off. It sends no model prompt. Help examples
+are not a model allowlist. Cursor lists Fable 5.1 and does not list Astra.
+
+Anthropic confirms the [Fable 5.1 model ID](https://www.anthropic.com/claude/fable).
+The [Agent SDK reference](https://code.claude.com/docs/en/agent-sdk/typescript)
+describes model discovery through its initialization response.
 
 A model check does not prove transport access. Agy needs local state and a
 localhost port. Elves Grok review needs its runner sandbox. OMP needs its

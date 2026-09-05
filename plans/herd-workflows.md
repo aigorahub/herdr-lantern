@@ -23,7 +23,7 @@ progress. The driver owns run records, changes, review, and authorized merge.
   stated deployment block. Close only user named targets. Keep home open.
 - Resolve Astra phrases and all six live efforts. Use medium by default.
   Reject bare gpt-6. Pass Fast only on request and with live tier evidence.
-- Resolve Claude Fable 5.1 only when Claude help lists it. Keep family quota
+- Resolve Claude Fable 5.1 from the live initialization catalog. Keep family quota
   checks and substitute consent. Resolve Cursor Fable 5.1 from exact live
   IDs. Do not invent a Cursor Astra ID.
 - Keep Codex unattended flags and existing Pi support. Keep yolo off unless
@@ -40,9 +40,15 @@ and Elves 2.36.0 from the local installed skill.
 catalog had no Fast tier. Tests must cover both catalogs. Astra has low,
 medium, high, xhigh, max, and ultra. Its default is medium.
 
-`claude --help` lists fable, opus, sonnet, and claude-fable-5 on this machine.
-It does not yet list claude-fable-5-1. The resolver must accept 5.1 when help
-lists it and reject the full ID when help does not list it.
+`claude --help` gives claude-fable-5 as an example. It is not a model
+allowlist. The installed Claude binary contains the Fable 5.1 model record.
+Its live SDK initialization response lists claude-fable-5-1[1m] and resolves
+it to claude-fable-5-1. It supports low, medium, high, xhigh, and max.
+The resolver must use that catalog and pin its resolved model identity.
+
+Anthropic confirms [Fable 5.1](https://www.anthropic.com/claude/fable).
+The [SDK reference](https://code.claude.com/docs/en/agent-sdk/typescript)
+documents initialization model discovery. No model prompt is needed.
 
 `agent --list-models` lists claude-fable-5-1 variants. It does not list
 Astra. Tests must keep the two provider catalogs separate.

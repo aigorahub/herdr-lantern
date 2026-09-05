@@ -44,6 +44,15 @@ CLAUDE_HELP = """
   --model <model>   Use 'fable', 'opus', or 'sonnet', or 'claude-fable-5-1'.
   -n, --name <name> A name such as 'not-a-model'
 """
+CLAUDE_CATALOG = (Path(__file__).parent / "fixtures/claude-models.json").read_text()
+
+
+def claude_read(command, *, input_text=None):
+    if command == ["claude", "--help"]:
+        return CLAUDE_HELP.replace("claude-fable-5-1", "claude-fable-5")
+    return CLAUDE_CATALOG
+
+
 CURSOR = """Available models
 claude-fable-5-high - Claude Fable 5 1M
 claude-fable-5-1-high - Claude Fable 5.1 1M
@@ -132,17 +141,36 @@ class Models(unittest.TestCase):
             self.assertEqual(route.cursor_route("astra")["model"], "gpt-6-astra")
 
     def test_claude_fable_alias_and_full_version(self):
-        with patch.object(route, "run_catalog", return_value=CLAUDE_HELP):
-            for phrase, model in (("fable high", "fable"),
+        with patch.object(route, "run_catalog", side_effect=claude_read):
+            for phrase, model in (("fable high", "claude-fable-5-1"),
                                   ("fable 5.1 high", "claude-fable-5-1"),
                                   ("claude-fable-5-1 high", "claude-fable-5-1")):
                 self.assertEqual(route.claude_route(phrase)["argv"], ["--model", model, "--effort", "high"])
             for phrase in ("fable 5", "fable ultra", "fable fast", "not-a-model"):
                 with self.assertRaises(route.RouteError):
                     route.claude_route(phrase)
-        with patch.object(route, "run_catalog", return_value=CLAUDE_HELP.replace("claude-fable-5-1", "claude-fable-5")):
+        # Help still says 5. The initialization response, not its examples,
+        # controls both aliases and full IDs.
+        with patch.object(route, "run_catalog", side_effect=claude_read) as read:
+            self.assertEqual(route.claude_route("fable")["model"], "claude-fable-5-1")
+            request = json.loads(read.call_args.kwargs["input_text"])
+            self.assertEqual(request["type"], "control_request")
+            self.assertEqual(request["request"], {"subtype": "initialize"})
+            self.assertIn("--safe-mode", read.call_args.args[0])
+            self.assertIn("--no-session-persistence", read.call_args.args[0])
+
+    def test_claude_unavailable_catalog_never_uses_help_as_allowlist(self):
+        for output in ('{}', 'invalid', CLAUDE_CATALOG.replace('lantern-model-catalog', 'wrong-id'),
+                       CLAUDE_CATALOG.replace('"success"', '"error"')):
+            with patch.object(route, "run_catalog", side_effect=[CLAUDE_HELP, output]):
+                with self.assertRaises(route.RouteError):
+                    route.claude_route("fable")
+
+    def test_claude_model_specific_efforts(self):
+        with patch.object(route, "run_catalog", side_effect=claude_read):
             with self.assertRaises(route.RouteError):
-                route.claude_route("claude-fable-5-1")
+                route.claude_route("sonnet max")
+
 
     def check(self, kind, model, effort):
         output = io.StringIO()
@@ -157,9 +185,9 @@ class Models(unittest.TestCase):
             self.assertEqual(self.check("codex", "gpt-6-invented", "high")[0], 3)
 
     def test_fable_51_quota_and_substitute(self):
-        def run(command):
-            if command == ["claude", "--help"]:
-                return CLAUDE_HELP
+        def run(command, *, input_text=None):
+            if command != ["claude", "/usage", "-p", "--output-format", "json"]:
+                return claude_read(command, input_text=input_text)
             return json.dumps({"result": "Current session: 0% used\nCurrent week (Fable 5.1): 100% used"})
         with patch.object(preflight, "run", side_effect=run):
             for model in ("fable", "claude-fable-5-1"):
@@ -171,7 +199,7 @@ class Models(unittest.TestCase):
 
     def test_fable_51_available_and_unreadable_usage(self):
         for usage in ("Current session: 0% used", "unparseable"):
-            with patch.object(preflight, "run", side_effect=[CLAUDE_HELP, json.dumps({"result": usage})]):
+            with patch.object(preflight, "run", side_effect=[CLAUDE_HELP, CLAUDE_CATALOG, json.dumps({"result": usage})]):
                 if usage == "unparseable":
                     with self.assertRaises(preflight.CheckError):
                         self.check("claude", "claude-fable-5-1", "high")

@@ -12,7 +12,7 @@ import sys
 
 from dataclasses import dataclass
 
-from model_catalog import listed_codex_models, model_words, parse_claude_capabilities
+from model_catalog import claude_model_catalog, listed_codex_models, model_words
 
 
 EFFORT_ALIASES = {
@@ -45,7 +45,7 @@ def fail(message: str) -> None:
     raise RouteError(message)
 
 
-def run_catalog(command: list[str]) -> str:
+def run_catalog(command: list[str], *, input_text: str | None = None) -> str:
     command_name = command[0]
     executable = shutil.which(command_name)
     if os.name == "nt" and executable is not None:
@@ -69,6 +69,7 @@ def run_catalog(command: list[str]) -> str:
         result = subprocess.run(
             process_command,
             check=True,
+            input=input_text,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -182,10 +183,11 @@ def claude_route(phrase: str) -> dict[str, object]:
         phrase = "opus high"
     parsed = parse_phrase(phrase, keep_effort=False)
     try:
-        models, efforts = parse_claude_capabilities(run_catalog(["claude", "--help"]))
+        catalog = claude_model_catalog(run_catalog)
     except ValueError as error:
         fail(str(error))
-    model_id = choose([(name, candidate_tokens(name)) for name in sorted(models)], parsed.terms)
+    choice = choose([(name, candidate_tokens(name)) for name in sorted(catalog)], parsed.terms)
+    model_id, efforts = catalog[choice]
     if parsed.fast:
         fail("Claude help does not publish a Fast route")
     if parsed.effort and parsed.effort not in efforts:

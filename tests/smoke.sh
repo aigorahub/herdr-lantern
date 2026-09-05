@@ -412,6 +412,7 @@ done
 # resolver must read each installed CLI catalog. It must not make one guessed
 # slug from the whole phrase.
 model_dir=$(mktemp -d)
+cp "$root/tests/fixtures/claude-models.json" "$model_dir/claude-models.json"
 cat >"$model_dir/codex" <<'EOF'
 #!/bin/sh
 [ "$1 $2" = "debug models" ] || exit 2
@@ -444,6 +445,9 @@ EOF
 cat >"$model_dir/claude" <<'EOF'
 #!/bin/sh
 case "$*" in
+"--safe-mode --print --input-format stream-json --output-format stream-json --verbose --no-session-persistence")
+    cat "$(dirname "$0")/claude-models.json"
+    ;;
 "/usage -p --output-format json")
     case ${CLAUDE_USAGE_MODE-} in
     global)
@@ -498,6 +502,10 @@ echo   - grok-4.5
 EOF
 cat >"$model_dir/claude.cmd" <<'EOF'
 @echo off
+if "%1"=="--safe-mode" (
+  type "%~dp0claude-models.json"
+  exit /b 0
+)
 if "%1"=="--help" (
   echo   --effort ^<level^>  Effort level for the current session ^(low, medium, high, xhigh, max^)
   echo   --model ^<model^>   Use alias 'fable', 'opus', or 'sonnet', or full name 'claude-fable-5'.

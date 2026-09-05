@@ -112,8 +112,8 @@ For a request such as "have Codex review battle-paddle #166":
 A model phrase has separate family, effort, and fast parts. Never pass the
 whole phrase as one model slug. Before a Codex, Claude, Cursor, or Grok seat, run
 `$HERDR_PLUGIN_ROOT/bin/model-route <codex|claude|cursor|grok> "<model phrase>"`.
-The resolver reads `codex debug models`, `claude --help`, `agent --list-models`, or `grok
-models`. Use its `argv` array as separate arguments. If it reports no match or
+The resolver reads `codex debug models`, the Claude initialization catalog, `agent --list-models`, or `grok
+models`. Claude help supplies CLI grammar, not a model allowlist. Use its `argv` array as separate arguments. If it reports no match or
 more than one match, stop and ask. Never build a slug from memory.
 
 Check these choices against the live CLI before each seat:
@@ -134,7 +134,7 @@ Check these choices against the live CLI before each seat:
 | Cursor | Sol, Terra, Luna, Fable 5.1, Grok, Opus, Sonnet, or another listed family | One exact ID returned by `agent --list-models`. Do not join tokens to make an ID. |
 | Cursor | `fable 5.1 high` | `--model claude-fable-5-1-high` if listed |
 | Cursor | `fable 5.1 thinking high` | `--model claude-fable-5-1-thinking-high` if listed |
-| Claude | `fable high`, `claude-fable-5-1 high` | `--model fable --effort high`, or the exact 5.1 ID only when `claude --help` lists it |
+| Claude | `fable high`, `fable 5.1 high`, `claude-fable-5-1 high` | `--model claude-fable-5-1 --effort high`, verified by the live initialization catalog |
 | Claude | Opus high | `--model opus --effort high` |
 | Grok Build | `grok 4.6 high` | `-m grok-4.6 --reasoning-effort high` |
 | Grok Build | A model from `grok models`, plus an effort | `-m <listed-model> --reasoning-effort <effort>` |
@@ -148,10 +148,12 @@ The kickoff Codex catalog had no Astra Fast tier. The 2026-09-05 live check
 now lists Fast with ID priority. Fast is off by default. Request it only
 when the live model publishes one Fast tier ID. Never hardcode priority.
 Normal Codex routes set `service_tier="default"` to override inherited Fast.
-Claude help on this machine still names fable and claude-fable-5. Do not
-claim its full 5.1 ID is verified until help lists claude-fable-5-1. Use Fable
-5.1 in route reports when that is the observed model. A family alias alone
-is not proof of the exact model on resume.
+Claude Fable 5.1 is live as `fable` and `claude-fable-5-1`. The installed
+Claude initialization response resolves it to `claude-fable-5-1` and lists
+low, medium, high, xhigh, and max effort. The old help example
+`claude-fable-5` is not an exhaustive catalog. Never reject 5.1 because
+help omits it. Resolve aliases through the live catalog and pin its exact
+model. Keep the returned model identity on stage and resume.
 
 When the user does not name a model:
 
@@ -202,9 +204,11 @@ passes.
   `.result` text. A session, all-models, or requested family bucket at 100%
   is unavailable. A result that says the user hit a limit is unavailable.
   A usage line with no reset time is still a valid bucket. Report the reset
-  only when the text has one. Claude model aliases and effort values must
-  also appear in `claude --help`. Do not require every Claude alias, every
-  usage bucket, or a reset time just to pass.
+  only when the text has one. Claude model identity and effort must appear
+  in the live initialization response. The wrapper sends only the SDK
+  initialize control request in safe mode with session persistence off.
+  It sends no model prompt. Help examples are not a model allowlist.
+  Do not require every usage bucket or a reset time just to pass.
 - Cursor checks the exact ID in `agent --list-models`. It does not scrape a
   dashboard or use account tokens because the CLI has no quota command.
 - Grok Build checks the exact ID in `grok models`. It does not scrape

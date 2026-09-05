@@ -29,7 +29,7 @@ HELPER_CWD="~"
 # Model is a spoken phrase or catalog id; empty uses that kind’s live
 # default. Set these from the lantern chat ("make X my default spawn")
 # or with `bin/onboard apply`. Codex example: model "astra high".
-# Claude example: "fable high". Full Fable 5.1 IDs require live CLI help.
+# Claude example: "fable high". Fable 5.1 resolves through the live CLI initialization catalog.
 HELPER_SPAWN_KIND="claude"
 HELPER_SPAWN_MODEL=""
 HELPER_SPAWN_EFFORT=""

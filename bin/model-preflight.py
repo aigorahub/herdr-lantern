@@ -12,7 +12,7 @@ import sys
 
 from dataclasses import dataclass
 
-from model_catalog import listed_codex_models, model_words, parse_claude_capabilities
+from model_catalog import claude_model_catalog, listed_codex_models, model_words
 
 
 class CheckError(RuntimeError):
@@ -51,7 +51,7 @@ def resolve_command(name: str) -> list[str]:
     return command
 
 
-def run(command: list[str]) -> str:
+def run(command: list[str], *, input_text: str | None = None) -> str:
     prefix = resolve_command(command[0])
     if len(prefix) > 1:
         command_line = subprocess.list2cmdline([prefix[-1], *command[1:]])
@@ -62,6 +62,7 @@ def run(command: list[str]) -> str:
         result = subprocess.run(
             process_command,
             check=True,
+            input=input_text,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -188,9 +189,9 @@ def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | No
     return None
 
 
-def claude_capabilities() -> tuple[set[str], set[str]]:
+def claude_capabilities() -> dict[str, tuple[str, set[str]]]:
     try:
-        return parse_claude_capabilities(run(["claude", "--help"]))
+        return claude_model_catalog(run)
     except ValueError as error:
         fail(f"availability check failed: {error}")
 
@@ -198,11 +199,10 @@ def claude_capabilities() -> tuple[set[str], set[str]]:
 def claude_alias_available(
     alias: str,
     effort: str,
-    models: set[str],
-    efforts: set[str],
+    models: dict[str, tuple[str, set[str]]],
     buckets: list[UsageBucket],
 ) -> bool:
-    return alias in models and effort in efforts and exhausted_bucket(alias, buckets) is None
+    return alias in models and effort in models[alias][1] and exhausted_bucket(models[alias][0], buckets) is None
 
 
 def claude_global_exhausted(buckets: list[UsageBucket]) -> bool:
@@ -220,15 +220,14 @@ def claude_global_exhausted(buckets: list[UsageBucket]) -> bool:
 def claude_substitute(
     model: str,
     buckets: list[UsageBucket],
-    models: set[str],
-    efforts: set[str],
+    models: dict[str, tuple[str, set[str]]],
 ) -> dict[str, object] | None:
     if not claude_global_exhausted(buckets) and "fable" in model.lower() and claude_alias_available(
-        "opus", "xhigh", models, efforts, buckets
+        "opus", "xhigh", models, buckets
     ):
         return {"kind": "claude", "model": "opus", "effort": "xhigh", "fast": False, "argv": ["--model", "opus", "--effort", "xhigh"]}
     if not claude_global_exhausted(buckets) and "opus" in model.lower() and claude_alias_available(
-        "sonnet", "high", models, efforts, buckets
+        "sonnet", "high", models, buckets
     ):
         return {"kind": "claude", "model": "sonnet", "effort": "high", "fast": False, "argv": ["--model", "sonnet", "--effort", "high"]}
     return cursor_sol_substitute()
@@ -247,7 +246,7 @@ def report_unavailable(kind: str, model: str, reason: str, substitute: dict[str,
 
 def check(kind: str, model: str, effort: str) -> int:
     if kind == "claude":
-        models, efforts = claude_capabilities()
+        models = claude_capabilities()
         _, buckets = parse_claude_usage()
         if not buckets:
             fail("availability check failed: Claude returned no usage buckets")
@@ -255,23 +254,23 @@ def check(kind: str, model: str, effort: str) -> int:
             return report_unavailable(
                 kind,
                 model,
-                f"Claude model {model} is not verified by claude --help",
-                claude_substitute(model, buckets, models, efforts),
+                f"Claude model {model} is absent from the Claude initialization catalog",
+                claude_substitute(model, buckets, models),
             )
-        if effort and effort.lower() not in efforts:
+        if effort and effort.lower() not in models[model.lower()][1]:
             return report_unavailable(
                 kind,
                 model,
-                f"Claude effort {effort} is not verified by claude --help",
-                claude_substitute(model, buckets, models, efforts),
+                f"Claude effort {effort} is absent from the Claude initialization catalog",
+                claude_substitute(model, buckets, models),
             )
-        exhausted = exhausted_bucket(model, buckets)
+        exhausted = exhausted_bucket(models[model.lower()][0], buckets)
         if exhausted:
             return report_unavailable(
                 kind,
                 model,
                 exhausted_reason(exhausted),
-                claude_substitute(model, buckets, models, efforts),
+                claude_substitute(model, buckets, models),
             )
         return report_available(kind, model, effort)
     if kind == "cursor":
