@@ -17,6 +17,8 @@ import time
 
 PROTOCOL = 1
 MAX_BYTES = 65536
+MAX_ACTOR_BYTES = 32768
+MAX_REPLY_BYTES = 512 * 1024
 MAX_PENDING = 10000
 IDENTITY = {"actor_id", "run_id", "role", "server_id", "pane_id", "session_id",
             "kind", "model", "generation", "task_ids", "peers"}
@@ -28,8 +30,8 @@ class MailboxError(ValueError):
     pass
 
 
-def encode(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+def encode(value, ascii=False):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=ascii,
                       allow_nan=False)
 
 
@@ -76,6 +78,8 @@ def actor_identity(actor):
             raise MailboxError(f"duplicate_{field}")
     if not actor["task_ids"]:
         raise MailboxError("task_scope_required")
+    if len(encode(actor).encode()) > MAX_ACTOR_BYTES:
+        raise MailboxError("actor_too_large")
     return actor
 
 
@@ -148,36 +152,65 @@ class Mailbox:
         self.db.execute("UPDATE messages SET status='unresolved' WHERE status='claimed' AND claim_until<=?", (now,))
         self.db.execute("UPDATE messages SET status='expired' WHERE status='queued' AND expires_at<=?", (now,))
 
-    def authenticate(self, credential):
+    def authenticate(self, credential, archive=False):
         if set(credential) != {"protocol", "actor", "token"} or type(credential["protocol"]) is not int or credential["protocol"] != PROTOCOL:
             raise MailboxError("invalid_credential")
         actor = actor_identity(credential["actor"])
         token = string(credential["token"], "token")
         row = self.db.execute("SELECT * FROM actors WHERE actor_id=?", (actor["actor_id"],)).fetchone()
         digest = hashlib.sha256(token.encode()).hexdigest()
-        if not row or not row["active"] or row["identity"] != encode(actor) or not hmac.compare_digest(digest, row["token_hash"]):
+        if not row or (not row["active"] and not archive) or row["identity"] != encode(actor) or not hmac.compare_digest(digest, row["token_hash"]):
             raise MailboxError("actor_identity_mismatch")
         return actor
 
     def register(self, actor, output):
         actor = actor_identity(actor)
         output = Path(output).expanduser().absolute()
-        if output.exists() or output.is_symlink():
-            raise MailboxError("credential_exists")
+        if output.is_symlink():
+            raise MailboxError("unsafe_credential_path")
         # Keep credentials beside private state, never in product files.
         if output.parent.resolve() != self.root.resolve():
             raise MailboxError("credential_must_be_in_state_directory")
-        token = secrets.token_urlsafe(32)
         with self.transaction():
-            if self.db.execute("SELECT 1 FROM actors WHERE actor_id=?", (actor["actor_id"],)).fetchone():
-                raise MailboxError("actor_exists")
+            # A durable credential can precede the database commit after a crash.
+            # Resume only the exact registration, never issue a replacement token.
+            if output.exists():
+                if not output.is_file():
+                    raise MailboxError("unsafe_credential_path")
+                # A crash between link and unlink leaves the private temporary
+                # hard link. Remove only links to this exact credential inode.
+                info = output.stat()
+                if info.st_nlink > 1:
+                    for pending in self.root.glob(".credential-*"):
+                        st = pending.lstat()
+                        if stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) == (info.st_dev, info.st_ino):
+                            pending.unlink()
+                    if output.stat().st_nlink != 1:
+                        raise MailboxError("unsafe_credential_path")
+                saved = read_json(output)
+                if set(saved) != {"protocol", "actor", "token"} or saved["protocol"] != PROTOCOL or saved["actor"] != actor:
+                    raise MailboxError("credential_exists")
+                token = string(saved["token"], "token")
+            else:
+                token = secrets.token_urlsafe(32)
+            row = self.db.execute("SELECT * FROM actors WHERE actor_id=?", (actor["actor_id"],)).fetchone()
+            if row:
+                if not output.exists() or not row["active"] or row["identity"] != encode(actor) or not hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(), row["token_hash"]):
+                    raise MailboxError("actor_exists")
+                return {"actor_id": actor["actor_id"], "credential_path": str(output), "status": "registered", "duplicate": True}
             self.db.execute("INSERT INTO actors(actor_id,identity,token_hash) VALUES(?,?,?)",
                             (actor["actor_id"], encode(actor), hashlib.sha256(token.encode()).hexdigest()))
-            fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                stream.write(encode({"protocol": PROTOCOL, "actor": actor, "token": token}) + "\n")
-                stream.flush()
-                os.fsync(stream.fileno())
+            if not output.exists():
+                temporary = self.root / (".credential-" + secrets.token_hex(16))
+                try:
+                    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        stream.write(encode({"protocol": PROTOCOL, "actor": actor, "token": token}) + "\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.link(temporary, output)
+                finally:
+                    temporary.unlink(missing_ok=True)
         return {"actor_id": actor["actor_id"], "credential_path": str(output), "status": "registered"}
 
     def post(self, credential, message):
@@ -239,11 +272,17 @@ class Mailbox:
                 ORDER BY priority, created_at, message_id LIMIT ?""",
                                    (actor["actor_id"], limit)).fetchall()
             messages = []
+            reply_bytes = 0
             for row in rows:
-                receipt = secrets.token_urlsafe(24)
+                receipt = secrets.token_hex(24)
+                message = dict(json.loads(row["payload"]), receipt=receipt, status="claimed")
+                message_bytes = len(encode(message, ascii=True)) + 1
+                if reply_bytes + message_bytes > MAX_REPLY_BYTES:
+                    break
                 self.db.execute("UPDATE messages SET status='claimed',receipt=?,claim_until=? WHERE message_id=?",
                                 (receipt, time.time() + 120, row["message_id"]))
-                messages.append(dict(json.loads(row["payload"]), receipt=receipt, status="claimed"))
+                messages.append(message)
+                reply_bytes += message_bytes
             unresolved = self.db.execute("SELECT message_id FROM messages WHERE recipient=? AND status='unresolved' ORDER BY created_at LIMIT 100",
                                          (actor["actor_id"],)).fetchall()
             return {"messages": messages, "unresolved": [r[0] for r in unresolved]}
@@ -257,7 +296,7 @@ class Mailbox:
     def inspect(self, credential, message_id):
         with self.transaction():
             self.expire()
-            row = self.addressed(self.authenticate(credential), message_id)
+            row = self.addressed(self.authenticate(credential, archive=True), message_id)
             return {"message": json.loads(row["payload"]), "status": row["status"], "expires_at": row["expires_at"]}
 
     def ack(self, credential, message_id, receipt):
@@ -288,7 +327,8 @@ class Mailbox:
         with self.transaction():
             actor = self.authenticate(credential)
             self.db.execute("UPDATE actors SET active=0 WHERE actor_id=?", (actor["actor_id"],))
-            self.db.execute("UPDATE messages SET status='unresolved' WHERE (sender=? OR recipient=?) AND status IN ('queued','claimed')", (actor["actor_id"], actor["actor_id"]))
+            self.db.execute("UPDATE messages SET status='retired' WHERE recipient=? AND status IN ('queued','claimed','unresolved')", (actor["actor_id"],))
+            self.db.execute("UPDATE messages SET status='unresolved' WHERE sender=? AND status IN ('queued','claimed')", (actor["actor_id"],))
             return {"actor_id": actor["actor_id"], "status": "retired"}
 
 
@@ -326,6 +366,7 @@ def main(argv=None):
     try:
         if args.command == "capabilities":
             result = {"protocol": PROTOCOL, "delivery": "checkpoint", "automatic_wake": False,
+                      "max_message_bytes": MAX_BYTES, "max_claimed_bytes": MAX_REPLY_BYTES,
                       "commands": ["register", "post", "receive", "ack", "inspect", "reconcile", "retire", "observe"]}
         elif args.command == "observe":
             from team_observer import observe
@@ -350,12 +391,12 @@ def main(argv=None):
                     result = box.reconcile(credential, args.message_id, args.outcome)
                 else:
                     result = box.retire(credential)
-        print(encode(result))
+        print(encode(result, ascii=True))
         return 0
     except (OSError, ValueError, sqlite3.Error) as error:
         # Never emit credentials, input content, or raw SQLite errors.
         code = str(error) if isinstance(error, MailboxError) else getattr(error, "code", type(error).__name__)
-        print(encode({"error": code, "protocol": PROTOCOL}))
+        print(encode({"error": code, "protocol": PROTOCOL}, ascii=True))
         return 2
     finally:
         if box is not None:

@@ -254,6 +254,10 @@ Each local credential binds one actor to its run, tasks, session, model, and
 permitted peers. Credentials stay outside repos and logs. A report can request
 help; it cannot grant permission, replace a model, or authorize merge.
 The transport uses Python's standard library and a private local SQLite store.
+Launch exports native callback paths as `LANTERN_TEAM_MAILBOX` and
+`LANTERN_TEAM_STATE_DIR` for the Elves adapter. Exact registration retries
+preserve credentials after process failure. Retired actors retain access to
+inspect their archived messages, but cannot send or consume further work.
 See the [team rules](herd-workflows.md#teams-on-one-task) and
 [callback protocol](plans/team-protocol-v1.md) for setup and recovery.
 

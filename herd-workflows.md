@@ -232,6 +232,9 @@ The local callback transport is `$HERDR_PLUGIN_ROOT/bin/team-mailbox`.
 Run `team-mailbox capabilities` before configuring it. Protocol 1 reports
 `delivery: checkpoint` and `automatic_wake: false`. It provides storage and
 claims, not automatic agent wake-up or exactly once external actions.
+Each receive call claims at most 512 KiB of message JSON encoded as ASCII.
+Additional messages stay queued for the next checkpoint. CLI output uses
+ASCII JSON escapes so Unicode report text survives Windows code pages.
 The full CLI contract is in `plans/team-protocol-v1.md`.
 
 Use an absolute helper path and the private `LANTERN_HERD_STATE_DIR`. Keep
@@ -240,7 +243,10 @@ actor with `register --input ACTOR.json --output CREDENTIAL.json`. The output
 credential file must be directly inside that state directory. Bind the
 actor to its exact run, role, Herdr server, pane, native session, kind, model,
 generation, task IDs, and permitted peers. Registration cannot replace an
-existing actor ID. Give each actor only its own private credential. Do not
+existing actor ID. An exact registration retry with the same identity and
+credential path returns the existing credential. It also recovers a credential
+saved before a process died at database commit. Do not delete or replace that
+file to force a retry. Give each actor only its own private credential. Do not
 print tokens, put them in Git, or include them in a report. Local credentials
 do not form a security boundary against other processes running as the same
 OS user. Registration records identity; the driver must still verify the live
@@ -248,6 +254,9 @@ occupant before it binds or resumes an agent.
 
 Configure the Elves callback adapter in its run state with protocol version,
 absolute executable path, state directory, and actor credential path. Use
+`LANTERN_TEAM_MAILBOX` and `LANTERN_TEAM_STATE_DIR` from launch for native
+paths. Invoke that Python file with the detected Python 3 command. Pass those
+paths in the driver's kickoff because another pane may not inherit them. Use
 argument arrays, closed stdin, captured output, and a timeout. Worker reports
 cannot replace this configuration. If delivery fails, retain the same message
 ID and inspect the stored result before retry. Do not retry an ambiguous post
@@ -270,6 +279,12 @@ to read its stored payload. Inspect actual effects before
 addressed actor can acknowledge or reconcile. A restart with a changed actor
 identity requires a new registration and explicit recovery of old work.
 Retire a departed actor with `retire --actor`; do not reuse its actor ID.
+Pending messages addressed to it become terminal `retired` records. Its old
+credential permits `inspect` only. It cannot receive, post, acknowledge, or
+reconcile. Pending reports from the retired sender to a live recipient become
+unresolved. That recipient can inspect and record consumption but cannot retry
+them. Archived transport state does not cancel the underlying task; the driver
+must record its disposition or assign remaining work to a new actor.
 
 A receipt proves transport consumption only. A completion message moves the
 task to reported complete until the existing acceptance checks pass. Verify

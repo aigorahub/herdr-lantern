@@ -1,6 +1,7 @@
 """Team transport contract tests. All actors and messages use private fixtures."""
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import importlib.util
 import json
 import os
@@ -80,6 +81,23 @@ class Mailbox(unittest.TestCase):
     def receive(self, credential):
         return self.invoke("receive", "--actor", credential, "--limit", "20")
 
+    @unittest.skipUnless(os.name == "nt", "Windows native callback path contract")
+    def test_windows_callback_paths_round_trip_through_shell(self):
+        # Exercise the same conversion used by launch.sh before persisting JSON.
+        for target in (CLI, self.state):
+            posix = subprocess.run(["bash", "-c", 'cygpath -u "$1"', "path", str(target)],
+                                   capture_output=True, text=True, check=True).stdout.strip()
+            native = subprocess.run(["bash", "-c", '. "$1"; helper_native_path "$2"',
+                                     "path", str(ROOT / "lib.sh"), posix],
+                                    capture_output=True, text=True, check=True).stdout.strip()
+            persisted = json.loads(json.dumps({"path": native}))["path"]
+            self.assertTrue(Path(persisted).is_absolute())
+            self.assertEqual(Path(persisted).resolve(), target.resolve())
+            if target == CLI:
+                result = subprocess.run([sys.executable, persisted, "capabilities"],
+                                        capture_output=True, text=True, check=True)
+                self.assertEqual(json.loads(result.stdout)["protocol"], 1)
+
     def test_capabilities_do_not_need_state(self):
         value = self.invoke("capabilities", state=False)
         self.assertEqual(value["protocol"], 1)
@@ -110,6 +128,7 @@ class Mailbox(unittest.TestCase):
         self.assertEqual(message["sender"]["session_id"], "session-driver")
         self.assertNotIn("token", message["sender"])
         self.assertEqual(message["status"], "claimed")
+        self.assertRegex(message["receipt"], r"\A[0-9a-f]{48}\Z")
         self.assertEqual(self.receive(helper)["messages"], [])
         self.invoke("ack", "--actor", helper, "--message-id", "message-a",
                     "--receipt", message["receipt"])
@@ -121,6 +140,98 @@ class Mailbox(unittest.TestCase):
         self.post(driver)
         self.post(driver, self.message(body={"text": "Different work"}), ok=False)
         self.assertEqual(len(self.receive(helper)["messages"]), 1)
+
+    def test_exact_registration_retry_keeps_the_same_credential(self):
+        credential = self.actor("helper")
+        original = credential.read_bytes()
+        actor = json.loads(original)["actor"]
+        result = self.invoke("register", "--input", self.fixture(actor), "--output", credential)
+        self.assertIs(result["duplicate"], True)
+        self.assertEqual(credential.read_bytes(), original)
+        self.assertNotIn(json.loads(original)["token"], json.dumps(result))
+        self.assertEqual(self.receive(credential)["messages"], [])
+
+    def registration_crash(self, point):
+        actor = {"actor_id": "crash-actor", "run_id": "run-a", "role": "helper",
+                 "server_id": "server-a", "pane_id": "pane-crash", "session_id": "session-crash",
+                 "kind": "codex", "model": "gpt-6-astra", "generation": "1",
+                 "task_ids": ["task-a"], "peers": []}
+        source = self.fixture(actor)
+        credential = self.state / "crash-credential.json"
+        script = '''
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+import team_mailbox
+box = team_mailbox.Mailbox(sys.argv[2])
+if sys.argv[5] == "commit":
+    class CrashBeforeCommit:
+        def __init__(self, db):
+            self.db = db
+        def execute(self, sql, *args):
+            if sql == "COMMIT":
+                os._exit(91)
+            return self.db.execute(sql, *args)
+    box.db = CrashBeforeCommit(box.db)
+else:
+    original_link = os.link
+    def crash_after_link(*args, **kwargs):
+        original_link(*args, **kwargs)
+        os._exit(92)
+    os.link = crash_after_link
+box.register(team_mailbox.read_json(sys.argv[3]), sys.argv[4])
+'''
+        result = subprocess.run([sys.executable, "-c", script, str(ROOT / "bin"),
+                                 str(self.state), str(source), str(credential), point],
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 91 if point == "commit" else 92, result.stderr)
+        self.assertEqual(result.stdout, "")
+        original = credential.read_bytes()
+        with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
+            self.assertEqual(db.execute("SELECT count(*) FROM actors").fetchone()[0], 0)
+        if point == "link":
+            self.assertTrue(list(self.state.glob(".credential-*")))
+        self.invoke("register", "--input", source, "--output", credential)
+        self.assertEqual(credential.read_bytes(), original)
+        self.assertEqual(list(self.state.glob(".credential-*")), [])
+        self.assertEqual(credential.stat().st_nlink, 1)
+        self.assertEqual(self.receive(credential)["messages"], [])
+
+    def test_registration_recovers_after_process_dies_before_database_commit(self):
+        self.registration_crash("commit")
+
+    def test_registration_recovers_after_process_dies_with_temporary_hardlink(self):
+        self.registration_crash("link")
+
+    def test_receive_caps_claimed_bytes_and_leaves_extra_messages_queued(self):
+        driver, helper = self.pair()
+        for index in range(20):
+            self.post(driver, self.message(message_id=f"large-{index}", body={"text": "界" * 8000}))
+        budget = self.invoke("capabilities", state=False)["max_claimed_bytes"]
+        self.assertEqual(budget, 512 * 1024)
+        first = self.receive(helper)["messages"]
+        self.assertGreater(len(first), 0)
+        self.assertLess(len(first), 20)
+        encoded_size = sum(len(json.dumps(message, ensure_ascii=True, sort_keys=True,
+                                         separators=(",", ":"))) + 1 for message in first)
+        self.assertLessEqual(encoded_size, budget)
+        with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
+            queued = db.execute("SELECT count(*) FROM messages WHERE status='queued'").fetchone()[0]
+        self.assertEqual(queued, 20 - len(first))
+        second = self.receive(helper)["messages"]
+        self.assertEqual(len(first) + len(second), 20)
+        self.assertEqual(len({m["message_id"] for m in first + second}), 20)
+
+    def test_unicode_message_survives_cp1252_stdout(self):
+        driver, helper = self.pair()
+        body = {"text": "日本語 Ελληνικά 😀"}
+        self.post(driver, self.message(body=body))
+        environment = dict(os.environ, PYTHONIOENCODING="cp1252")
+        result = subprocess.run([sys.executable, str(CLI), "--state-dir", str(self.state),
+                                 "receive", "--actor", str(helper)], env=environment,
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = result.stdout.decode("ascii")
+        self.assertEqual(json.loads(text)["messages"][0]["body"], body)
 
     def test_run_task_and_peer_scopes(self):
         driver = self.actor("driver", "driver", peers=["helper", "other-run", "other-task"])
@@ -184,8 +295,33 @@ class Mailbox(unittest.TestCase):
         self.invoke("register", "--input", self.fixture(original), "--output",
                     self.state / "replacement.json", ok=False)
 
+    def test_retired_recipient_can_inspect_archived_work_but_cannot_act(self):
+        driver, helper = self.pair()
+        self.post(driver)
+        self.receive(helper)
+        self.expire_claim()
+        self.assertEqual(self.receive(helper)["unresolved"], ["message-a"])
+        self.post(driver, self.message(message_id="claimed"))
+        receipt = self.receive(helper)["messages"][0]["receipt"]
+        self.post(driver, self.message(message_id="queued"))
+        self.invoke("retire", "--actor", helper)
+        for message_id in ("message-a", "claimed", "queued"):
+            archive = self.invoke("inspect", "--actor", helper, "--message-id", message_id)
+            self.assertEqual(archive["status"], "retired")
+            self.assertEqual(archive["message"]["message_id"], message_id)
+            self.invoke("inspect", "--actor", driver, "--message-id", message_id, ok=False)
+        self.invoke("receive", "--actor", helper, ok=False)
+        self.invoke("ack", "--actor", helper, "--message-id", "claimed",
+                    "--receipt", receipt, ok=False)
+        self.invoke("reconcile", "--actor", helper, "--message-id", "message-a",
+                    "--outcome", "consumed", ok=False)
+        self.post(helper, self.message(message_id="late-report", recipient="driver"), ok=False)
+        with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
+            self.assertEqual(db.execute("SELECT count(*) FROM messages WHERE status IN "
+                                        "('queued','claimed','unresolved')").fetchone()[0], 0)
+
     def expire_claim(self, message_id="message-a"):
-        with sqlite3.connect(self.state / "mailbox.sqlite3") as db:
+        with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
             db.execute("UPDATE messages SET claim_until=0 WHERE message_id=?", (message_id,))
 
     def test_expired_claim_needs_reconciliation_before_retry(self):
@@ -226,7 +362,7 @@ class Mailbox(unittest.TestCase):
     def test_expired_queued_message_is_not_delivered(self):
         driver, helper = self.pair()
         self.post(driver)
-        with sqlite3.connect(self.state / "mailbox.sqlite3") as db:
+        with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
             db.execute("UPDATE messages SET expires_at=0")
         self.assertEqual(self.receive(helper)["messages"], [])
         view = self.invoke("inspect", "--actor", helper, "--message-id", "message-a")

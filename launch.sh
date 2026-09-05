@@ -145,8 +145,10 @@ chat_identity=$(helper_chat_identity "$HELPER_AGENT" \
 # Persistent monitor records survive prompt refresh and stay outside product repos.
 LANTERN_HERD_STATE_DIR=$state_dir/herd
 export LANTERN_HERD_STATE_DIR
-LANTERN_TEAM_MAILBOX=$plugin_root/bin/team_mailbox.py
+LANTERN_TEAM_MAILBOX=$(helper_native_path "$plugin_root/bin/team_mailbox.py")
 export LANTERN_TEAM_MAILBOX
+LANTERN_TEAM_STATE_DIR=$(helper_native_path "$LANTERN_HERD_STATE_DIR")
+export LANTERN_TEAM_STATE_DIR
 (umask 077; mkdir -p "$LANTERN_HERD_STATE_DIR") ||
     die "could not create herd state directory"
 workdir=$state_dir/workdir
@@ -177,7 +179,8 @@ Runtime (injected by launch.sh; do not ignore):
   (environment: LANTERN_TEAM_MAILBOX). Invoke the Python file with the
   detected Python 3 command. Probe capabilities before registering actors.
   Protocol 1 delivers at checkpoints and never wakes or prompts a chat.
-  Give the Elves driver this path and LANTERN_HERD_STATE_DIR in its kickoff.
+  Give the Elves driver this path and native callback state path
+  $LANTERN_TEAM_STATE_DIR (environment: LANTERN_TEAM_STATE_DIR) in its kickoff.
   Register only identities verified in live Herdr records. On identity drift,
   retire the old actor before registering a new one. Do not reuse an actor ID.
 

@@ -13,6 +13,10 @@ All notable changes to Lantern, by Elves are documented here.
   credentials to the run, tasks, session, model, and permitted peers. Message
   IDs prevent duplicate storage. Claims require receipts and explicit recovery
   after expiry. Delivery occurs at checkpoints and does not wake agent chats.
+- Registration recovers exact credentials after process failure. Retired
+  recipients retain archive inspection without delivery rights. Receive calls
+  limit claimed message data to 512 KiB. ASCII JSON preserves report text on
+  Windows code pages.
 - Bounded Herdr socket observation for event hints and a reconciliation
   snapshot. Observation uses read only API methods. The recurring monitor
   remains responsible for checks and progress.
