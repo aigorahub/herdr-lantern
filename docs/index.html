@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.10.0 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.10.1 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -435,9 +435,12 @@ No Elves install required. If there are no
         <li><code>cutoff resume relay recovery</code><span>Resume the exact session, kind, model, effort, worktree, and phase. A login picker gets one restart with no keypress. Competing drivers stay stopped.</span></li>
         <li><code>close bar</code><span>List only tabs with merged work and current main. Each needs a passed deploy check or a stated deployment block. You name what to close. Lantern keeps its home tab open.</span></li>
       </ul>
+      <p>New implementation work gets a draft PR at the first useful push, before bulk execution. The driver checks the configured bot review trigger and reads findings at safe batch boundaries. Lantern tracks the PR and bot state. If bots skip drafts, record the block and continue authorized work. Keep incomplete work in draft. Early bot reviews do not replace final independent review.</p>
       <p>Omit <code>merge when clean</code> to stop at a landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage does not grant merge authority. Lantern never merges, edits product repos, or prompts a working chat.</p>
       <p>Lantern can grant routine permissions within the named run scope. It reads the blocked prompt, selects a visible allow once option, and checks progress. It does not grant access outside the run scope or turn on broad bypass settings. Yolo stays off unless you name it.</p>
       <p>Herd runs need the installed Elves skill. The driver controls parallel batches within its repo. The herd rules load on every Lantern launch, including with a saved custom prompt. Reopen Lantern after an upgrade.</p>
+
+      <p>Agy reviews always use <code>/boost</code> in plan mode, including reviews of fixes. Prefer the listed <code>gemini-3.8-flash-high</code> model. Keep a separate session from the code writers. If Boost fails or cannot be confirmed active, use an approved independent fallback or report a block. A plain Agy response does not satisfy review. Use a supervised terminal when headless transport is unqualified. Pass the absolute review workspace to every Boost worker. Approve only scoped review actions. Keep the terminal open until the children finish and the final report names the exact commit. A parent success or delegation notice does not prove completion. A clean review also needs verified coverage of changed files, relevant callers, tests, instructions, and task documentation. Missing required context blocks a clean result. Keep <code>/grill-me</code> for optional planning interviews.</p>
 
       <h2>Choose a live model</h2>
       <ul>

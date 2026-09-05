@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.10.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.10.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -201,6 +201,13 @@ uses one worker session and one packet. Its supervisor resumes the same session
 on the bound execute route. Review uses an independent session. Parallel
 batches within a repo belong to that repo's driver and Elves lane checks.
 
+New implementation work gets a draft PR at the first useful push, before
+bulk execution. The driver reuses that PR and checks whether the configured
+bots review drafts or need a documented request. Lantern tracks the PR and
+bot state. The driver reads findings at safe batch boundaries. Bots that
+skip drafts remain a recorded block while work continues. Incomplete work
+stays in draft. Early bot reviews do not replace final independent review.
+
 `herd-workflows.md` loads on each launch, even with a saved custom prompt.
 Reopen Lantern after an upgrade to load it.
 
@@ -240,6 +247,24 @@ localhost port. Elves Grok review needs its runner sandbox. OMP needs its
 state directory and configured auth broker. Report a denied resource as a
 transport block. Do not change models to fix it. A named Claude Code review
 must not become an OMP or Cursor review without a user choice.
+
+Agy reviews and re-reviews always use `/boost` in plan mode. The default
+review preference is `gemini-3.8-flash-high` when listed. Each reviewer uses
+a separate session from the code writers. If Boost fails or its activation
+cannot be confirmed, the route is unavailable. Use an already approved
+independent fallback or report a block. Plain Agy does not satisfy review.
+Use a supervised Agy terminal seat until headless transport passes a live
+qualification. Pass the absolute workspace to all Boost workers. Keep the
+seat open while children work, and approve only required review actions.
+A parent success or delegation notice is not a final review. Record the
+exact commit, session, model, child completion, and findings.
+A clean Agy review also needs context coverage. Read changed files, relevant
+callers, tests, instructions, and task docs. The host checks the coverage
+record against the diff and read evidence. Missing required context blocks
+a clean result.
+
+`/grill-me` stays an optional planning interview. See the
+[Boost documentation](https://www.antigravity.google/docs/boost/).
 
 ## Open it
 

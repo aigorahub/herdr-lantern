@@ -82,6 +82,31 @@ contract, worker packet, implementation draft PR, and registered worktree.
 A separate plan PR is needed only when the repo or task needs plan review.
 Use a feature branch. Record the named run and merge policy in Run Control.
 
+Put early PR creation in every new implementation kickoff. The driver opens
+or reuses the implementation draft PR at the first useful pushed commit,
+before bulk execution. Use a real staging change when available. Do not wait
+for all batches, tests, docs, or independent review to finish. If staging
+has no useful diff, record that reason and open the PR at the first useful
+implementation push. Do not create empty commits to force a PR. Reuse the
+run's PR after resume. Record its URL, base, branch, and current head in the
+run records. Workers can push within their branch authority; PR actions
+remain with the driver. When staging has no diff, arrange a safe first push
+checkpoint for the driver to open the PR before the worker starts bulk work.
+Keep the same worker session and its required prewalk transition intact.
+Sweep and issue harvest do not create implementation
+PRs or gain execution authority from this rule.
+
+The driver checks the repo's configured bot review trigger once at PR
+creation. A draft PR does not prove a bot review started. Use the documented
+bot request when the run permits it, then check for a queued bot review,
+bot review check, or bot response at the pushed head. Other CI is not review
+start evidence. If bots skip drafts and no supported
+request works, record the bot review block and continue authorized work.
+Keep incomplete work in draft. Do not enable paid services or change repo
+settings to force a review. Push useful slices to the same PR. Read bot
+findings at safe batch boundaries and before final readiness. Check the
+configured trigger again if review does not start after a later push.
+
 Prewalk is one worker trajectory: guide route, bounded TODO, first meaningful
 edit, private checkpoint, then exact session and same worktree resume on the
 bound execute route with only `Continue.`. Send the worker packet once.
@@ -102,6 +127,8 @@ The driver reads PR comments and required checks. It removes draft state
 only when ready. It merges only with explicit authority for this run and
 clean evidence at the same head. Elves uses a regular merge commit. Lantern
 never runs `gh pr merge` or `land-pr` and never edits product repositories.
+Early bot reviews are input to the loop. They do not replace the final
+independent review at the exact head or any required check.
 
 After merge, the driver publishes the matching GitHub tag/release when the
 repo uses that release process. Reuse release automation and existing tags.
@@ -125,6 +152,12 @@ batches inside one repo belong to its driver and Elves lane checks, with
 separate worktrees and disjoint owned surfaces. Do not launch overlapping
 writers to increase pack width.
 
+Track early PR publication and bot review state for each run. If the first
+useful push has no PR, deliver that action at the next idle driver boundary.
+Do not prompt a working driver or parked parent. Lantern does not open the
+product PR itself. A missing bot response alone is not a user interruption;
+raise NEEDS YOU only if a required gate needs a user decision.
+
 Routine in-scope permission prompts are handled below without interrupting
 the user. NEEDS YOU means a real unresolved question, quota death, or dirty review
 that the driver cannot resolve under the accepted scope. Include the exact
@@ -139,8 +172,10 @@ chat prompt and does not need a second user confirmation when it is within
 the accepted run scope.
 
 1. Read `herdr agent get <target>`, `herdr agent read <target> --lines 80`,
-   and pane process info. Require a blocked state and the recorded run,
-   session, kind, and pane. Read the exact action and its target.
+   and pane process info. Require the recorded run, session, kind, and pane.
+   Require a blocked agent or a visible blocked child permission card in
+   that pane. An Agy parent may be idle while its child needs approval.
+   Read the exact action, child identity when present, and target.
 2. Compare that action with the run's accepted scope and current phase.
    Permit required repo reads, worktree edits, tests, builds, feature branch
    commits and pushes, and the named run's authorized PR and deploy actions.
@@ -191,7 +226,8 @@ Do not loop restarts. Do not revive competing drivers.
 Resume through `herdr agent start` with the same kind and verified model args:
 Codex `--dangerously-bypass-approvals-and-sandbox resume <session_id>`, Claude
 `--resume <session_id>`, Cursor `--resume <chatId>`, Grok
-`--resume <id>`, or OMP `-r <id>`. Keep recorded effort and permission args.
+`--resume <id>`, Agy `--conversation <id>`, or OMP `-r <id>`.
+Keep recorded effort and permission args.
 Verify the resumed session ID, worktree, and observed model before continuing.
 A changed or unavailable route stops recovery. No silent substitute.
 
@@ -228,8 +264,64 @@ a user route choice. The same model name does not mean the same harness.
 
 Agy uses `agy models` and `agy --help`, not the Cursor catalog. For a named
 Gemini review through Agy, verify the exact listed ID and use its plan mode.
-The installed route is `agy --model <listed-id> --effort <listed-effort>
---mode plan --print-timeout 15m --print "<review request>"`. Agy needs access
+Use a supervised terminal seat for Boost. Start it with
+`herdr agent start <review-name> --kind agy --pane <pane_id> --
+--model <listed-id> --effort <listed-effort> --mode plan`.
+At its verified ready prompt, send `/boost <review request>` once. Every Agy
+review and re-review requires `/boost`, including small changes. Keep slash
+command expansion enabled. Never pass `--disable-slash-commands`. Prefer
+`gemini-3.8-flash-high` when its live catalog lists it and no model was named.
+Use a separate session from every agent that wrote code. Require the exact
+commit, file and line evidence, failure conditions, and checks that could
+disprove each finding. Keep unsupported concerns separate from defects.
+Require Elves' context coverage gate before a clean verdict: changed files,
+relevant callers, tests, instructions, and task documentation must be read.
+The driver compares declared coverage with its own diff inventory and actual
+reads or complete supplied context. It checks commit IDs and each exclusion.
+A search snippet or confident summary cannot replace missing required context.
+If Boost is unavailable, fails, or cannot be confirmed active, the Agy route
+is unavailable. Use another independent route only when existing user
+preferences or run authority permit it; otherwise report NEEDS YOU. Never
+retry as plain Agy or count a plain response as a completed review.
+`/grill-me` is optional planning input, not part of unattended review.
+
+Put the absolute review workspace, base commit, and exact head in the request.
+Require every Boost investigator and worker to receive that same workspace.
+Do not assume a child starts in the parent's cwd. For an isolated Elves
+snapshot, use the admitted snapshot and supplied diff. Do not direct its
+workers back to the original repository or grant access outside the snapshot.
+
+Keep the terminal alive while any Boost child works or waits for permission.
+The parent can show an idle prompt while its children work. Inspect Agy's
+`/agents` panel or actual child events without sending a status prompt to the
+model. Apply the permission rules above to the named child and its exact
+action. Agy child cards show `ctrl+k approve` and `alt+j manage`; verify the
+current card before using either key. Do not grant all Git or shell commands
+when only one read is needed. Confirm the tool result after each approval.
+While Agy reviews are active, check all review seats for permission cards
+at least every 20 seconds. Live child requests expired after 60 seconds.
+Service pending cards before a long read or wait on another run. Re-read
+the card immediately before approval; an expired card can be replaced.
+If a request expires, inspect the child state. Resume only after the child
+has stopped. A permission timeout is not a clean review.
+
+Record the parent conversation ID, model, head, Boost activation, child
+completion evidence, and final findings. A delegation notice, exit code zero,
+or parent `SUCCESS` is not a completed review. Required reads must succeed.
+Bind the parent ID from the launch record and root CLI events. During the live
+Herdr test, `agent get` reported a Boost child ID as `agent_session`. Do not
+replace the recorded parent with that value. Cross-check the launch or resume
+argv with `herdr pane process-info --pane <pane_id>` before recovery.
+Resume a stopped Agy review with `--conversation <exact-id>` and the same
+model, effort, and plan mode. Verify that competing processes are dead first.
+
+Headless `--print` is conditional on a qualified transport. It can deny tools
+without a failing exit code. Native JSON events and a valid final report
+must pass the Elves completion gate. Do not assume a model catalog check
+qualifies authentication, scoped permissions, or Boost child completion.
+Use the supervised seat when headless transport is unqualified. Preserve
+required Elves isolation; a terminal seat does not authorize its removal.
+Agy needs access
 to its local state and localhost transport. Plan mode does not remove an
 outer host sandbox. Do not add `--dangerously-skip-permissions` unless the
 user names yolo. Agy is an optional reviewer, not an Elves main driver.

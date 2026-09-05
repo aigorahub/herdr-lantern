@@ -12,6 +12,13 @@ beyond this list.
 
 ## Routing table
 
+Every new implementation kickoff requires an early draft PR. The Elves
+driver opens or reuses it at the first useful push, before bulk execution,
+and checks the repo's bot review trigger. Monitor the PR URL and bot state.
+Keep incomplete work in draft. Read bot findings at safe batch boundaries.
+Follow `herd-workflows.md` for staging without a diff and bots that skip
+drafts. This rule does not apply to read only audits or issue harvest.
+
 Match loose user language to these routes. Resolve a loose repository name
 to one real path before any change. Use `herdr workspace list` and `herdr tab
 list` before you create anything. Reuse the workspace for the same cwd.
@@ -39,6 +46,7 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "resume", "continue last" | Start the named kind with its verified resume argv from the session table below. | Ask only when more than one saved session, repo, or tab can match. Never guess which saved session. |
 | "review this", "open a review" | Use Codex `review`, with `--uncommitted`, `--base <branch>`, or `--commit <sha>` as the requested scope requires. | A review is read-only. Do not turn it into an interactive coding task. |
 | "there's a PR on XYZ", "review that PR", "review PR #166", "have Codex review battle-paddle #166" | Use the named pull request route below. | Find the PR first. Use Codex review defaults unless the user named a model. |
+| "Agy review on XYZ", "Antigravity review on XYZ" | Use a supervised Agy seat with plan mode and mandatory `/boost`. Pass the absolute workspace to its children. | Keep a separate reviewer session. Monitor child permissions and completion. No plain Agy fallback. |
 | "Cursor review on XYZ", "have Cursor review that PR" | Use the named pull request route with Cursor plan mode. | Find the PR first. Use the live Cursor default unless the user named a model. |
 | "Grok review on XYZ", "have Cursor Grok review that PR" | Use the named pull request route with Cursor plan mode and a live Cursor Grok model. | Bare Grok means Cursor Ultra. |
 | "Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode. | Use `--kind grok` and the live Grok Build default. |

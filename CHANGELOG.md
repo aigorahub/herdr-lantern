@@ -2,6 +2,25 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.10.1] - 2026-09-05
+
+### Changed
+
+- New implementation kickoffs require a draft PR at the first useful push.
+  The driver checks bot review triggers and reads findings during work.
+  Lantern tracks PR publication and bot state without prompting busy agents.
+- Agy reviews require context coverage before a clean verdict. The host
+  checks changed files, callers, tests, instructions, and task docs against
+  read evidence. Missing context blocks a pass.
+- Every Agy review and re-review requires `/boost` in plan mode. Prefer
+  live Gemini 3.8 Flash High. Use a separate session from the code writers.
+- Boost failure cannot fall back to a plain Agy review. Use an approved
+  independent reviewer or report a block. Keep `/grill-me` for planning.
+- Agy review seats remain open through Boost child completion. The monitor
+  checks child permissions and final evidence. Requests carry the absolute
+  workspace. Headless success alone no longer counts as a review.
+- Updated the prompt, README, both guides, and plugin version.
+
 ## [0.10.0] - 2026-09-05
 
 ### Added
