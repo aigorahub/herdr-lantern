@@ -91,9 +91,9 @@ class Mailbox(unittest.TestCase):
         bash = next((path for path in shells if path.is_file()), None)
         self.assertIsNotNone(bash, "Git for Windows bash is required")
         for target in (CLI, self.state):
-            posix = subprocess.run([str(bash), "-c", 'cygpath -u "$1"', "path", str(target)],
+            posix = subprocess.run([str(bash), "-lc", 'cygpath -u "$1"', "path", str(target)],
                                    capture_output=True, text=True, check=True).stdout.strip()
-            native = subprocess.run([str(bash), "-c", '. "$1"; helper_native_path "$2"',
+            native = subprocess.run([str(bash), "-lc", '. "$1"; helper_native_path "$2"',
                                      "path", str(ROOT / "lib.sh"), posix],
                                     capture_output=True, text=True, check=True).stdout.strip()
             persisted = json.loads(json.dumps({"path": native}))["path"]
