@@ -6,6 +6,9 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Changed
 
+- New implementation kickoffs require a draft PR at the first useful push.
+  The driver checks bot review triggers and reads findings during work.
+  Lantern tracks PR publication and bot state without prompting busy agents.
 - Agy reviews require context coverage before a clean verdict. The host
   checks changed files, callers, tests, instructions, and task docs against
   read evidence. Missing context blocks a pass.

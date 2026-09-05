@@ -82,6 +82,31 @@ contract, worker packet, implementation draft PR, and registered worktree.
 A separate plan PR is needed only when the repo or task needs plan review.
 Use a feature branch. Record the named run and merge policy in Run Control.
 
+Put early PR creation in every new implementation kickoff. The driver opens
+or reuses the implementation draft PR at the first useful pushed commit,
+before bulk execution. Use a real staging change when available. Do not wait
+for all batches, tests, docs, or independent review to finish. If staging
+has no useful diff, record that reason and open the PR at the first useful
+implementation push. Do not create empty commits to force a PR. Reuse the
+run's PR after resume. Record its URL, base, branch, and current head in the
+run records. Workers can push within their branch authority; PR actions
+remain with the driver. When staging has no diff, arrange a safe first push
+checkpoint for the driver to open the PR before the worker starts bulk work.
+Keep the same worker session and its required prewalk transition intact.
+Sweep and issue harvest do not create implementation
+PRs or gain execution authority from this rule.
+
+The driver checks the repo's configured bot review trigger once at PR
+creation. A draft PR does not prove a bot review started. Use the documented
+bot request when the run permits it, then check for a queued bot review,
+bot review check, or bot response at the pushed head. Other CI is not review
+start evidence. If bots skip drafts and no supported
+request works, record the bot review block and continue authorized work.
+Keep incomplete work in draft. Do not enable paid services or change repo
+settings to force a review. Push useful slices to the same PR. Read bot
+findings at safe batch boundaries and before final readiness. Check the
+configured trigger again if review does not start after a later push.
+
 Prewalk is one worker trajectory: guide route, bounded TODO, first meaningful
 edit, private checkpoint, then exact session and same worktree resume on the
 bound execute route with only `Continue.`. Send the worker packet once.
@@ -102,6 +127,8 @@ The driver reads PR comments and required checks. It removes draft state
 only when ready. It merges only with explicit authority for this run and
 clean evidence at the same head. Elves uses a regular merge commit. Lantern
 never runs `gh pr merge` or `land-pr` and never edits product repositories.
+Early bot reviews are input to the loop. They do not replace the final
+independent review at the exact head or any required check.
 
 After merge, the driver publishes the matching GitHub tag/release when the
 repo uses that release process. Reuse release automation and existing tags.
@@ -124,6 +151,12 @@ another run blocks. Multi repo packs are separate Elves runs. Parallel
 batches inside one repo belong to its driver and Elves lane checks, with
 separate worktrees and disjoint owned surfaces. Do not launch overlapping
 writers to increase pack width.
+
+Track early PR publication and bot review state for each run. If the first
+useful push has no PR, deliver that action at the next idle driver boundary.
+Do not prompt a working driver or parked parent. Lantern does not open the
+product PR itself. A missing bot response alone is not a user interruption;
+raise NEEDS YOU only if a required gate needs a user decision.
 
 Routine in-scope permission prompts are handled below without interrupting
 the user. NEEDS YOU means a real unresolved question, quota death, or dirty review

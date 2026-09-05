@@ -201,6 +201,13 @@ uses one worker session and one packet. Its supervisor resumes the same session
 on the bound execute route. Review uses an independent session. Parallel
 batches within a repo belong to that repo's driver and Elves lane checks.
 
+New implementation work gets a draft PR at the first useful push, before
+bulk execution. The driver reuses that PR and checks whether the configured
+bots review drafts or need a documented request. Lantern tracks the PR and
+bot state. The driver reads findings at safe batch boundaries. Bots that
+skip drafts remain a recorded block while work continues. Incomplete work
+stays in draft. Early bot reviews do not replace final independent review.
+
 `herd-workflows.md` loads on each launch, even with a saved custom prompt.
 Reopen Lantern after an upgrade to load it.
 

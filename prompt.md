@@ -12,6 +12,13 @@ beyond this list.
 
 ## Routing table
 
+Every new implementation kickoff requires an early draft PR. The Elves
+driver opens or reuses it at the first useful push, before bulk execution,
+and checks the repo's bot review trigger. Monitor the PR URL and bot state.
+Keep incomplete work in draft. Read bot findings at safe batch boundaries.
+Follow `herd-workflows.md` for staging without a diff and bots that skip
+drafts. This rule does not apply to read only audits or issue harvest.
+
 Match loose user language to these routes. Resolve a loose repository name
 to one real path before any change. Use `herdr workspace list` and `herdr tab
 list` before you create anything. Reuse the workspace for the same cwd.
