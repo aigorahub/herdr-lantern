@@ -2222,7 +2222,9 @@ run_launch() {
     # URL points at a file that does not exist so no launch here waits on
     # the network; the fetch fails at once and the snapshot says so.
     printf '%s\n' "$1" >"$argv_dir/config/helper.conf"
-    rm -rf "$argv_dir/state"
+    if [ "${2:-}" != keep-state ]; then
+        rm -rf "$argv_dir/state"
+    fi
     mkdir -p "$argv_dir/state"
     env -i \
         HOME="$argv_home" \
@@ -2252,14 +2254,30 @@ argv_is() {
 printf '%s\n' 'Saved custom prompt' >"$argv_dir/config/prompt.md"
 run_launch 'HELPER_AGENT="codex"' >/dev/null || fail "workflow injection launch"
 for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rules/lantern.md; do
-    for invoke in 'sweep <repos>' 'issue harvest <repos>' 'stage <run>' \
+    for invoke in 'ship high ROI issue fixes in <repos>' \
+        'ship performance improvements in <repos>' 'ship <task> in <repo>' \
+        'sweep <repos>' 'issue harvest <repos>' 'stage <run>' \
         'landable loop <run>' 'parallel pack <runs and repos>' 'cutoff resume <run>' 'close bar'; do
         grep -qF "$invoke" "$argv_dir/state/workdir/$rendered_file" ||
             fail "$rendered_file lacks workflow $invoke with a custom prompt"
     done
+    for monitor_rule in '### Recurring monitor and task list' \
+        'CronCreate' 'CronDelete' 'active_loop' 'paused_needs_user' \
+        'all registered tasks' 'outcome: no_change' 'Do not edit Elves task' \
+        'LANTERN_HERD_STATE_DIR' "$argv_dir/state/herd"; do
+        grep -qF "$monitor_rule" "$argv_dir/state/workdir/$rendered_file" ||
+            fail "$rendered_file lacks monitor rule $monitor_rule with a custom prompt"
+    done
     grep -qF 'Saved custom prompt' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lost the custom prompt"
 done
+
+# Launch refresh must preserve unfinished monitoring records.
+[ -d "$argv_dir/state/herd" ] || fail "launch did not create herd state directory"
+printf '%s\n' '{"pack_id":"test-pack","state":"active"}' >"$argv_dir/state/herd/test-pack.json"
+run_launch 'HELPER_AGENT="codex"' keep-state >/dev/null || fail "monitor recovery launch"
+grep -qF '"state":"active"' "$argv_dir/state/herd/test-pack.json" ||
+    fail "launch replaced unfinished monitoring state"
 
 argv_is "claude" 'HELPER_AGENT="claude"
 HELPER_MODEL="opus"

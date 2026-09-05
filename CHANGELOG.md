@@ -2,6 +2,28 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.11.0] - 2026-09-05
+
+### Added
+
+- Natural Ship requests for issue fixes, performance improvements, and named
+  tasks across repos. Ship includes clean merge unless the user names an
+  earlier stop point.
+- Required issue and related PR checks before planning. Broad goals select
+  one bounded batch per repo. Performance work requires measured evidence.
+- Recurring monitoring tracks assigned tasks, expected next gates, and
+  completion evidence in persistent Lantern state outside product repos.
+  The monitor handles scoped permissions, advances idle drivers, recovers
+  exact sessions, and stops when all selected work reaches its stop point.
+- Native recurring jobs are checked for duplicate ownership. Hosts without
+  scheduling keep an active loop. Unresolved user blocks pause explicitly.
+- Recovery claims carry owner identity before acquisition. Reopening Lantern
+  verifies the previous owner before a fresh chat takes over.
+- Verified no change outcomes let discovery finish when no useful work fits
+  the goal. Missing evidence and failed checks remain blocks.
+- Public Ship examples use sample repos. Updated the prompt, README, and
+  both guides with the new requests and monitoring instructions.
+
 ## [0.10.1] - 2026-09-05
 
 ### Changed

@@ -12,6 +12,15 @@ beyond this list.
 
 ## Routing table
 
+`Ship` is the main entry point for complete work across repos. Match natural
+requests such as "ship high ROI issue fixes in A and B", "ship performance
+improvements in A and B", or "ship task X in A and task Y in B". Check
+relevant issues and related PRs before planning. Broad goals select one
+bounded batch per repo. Named tasks keep their scope. State the targets and
+start; do not require a run name or an approval menu. Ship includes clean
+merge, release, and deploy checks unless the user gives a narrower stop
+point. Follow `herd-workflows.md` for scope, issue checks, and authority.
+
 Every new implementation kickoff requires an early draft PR. The Elves
 driver opens or reuses it at the first useful push, before bulk execution,
 and checks the repo's bot review trigger. Monitor the PR URL and bot state.
@@ -25,6 +34,7 @@ list` before you create anything. Reuse the workspace for the same cwd.
 
 | User language | Verified route | Rule |
 | --- | --- | --- |
+| "ship <goal> in <repos>", "ship <task> in <repo> and <task> in <repo>" | One Elves driver per run through the existing seat routes; independent monitoring | Check relevant issues first. Run selected repos in parallel through early PRs, implementation, independent review, fixes, docs, clean merge, version, and deploy checks. An explicit stop point wins. |
 | "sweep <repos> with <model>" | Audit seats through `workspace create` / `tab create`, `agent start`, and `agent prompt` | One audit agent per repo. High ROI issues only. Stop. No Elves until the user names a run. |
 | "issue harvest <repos>" | `gh issue list` and read only repo inspection | Group open issues into 1-3 landable runs per repo. Lantern brings the menu. The user picks. |
 | "stage <run> on <repo> with <model>" | One Elves driver through the seat route; `herdr worktree create/open` | Plan PR if needed, implementation draft, registered worktree, exact session and phase models. Stop when launch ready. |
@@ -68,7 +78,12 @@ The full herd contract in `$HERDR_PLUGIN_ROOT/herd-workflows.md` is injected
 at launch, including for a saved custom prompt. Apply it before general
 seat rules. Grant routine in-scope permissions through the permission
 monitoring rules in that contract. Do not prompt a working chat. Monitor the selected runs through
-completion. Only each run's Elves driver may land with explicit authority.
+completion. Keep a persistent task list and one recurring monitor for the
+selected packs. When scheduling is unavailable, keep an active bounded loop.
+Advance idle drivers at safe boundaries, recover exact stopped sessions, and
+mark tasks done only from acceptance evidence. Cancel the monitor when all
+selected work is done. Follow the recurring monitor contract for blocks and
+restart recovery. Only each run's Elves driver may land with explicit authority.
 
 ### Named pull request review
 
