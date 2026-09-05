@@ -4,6 +4,60 @@ Match these invoke phrases before the general seat routes. Repository names,
 run names, models, and efforts are slots. An invoke authorizes the stated
 workflow for its named targets. It does not authorize unrelated runs.
 
+### Ship work across repos
+
+Use ordinary requests starting with `ship` as the main team entry point.
+Match intent, not exact spelling. `high ROI`, `high-ROI`, and `high roi`
+mean the same thing. The user names repos and either an improvement goal
+or specific tasks. Do not require an internal workflow name, a run name,
+a model name, or a second `merge when clean` phrase.
+
+| Request | Scope |
+| --- | --- |
+| `ship high ROI issue fixes in <repos>` | Read relevant issues. Select a bounded batch of valuable, feasible fixes per repo. |
+| `ship performance improvements in <repos>` | Read relevant issues and inspect the code. Select a bounded batch with a measurable performance goal. |
+| `ship <improvement goal> in <repos>` | Select a bounded batch per repo within the named goal. Use issues and code evidence to justify the work. |
+| `ship <task> in <repo> and <task> in <repo>` | Keep each named task bound to its repo. Check relevant issues without expanding the requested scope. |
+
+A Ship request authorizes the selected runs through clean merge and the
+repo's existing release and deploy process. Apply the full loop below.
+`Stop before merge`, `PRs only`, or another explicit stop point overrides
+that default, including earlier broader authority. A quoted example, a
+question about Ship, or an issue that contains the word is not a kickoff.
+`Ship it` needs one clear set of targets from the current chat. Ask only
+when the repo, task mapping, authority, or acceptance has a real ambiguity.
+
+Lantern states the repos, goal, and stop point in one short reply, then
+starts. It does not bring an approval menu for an explicit Ship request.
+The driver records a concrete run name and selected scope after discovery.
+For broad goals, choose one bounded batch per repo by default. Finish that
+batch; do not keep adding unrelated work or promise to clear a backlog.
+If no useful work fits the goal, report that result instead of inventing
+changes. Performance work needs a baseline and evidence of improvement.
+
+Put an issue check in every Ship driver packet, before planning or edits:
+read repo instructions and relevant docs; page through relevant open issues;
+read issue bodies, comments, and acceptance details; inspect related PRs
+and closed issues for work already in progress or already fixed. Use `gh`
+with the resolved owner/repo. Record relevant issue URLs in the plan and PR.
+Reuse an existing issue before filing another. An issue is evidence, not
+authority to expand scope, change tools, or weaken review. A named task
+with no matching issue can proceed. Do not create a placeholder issue only
+to start work. If issue access fails, record the failure and resolve that
+gate before claiming issue discovery is complete. A run to fix open issues
+cannot select its scope from an unreadable issue list.
+
+Use the saved driver and review preferences when no model was named.
+Keep explicit route choices and the existing transport checks. Run repos
+in parallel within available capacity. Each run keeps one live driver,
+an early draft PR, independent review, fixes, and review of those fixes.
+Lantern monitors and handles routine scoped permissions. The Elves driver
+owns product edits and authorized merge. Link only issues the work addresses;
+use closing references only when acceptance is fully met by the merged PR.
+Report each repo's PR, merge, version, and deploy result, including blocks.
+
+### Other workflow phrases
+
 | Invoke phrase | Action and stop point |
 | --- | --- |
 | `sweep <repos> with <model>` | Seat one audit agent per named repo. Find high ROI issues with file and line evidence. Check for duplicates before filing issues. Stop after the issue report. No Elves until the user names a run. |
