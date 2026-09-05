@@ -260,6 +260,10 @@ model. Apply the permission rules above to the named child and its exact
 action. Agy child cards show `ctrl+k approve` and `alt+j manage`; verify the
 current card before using either key. Do not grant all Git or shell commands
 when only one read is needed. Confirm the tool result after each approval.
+While Agy reviews are active, check all review seats for permission cards
+at least every 20 seconds. Live child requests expired after 60 seconds.
+Service pending cards before a long read or wait on another run. Re-read
+the card immediately before approval; an expired card can be replaced.
 If a request expires, inspect the child state. Resume only after the child
 has stopped. A permission timeout is not a clean review.
 
