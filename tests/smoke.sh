@@ -1300,14 +1300,34 @@ if printf '%s' "$out" | grep -q 'agent send-keys'; then
     fail "a now working seat received Enter after the prompt timeout"
 fi
 unset FAKE_PROMPT_AFTER_STATUS
-for login_screen in 'Sign in to continue. Yes, continue' 'Select an account. Start a new chat? [y/n]' 'Choose login method. Yes, I trust this folder'; do
+for task_text in 'Fix login in /tmp/login-service' 'Review sign in and select account behavior'; do
+    : >"$FAKE_PANE"
+    out=$(sh "$root/bin/herdr" agent prompt w1:p1 "$task_text") ||
+        fail "login task text must not block a stalled prompt"
+    printf '%s\n' "$out" | grep -q 'agent send-keys w1:p1 Enter' ||
+        fail "login task text prevented Enter fallback"
+done
+for login_screen in 'Sign in to continue. Yes, continue' 'Select an account. Start a new chat? [y/n]' 'Choose login method. Yes, I trust this folder' 'Sign in with ChatGPT' 'Login' 'Authentication method:'; do
+    helper_pane_has_login_picker "$login_screen" || fail "login screen was not detected"
     if helper_codex_startup_key "$login_screen" >/dev/null; then
         fail "Codex login picker received a startup key"
     fi
     if helper_claude_pane_has_trust "$login_screen"; then
         fail "Claude login picker received a trust key"
     fi
+    printf '%s\n' "$login_screen" >"$FAKE_PANE"
+    if out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there" 2>"$err"); then
+        fail "login picker must block the prompt fallback"
+    fi
+    if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+        fail "login picker received Enter from the prompt fallback"
+    fi
 done
+login_path_trust=$(printf '%s\n' '/tmp/login-service' 'Do you trust the contents of this directory?' 'Yes, continue')
+[ "$(helper_codex_startup_key "$login_path_trust")" = Enter ] ||
+    fail "login in a repo path must not block Codex trust"
+helper_claude_pane_has_trust "$(printf '%s\n' 'Accessing workspace: /tmp/login-service' 'Yes, I trust this folder')" ||
+    fail "login in a repo path must not block Claude trust"
 unset FAKE_PANE
 unset HERDR_REAL
 rm -rf "$fake_prompt"

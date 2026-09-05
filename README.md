@@ -34,7 +34,7 @@ open when you just name a repo (harness, model, setting). After that,
 If you already have a coding agent open, paste the block at the top of
 [the guide](https://aigorahub.github.io/herdr-lantern/).
 
-From the marketplace / GitHub (after this release is on `main`):
+From the marketplace / GitHub:
 
 ```bash
 # If you previously used `herdr plugin link` for this repo, unlink first.

@@ -703,8 +703,10 @@ helper_prompt_seat_is_ready() {
 }
 
 helper_pane_has_login_picker() {
-    printf '%s\n' "$1" | tr '\n\r' '  ' | grep -qiE \
-        'sign in|log in|login|choose.*account|select.*account|select.*login|authentication method'
+    # Match login headings and choices at line starts. Paths and task text
+    # can contain login or account words without being an auth screen.
+    printf '%s\n' "$1" | tr '\r' '\n' | grep -qiE \
+        '^[[:space:]>]*((please[[:space:]]+)?(sign[ -]?in|log[ -]?in)([[:space:]]+(to continue|with|using)([[:space:].:]|$)|[[:space:]]*[:?.!]?[[:space:]]*$)|(please[[:space:]]+)?(choose|select)[[:space:]]+((an?|your)[[:space:]]+)?(account|login method|authentication method)([[:space:].:?]|$)|(login|authentication)[[:space:]]+method([[:space:].:?]|$))'
 }
 
 helper_relay_agent_prompt() {

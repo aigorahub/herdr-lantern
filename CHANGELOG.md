@@ -28,8 +28,15 @@ All notable changes to Lantern, by Elves are documented here.
 - The prompt wrapper blocks working, blocked, and unknown seats. It checks
   readiness again before a stalled prompt receives Enter.
 - Login pickers cannot match first run trust or new chat key handlers.
+- Repo paths and task text that contain login no longer block valid trust
+  prompts or stalled prompt submission.
 - Review guidance separates model availability from socket, state, auth,
   and sandbox access. Named harnesses stay bound to their review routes.
+
+### Changed
+
+- The plugin version is 0.10.0. README and both HTML guides describe the
+  herd invokes, live model routes, permission scope, and upgrade behavior.
 
 ### Included
 
@@ -37,7 +44,7 @@ All notable changes to Lantern, by Elves are documented here.
   existing five, `HELPER_PROVIDER` maps to `--provider`, `HELPER_MODEL` to
   `--model`, `HELPER_EFFORT` to `--thinking`, the session table gains
   `pi -c` / `pi -r` / `pi --session` / `pi --fork` routes, and Pi gets no
-  permission flags — Lantern never passes an approval bypass to it. The
+  permission flags. Lantern never passes an approval bypass to it. The
   invisible first-turn prompt reaches Pi as a positional message.
 
 ## [0.9.11] - 2026-08-26
