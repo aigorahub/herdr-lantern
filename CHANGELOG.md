@@ -2,6 +2,14 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Published the interactive team guide on GitHub Pages. It includes a request
+  builder, copyable examples, and instructions for model discussions, helpers,
+  parallel repo work, monitoring, and merge stop points.
+
 ## [0.12.0] - 2026-09-05
 
 ### Added
