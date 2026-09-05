@@ -175,21 +175,23 @@ Team setup notes: [howto.html](howto.html). Changelog: [CHANGELOG.md](CHANGELOG.
 Name the repos and the result you want. Ask Lantern to choose useful work:
 
 ```text
-Ship high ROI issue fixes in battle-paddle, image-maker, and herdr.
-Ship performance improvements in battle-paddle and image-maker.
+Ship high ROI issue fixes in storefront, billing-api, and admin-console.
+Ship performance improvements in storefront and billing-api.
 ```
 
 Or name the changes:
 
 ```text
-Ship reconnect recovery in battle-paddle and faster exports in image-maker.
+Ship saved carts in storefront and invoice exports in billing-api.
 ```
 
 Ship means the full job through clean merge. Agents check relevant issues,
 comments, docs, and related PRs before they plan. They use existing issues
 when available and check for work already in progress or already fixed.
 Broad goals select one bounded batch per repo. Named tasks keep their scope.
-Performance work needs a baseline and evidence of improvement.
+Performance work needs a baseline and evidence of improvement. If no useful
+work fits the goal, Lantern reports the checked evidence and records that
+no change is needed. It does not create a PR for that result.
 
 Lantern states the targets and starts the repos in parallel within available
 capacity. Drivers open draft PRs early, handle independent reviews and fixes,

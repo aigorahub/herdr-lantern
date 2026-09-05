@@ -2263,7 +2263,7 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
     done
     for monitor_rule in '### Recurring monitor and task list' \
         'CronCreate' 'CronDelete' 'active_loop' 'paused_needs_user' \
-        'all registered tasks' 'Do not edit Elves task' \
+        'all registered tasks' 'outcome: no_change' 'Do not edit Elves task' \
         'LANTERN_HERD_STATE_DIR' "$argv_dir/state/herd"; do
         grep -qF "$monitor_rule" "$argv_dir/state/workdir/$rendered_file" ||
             fail "$rendered_file lacks monitor rule $monitor_rule with a custom prompt"

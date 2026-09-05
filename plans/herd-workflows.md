@@ -59,3 +59,26 @@ Run `sh tests/smoke.sh`, model regression tests, and `git diff --check`.
 Use fake catalogs for missing models, ambiguous phrases, and quota errors.
 Use fake Herdr panes to prove that working and login states receive no keys.
 Inspect GitHub checks and review comments at the pushed commit.
+
+## Ship extension (0.11.0)
+
+The original workflow and model work shipped in 0.10.0. The 0.11.0 extension
+adds natural Ship requests and recurring monitoring. A Ship request names
+repos and a goal or tasks. The driver selects and records a bounded run;
+the user does not need to supply an internal run name. Ship includes clean
+merge unless the user gives an earlier stop point.
+
+Every Ship run checks relevant issues and related PRs, opens a draft PR at
+the first useful push, and keeps independent review and fixes. Lantern
+tracks assignments and expected gates in persistent state outside product
+repos. It uses one native recurring monitor when available, or an active
+bounded loop. It handles scoped permissions, advances safe idle drivers,
+and recovers exact stopped sessions. Completion needs evidence. Discovery
+can finish with a verified no change result without a new PR. Queued work
+and active children prevent premature shutdown. User blocks pause checks
+only when no remaining work or external check can advance.
+
+Release gates: independent reviews, fixed findings, smoke and model tests,
+consistent 0.11.0 version surfaces, and clean GitHub checks. The user
+explicitly authorized merging PR 36 and publishing its GitHub version on
+2026-09-05. This replaces the original plan's stop before merge instruction for PR 36.

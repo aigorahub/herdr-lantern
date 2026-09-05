@@ -236,7 +236,8 @@ Record these fields before kickoff and update them after each check:
 - Pack ID, original request, accepted scope, stop point, dependencies, and
   any explicit merge authority. Register every selected repo before launch,
   including queued repos. Record a provisional task ID until run_id exists.
-- Lantern home pane and exact session, monitor mode, job ID when present,
+- Lantern home pane, exact session, Herdr server identity, host, process ID
+  and process start identity, monitor mode, job ID when present,
   interval, creation and expiry times, last check time, and next check time.
   One owner writes the list.
 - Per run: task, repo and worktree paths, run_id, branch, PR URL, driver
@@ -308,6 +309,14 @@ Each pass must do useful work when a gate can advance:
    run needs verified launch readiness. An idle or exited agent, a green CI
    check, a parent SUCCESS, or all visible panes being done is insufficient.
    A deployment block stays a named unresolved gate, not a successful run.
+   If discovery finds no useful work within a broad goal, or proves a named
+   task is already satisfied, record `done` with `outcome: no_change` only
+   after reading the discovery evidence. Record checked issues, related PRs,
+   relevant code or tests, and the reason no change is needed. Require all
+   assigned agents and children to have stopped that task. Do not require
+   or invent a new PR, version bump, merge, or deploy for that outcome.
+   Missing issue access, missing evidence, or a failed check is a block,
+   never a no change result. Include no change outcomes in the final report.
 5. Mark verified tasks done in the Lantern list. Do not edit Elves task
    state. Start eligible queued runs as capacity opens. Keep other runs
    moving when one needs a user decision. Ask once with the exact blocker;
@@ -327,15 +336,32 @@ the same task list. If CI or deployment is still pending, keep checking.
 After compaction, the same live owner loads its task lists, reconciles live
 identities, and reuses its verified job or active loop. Compaction does not
 require that owner to die or transfer ownership.
-After Lantern restart, inspect unfinished task lists and existing jobs.
-The same verified session can resume its monitor. A different session may
-take ownership only after proving the prior owner is gone. Serialize that
-transfer with an atomic directory claim (`mkdir`) per pack in the state
-directory, reread ownership under the claim, record the new owner, then
-release the claim. If a claim exists, do not remove it because it is old;
-prove its holder is gone before recovering it. Never take a pack from a live
-Lantern owner. Restore one monitor for accepted work only. If owner or
-scheduler state cannot be verified, report the monitoring block.
+Normal Lantern launch starts a fresh chat. After reopen, load unfinished
+task lists and verify the old owner is gone before transferring ownership.
+Inspect the new host session for jobs before creating its replacement
+monitor; session scoped jobs from the old chat do not survive its exit.
+Match host, Herdr server, pane, exact model session, PID, and process start
+identity against `herdr agent get` and `herdr pane process-info`. Pane IDs
+and PIDs can be reused. A matching number alone is not a matching owner.
+A failed inspection is not proof of death. Verify an old server or process
+has ended before treating a changed identity as a replacement.
+
+Serialize transfers with one fixed claim file per pack in the state directory.
+Prepare a private candidate file containing the complete claimant identity
+above before acquiring the claim. Atomically hard link that complete file to
+the fixed claim path (`os.link` in Python); an existing path means busy.
+Then remove the candidate path. Do not use an empty `mkdir` claim or write
+identity only after acquiring a lock. A crash before linking leaves no claim;
+a crash after linking leaves the full owner identity available for recovery.
+Under the claim, reread the task list and compare its old owner with the one
+just verified before recording the new owner. Release only the claim that
+still matches this claimant. If a claim exists, inspect its recorded owner
+and prove that owner is gone before removing the same claim file and retrying
+acquisition. Never remove a claim based on age or remove a replacement claim.
+If hard links are unavailable, leave ownership unchanged and report the block.
+Never take a pack from a live Lantern owner. Restore one monitor for accepted
+work only. If owner or scheduler state cannot be verified, report the
+monitoring block.
 
 ### Permission handling during monitoring
 

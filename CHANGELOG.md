@@ -17,7 +17,12 @@ All notable changes to Lantern, by Elves are documented here.
   exact sessions, and stops when all selected work reaches its stop point.
 - Native recurring jobs are checked for duplicate ownership. Hosts without
   scheduling keep an active loop. Unresolved user blocks pause explicitly.
-- Updated the prompt, README, and both guides with the new requests.
+- Recovery claims carry owner identity before acquisition. Reopening Lantern
+  verifies the previous owner before a fresh chat takes over.
+- Verified no change outcomes let discovery finish when no useful work fits
+  the goal. Missing evidence and failed checks remain blocks.
+- Public Ship examples use sample repos. Updated the prompt, README, and
+  both guides with the new requests and monitoring instructions.
 
 ## [0.10.1] - 2026-09-05
 
