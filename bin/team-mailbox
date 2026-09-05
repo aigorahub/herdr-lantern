@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+team_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+# shellcheck disable=SC1091
+. "$team_root/lib.sh"
+team_python=$(helper_detect_python) || exit 2
+if [ "$team_python" = 'py -3' ]; then
+    exec py -3 "$team_root/bin/team_mailbox.py" "$@"
+fi
+exec "$team_python" "$team_root/bin/team_mailbox.py" "$@"

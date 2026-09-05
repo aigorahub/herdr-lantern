@@ -2268,6 +2268,10 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
         grep -qF "$monitor_rule" "$argv_dir/state/workdir/$rendered_file" ||
             fail "$rendered_file lacks monitor rule $monitor_rule with a custom prompt"
     done
+    grep -qF "Team callback executable: $(helper_native_path "$root/bin/team_mailbox.py")" "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file lacks the native callback executable in runtime instructions"
+    grep -qF "$(helper_native_path "$argv_dir/state/herd") (environment: LANTERN_TEAM_STATE_DIR)" "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file lacks the native callback state path in runtime instructions"
     grep -qF 'Saved custom prompt' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lost the custom prompt"
 done

@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.11.0 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.12.0 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -442,6 +442,20 @@ No Elves install required. If there are no
       <p>Herd runs need the installed Elves skill. The driver controls parallel batches within its repo. The herd rules load on every Lantern launch, including with a saved custom prompt. Reopen Lantern after an upgrade.</p>
 
       <p>Agy reviews always use <code>/boost</code> in plan mode, including reviews of fixes. Prefer the listed <code>gemini-3.8-flash-high</code> model. Keep a separate session from the code writers. If Boost fails or cannot be confirmed active, use an approved independent fallback or report a block. A plain Agy response does not satisfy review. Use a supervised terminal when headless transport is unqualified. Pass the absolute review workspace to every Boost worker. Approve only scoped review actions. Keep the terminal open until the children finish and the final report names the exact commit. A parent success or delegation notice does not prove completion. A clean review also needs verified coverage of changed files, relevant callers, tests, instructions, and task documentation. Missing required context blocks a clean result. Keep <code>/grill-me</code> for optional planning interviews.</p>
+
+      <h2>Put a team on one task</h2>
+      <p>Give one lead a set of helpers, or compare proposals from several models. Use Elves 2.37.0 or later for team assignments and the callback adapter. On Windows, Elves team execution requires WSL2 and callback paths valid inside WSL2.</p>
+      <ul class="says">
+        <li><code>Brainstorm ways to simplify onboarding. Have three models compare approaches.</code><span>Agents write separate first proposals, critique the alternatives, and give the lead evidence for a recommendation.</span></li>
+        <li><code>Investigate slow checkout. Give the driver database and frontend helpers.</code><span>Each helper gets a bounded question. The driver combines findings and tracks decisions.</span></li>
+        <li><code>Ship saved carts in storefront. Use helpers where useful.</code><span>The driver assigns work, checks dependencies, and integrates separate writer worktrees.</span></li>
+        <li><code>Ship high ROI issue fixes in storefront, billing-api, and admin-console. Run two repos at once, with up to two helpers per driver.</code><span>Set the number of active repos and helpers in the request. Extra work waits for capacity.</span></li>
+      </ul>
+      <p>Brainstorming and investigation stop with findings. They do not authorize edits or merge. Ship keeps its existing meaning and stop options. Lantern reuses the model routes saved in Elves. Named models and team limits take priority. A comparison without a count starts with a lead and two proposers. Helpers cannot expand their own scope or team.</p>
+      <p>Agents send persistent reports through Lantern's local mailbox. The Elves adapter receives them at safe checkpoints. Reports survive a busy chat or process exit, but they do not wake chats automatically. Herdr event observation provides hints. Lantern keeps its recurring monitor active and checks the evidence before marking work done.</p>
+      <p>Each actor has a private credential limited to its run, tasks, session, model, and permitted peers. A message cannot grant permission, change a model, or authorize merge. Keep credentials outside repos and logs. Unsupported socket transports use the existing CLI monitor.</p>
+      <p>The final reviewer must be separate from the authors and substantive design contributors. Prefer another model family. A separate qualified agent from the same family is valid when no other family is available under saved choices. The reviewer checks the code and documentation before discussing findings with authors.</p>
+      <p>Read the <a href="https://github.com/aigorahub/herdr-lantern/blob/main/herd-workflows.md#teams-on-one-task">team rules</a> and <a href="https://github.com/aigorahub/herdr-lantern/blob/main/plans/team-protocol-v1.md">callback protocol</a> for setup and recovery.</p>
 
       <h2>Choose a live model</h2>
       <ul>
