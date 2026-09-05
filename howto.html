@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.10.0</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.10.1</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -330,6 +330,8 @@ HELPER_EXTRA_ARGS=""</pre>
       <p>Omit <code>merge when clean</code> to stop at a landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage does not grant merge authority. Lantern never merges, edits product repos, or prompts a working chat.</p>
       <p>Lantern can grant routine permissions within the named run scope. It reads the blocked prompt, selects a visible allow once option, and checks progress. It does not grant access outside the run scope or turn on broad bypass settings. Yolo stays off unless you name it.</p>
       <p>Herd runs need the installed Elves skill. The driver controls parallel batches within its repo. The herd rules load on every Lantern launch, including with a saved custom prompt. Reopen Lantern after an upgrade.</p>
+
+      <p>Agy reviews always use <code>/boost</code> in plan mode, including reviews of fixes. Prefer the listed <code>gemini-3.8-flash-high</code> model. Keep a separate session from the code writers. If Boost fails or cannot be confirmed active, use an approved independent fallback or report a block. A plain Agy response does not satisfy review. Keep <code>/grill-me</code> for optional planning interviews.</p>
 
       <h2>Choose a live model</h2>
       <ul>

@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.10.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.10.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -240,6 +240,14 @@ localhost port. Elves Grok review needs its runner sandbox. OMP needs its
 state directory and configured auth broker. Report a denied resource as a
 transport block. Do not change models to fix it. A named Claude Code review
 must not become an OMP or Cursor review without a user choice.
+
+Agy reviews and re-reviews always use `/boost` in plan mode. The default
+review preference is `gemini-3.8-flash-high` when listed. Each reviewer uses
+a separate session from the code writers. If Boost fails or its activation
+cannot be confirmed, the route is unavailable. Use an already approved
+independent fallback or report a block. Plain Agy does not satisfy review.
+`/grill-me` stays an optional planning interview. See the
+[Boost documentation](https://www.antigravity.google/docs/boost/).
 
 ## Open it
 

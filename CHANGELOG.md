@@ -2,6 +2,16 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.10.1] - 2026-09-05
+
+### Changed
+
+- Every Agy review and re-review requires `/boost` in plan mode. Prefer
+  live Gemini 3.8 Flash High. Use a separate session from the code writers.
+- Boost failure cannot fall back to a plain Agy review. Use an approved
+  independent reviewer or report a block. Keep `/grill-me` for planning.
+- Updated the prompt, README, both guides, and plugin version.
+
 ## [0.10.0] - 2026-09-05
 
 ### Added

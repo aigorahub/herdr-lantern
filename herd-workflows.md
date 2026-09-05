@@ -229,7 +229,19 @@ a user route choice. The same model name does not mean the same harness.
 Agy uses `agy models` and `agy --help`, not the Cursor catalog. For a named
 Gemini review through Agy, verify the exact listed ID and use its plan mode.
 The installed route is `agy --model <listed-id> --effort <listed-effort>
---mode plan --print-timeout 15m --print "<review request>"`. Agy needs access
+--mode plan --print-timeout 15m --print "/boost <review request>"`. Every Agy
+review and re-review requires `/boost`, including small changes. Keep slash
+command expansion enabled. Never pass `--disable-slash-commands`. Prefer
+`gemini-3.8-flash-high` when its live catalog lists it and no model was named.
+Use a separate session from every agent that wrote code. Require the exact
+commit, file and line evidence, failure conditions, and checks that could
+disprove each finding. Keep unsupported concerns separate from defects.
+If Boost is unavailable, fails, or cannot be confirmed active, the Agy route
+is unavailable. Use another independent route only when existing user
+preferences or run authority permit it; otherwise report NEEDS YOU. Never
+retry as plain Agy or count a plain response as a completed review.
+`/grill-me` is optional planning input, not part of unattended review.
+Agy needs access
 to its local state and localhost transport. Plan mode does not remove an
 outer host sandbox. Do not add `--dangerously-skip-permissions` unless the
 user names yolo. Agy is an optional reviewer, not an Elves main driver.
