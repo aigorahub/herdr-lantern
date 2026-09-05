@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import shutil
 import socket
 import stat
 import subprocess
@@ -84,10 +85,15 @@ class Mailbox(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows native callback path contract")
     def test_windows_callback_paths_round_trip_through_shell(self):
         # Exercise the same conversion used by launch.sh before persisting JSON.
+        # PATH can name the WSL bash stub when tests start from PowerShell.
+        git = Path(shutil.which("git")).resolve()
+        shells = [parent / "bin" / "bash.exe" for parent in git.parents]
+        bash = next((path for path in shells if path.is_file()), None)
+        self.assertIsNotNone(bash, "Git for Windows bash is required")
         for target in (CLI, self.state):
-            posix = subprocess.run(["bash", "-c", 'cygpath -u "$1"', "path", str(target)],
+            posix = subprocess.run([str(bash), "-c", 'cygpath -u "$1"', "path", str(target)],
                                    capture_output=True, text=True, check=True).stdout.strip()
-            native = subprocess.run(["bash", "-c", '. "$1"; helper_native_path "$2"',
+            native = subprocess.run([str(bash), "-c", '. "$1"; helper_native_path "$2"',
                                      "path", str(ROOT / "lib.sh"), posix],
                                     capture_output=True, text=True, check=True).stdout.strip()
             persisted = json.loads(json.dumps({"path": native}))["path"]
