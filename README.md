@@ -246,6 +246,11 @@ review preference is `gemini-3.8-flash-high` when listed. Each reviewer uses
 a separate session from the code writers. If Boost fails or its activation
 cannot be confirmed, the route is unavailable. Use an already approved
 independent fallback or report a block. Plain Agy does not satisfy review.
+Use a supervised Agy terminal seat until headless transport passes a live
+qualification. Pass the absolute workspace to all Boost workers. Keep the
+seat open while children work, and approve only required review actions.
+A parent success or delegation notice is not a final review. Record the
+exact commit, session, model, child completion, and findings.
 `/grill-me` stays an optional planning interview. See the
 [Boost documentation](https://www.antigravity.google/docs/boost/).
 

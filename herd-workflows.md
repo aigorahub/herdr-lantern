@@ -139,8 +139,10 @@ chat prompt and does not need a second user confirmation when it is within
 the accepted run scope.
 
 1. Read `herdr agent get <target>`, `herdr agent read <target> --lines 80`,
-   and pane process info. Require a blocked state and the recorded run,
-   session, kind, and pane. Read the exact action and its target.
+   and pane process info. Require the recorded run, session, kind, and pane.
+   Require a blocked agent or a visible blocked child permission card in
+   that pane. An Agy parent may be idle while its child needs approval.
+   Read the exact action, child identity when present, and target.
 2. Compare that action with the run's accepted scope and current phase.
    Permit required repo reads, worktree edits, tests, builds, feature branch
    commits and pushes, and the named run's authorized PR and deploy actions.
@@ -191,7 +193,8 @@ Do not loop restarts. Do not revive competing drivers.
 Resume through `herdr agent start` with the same kind and verified model args:
 Codex `--dangerously-bypass-approvals-and-sandbox resume <session_id>`, Claude
 `--resume <session_id>`, Cursor `--resume <chatId>`, Grok
-`--resume <id>`, or OMP `-r <id>`. Keep recorded effort and permission args.
+`--resume <id>`, Agy `--conversation <id>`, or OMP `-r <id>`.
+Keep recorded effort and permission args.
 Verify the resumed session ID, worktree, and observed model before continuing.
 A changed or unavailable route stops recovery. No silent substitute.
 
@@ -228,8 +231,10 @@ a user route choice. The same model name does not mean the same harness.
 
 Agy uses `agy models` and `agy --help`, not the Cursor catalog. For a named
 Gemini review through Agy, verify the exact listed ID and use its plan mode.
-The installed route is `agy --model <listed-id> --effort <listed-effort>
---mode plan --print-timeout 15m --print "/boost <review request>"`. Every Agy
+Use a supervised terminal seat for Boost. Start it with
+`herdr agent start <review-name> --kind agy --pane <pane_id> --
+--model <listed-id> --effort <listed-effort> --mode plan`.
+At its verified ready prompt, send `/boost <review request>` once. Every Agy
 review and re-review requires `/boost`, including small changes. Keep slash
 command expansion enabled. Never pass `--disable-slash-commands`. Prefer
 `gemini-3.8-flash-high` when its live catalog lists it and no model was named.
@@ -241,6 +246,35 @@ is unavailable. Use another independent route only when existing user
 preferences or run authority permit it; otherwise report NEEDS YOU. Never
 retry as plain Agy or count a plain response as a completed review.
 `/grill-me` is optional planning input, not part of unattended review.
+
+Put the absolute review workspace, base commit, and exact head in the request.
+Require every Boost investigator and worker to receive that same workspace.
+Do not assume a child starts in the parent's cwd. For an isolated Elves
+snapshot, use the admitted snapshot and supplied diff. Do not direct its
+workers back to the original repository or grant access outside the snapshot.
+
+Keep the terminal alive while any Boost child works or waits for permission.
+The parent can show an idle prompt while its children work. Inspect Agy's
+`/agents` panel or actual child events without sending a status prompt to the
+model. Apply the permission rules above to the named child and its exact
+action. Agy child cards show `ctrl+k approve` and `alt+j manage`; verify the
+current card before using either key. Do not grant all Git or shell commands
+when only one read is needed. Confirm the tool result after each approval.
+If a request expires, inspect the child state. Resume only after the child
+has stopped. A permission timeout is not a clean review.
+
+Record the parent conversation ID, model, head, Boost activation, child
+completion evidence, and final findings. A delegation notice, exit code zero,
+or parent `SUCCESS` is not a completed review. Required reads must succeed.
+Resume a stopped Agy review with `--conversation <exact-id>` and the same
+model, effort, and plan mode. Verify that competing processes are dead first.
+
+Headless `--print` is conditional on a qualified transport. It can deny tools
+without a failing exit code. Native JSON events and a valid final report
+must pass the Elves completion gate. Do not assume a model catalog check
+qualifies authentication, scoped permissions, or Boost child completion.
+Use the supervised seat when headless transport is unqualified. Preserve
+required Elves isolation; a terminal seat does not authorize its removal.
 Agy needs access
 to its local state and localhost transport. Plan mode does not remove an
 outer host sandbox. Do not add `--dangerously-skip-permissions` unless the
