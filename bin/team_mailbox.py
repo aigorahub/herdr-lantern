@@ -182,13 +182,15 @@ class Mailbox:
                 info = output.stat()
                 if info.st_nlink > 1:
                     for pending in self.root.glob(".credential-*"):
+                        if pending.name == output.name:
+                            continue
                         st = pending.lstat()
                         if stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) == (info.st_dev, info.st_ino):
                             pending.unlink()
                     if output.stat().st_nlink != 1:
                         raise MailboxError("unsafe_credential_path")
                 saved = read_json(output)
-                if set(saved) != {"protocol", "actor", "token"} or saved["protocol"] != PROTOCOL or saved["actor"] != actor:
+                if set(saved) != {"protocol", "actor", "token"} or type(saved["protocol"]) is not int or saved["protocol"] != PROTOCOL or saved["actor"] != actor:
                     raise MailboxError("credential_exists")
                 token = string(saved["token"], "token")
             else:

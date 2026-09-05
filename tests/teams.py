@@ -151,13 +151,13 @@ class Mailbox(unittest.TestCase):
         self.assertNotIn(json.loads(original)["token"], json.dumps(result))
         self.assertEqual(self.receive(credential)["messages"], [])
 
-    def registration_crash(self, point):
+    def registration_crash(self, point, credential_name="crash-credential.json"):
         actor = {"actor_id": "crash-actor", "run_id": "run-a", "role": "helper",
                  "server_id": "server-a", "pane_id": "pane-crash", "session_id": "session-crash",
                  "kind": "codex", "model": "gpt-6-astra", "generation": "1",
                  "task_ids": ["task-a"], "peers": []}
         source = self.fixture(actor)
-        credential = self.state / "crash-credential.json"
+        credential = self.state / credential_name
         script = '''
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
@@ -192,7 +192,7 @@ box.register(team_mailbox.read_json(sys.argv[3]), sys.argv[4])
             self.assertTrue(list(self.state.glob(".credential-*")))
         self.invoke("register", "--input", source, "--output", credential)
         self.assertEqual(credential.read_bytes(), original)
-        self.assertEqual(list(self.state.glob(".credential-*")), [])
+        self.assertEqual([p for p in self.state.glob(".credential-*") if p != credential], [])
         self.assertEqual(credential.stat().st_nlink, 1)
         self.assertEqual(self.receive(credential)["messages"], [])
 
@@ -201,6 +201,9 @@ box.register(team_mailbox.read_json(sys.argv[3]), sys.argv[4])
 
     def test_registration_recovers_after_process_dies_with_temporary_hardlink(self):
         self.registration_crash("link")
+
+    def test_registration_recovery_keeps_output_with_temporary_name_prefix(self):
+        self.registration_crash("link", ".credential-driver.json")
 
     def test_receive_caps_claimed_bytes_and_leaves_extra_messages_queued(self):
         driver, helper = self.pair()
