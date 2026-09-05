@@ -425,6 +425,38 @@ box.register(team_mailbox.read_json(sys.argv[3]), sys.argv[4])
                                                 "--input", source), range(6)))
         self.assertEqual(len(self.receive(helper)["messages"]), 1)
 
+    def test_large_pack_prioritizes_blockers_without_duplicate_claims(self):
+        tasks = [f"task-{i}" for i in range(100)]
+        driver = self.actor("driver", "driver", tasks=tasks, peers=["helper"])
+        helper = self.actor("helper", tasks=tasks, peers=["driver"])
+        spec = importlib.util.spec_from_file_location("team_load_fixture", CLI)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sender = json.loads(helper.read_text())
+        receiver = json.loads(driver.read_text())
+        box = module.Mailbox(self.state)
+        self.addCleanup(box.close)
+        for i, task in enumerate(tasks):
+            box.post(sender, self.message(message_id=f"report-{i}", recipient="driver",
+                     task_id=task, kind="blocked" if i == 99 else "completion"))
+
+        def claim(_):
+            consumer = module.Mailbox(self.state)
+            try:
+                return consumer.receive(receiver, 20)["messages"]
+            finally:
+                consumer.close()
+
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            batches = list(pool.map(claim, range(5)))
+        self.assertEqual([len(batch) for batch in batches], [20] * 5)
+        self.assertTrue(any(batch[0]["kind"] == "blocked" for batch in batches))
+        received = [message for batch in batches for message in batch]
+        self.assertEqual(len({message["message_id"] for message in received}), 100)
+        for message in received:
+            box.ack(receiver, message["message_id"], message["receipt"])
+        self.assertEqual(box.receive(receiver), {"messages": [], "unresolved": []})
+
 
 class Observer(unittest.TestCase):
     @unittest.skipUnless(hasattr(socket, "AF_UNIX") and os.name != "nt",
