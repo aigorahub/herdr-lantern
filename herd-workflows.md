@@ -241,6 +241,11 @@ command expansion enabled. Never pass `--disable-slash-commands`. Prefer
 Use a separate session from every agent that wrote code. Require the exact
 commit, file and line evidence, failure conditions, and checks that could
 disprove each finding. Keep unsupported concerns separate from defects.
+Require Elves' context coverage gate before a clean verdict: changed files,
+relevant callers, tests, instructions, and task documentation must be read.
+The driver compares declared coverage with its own diff inventory and actual
+reads or complete supplied context. It checks commit IDs and each exclusion.
+A search snippet or confident summary cannot replace missing required context.
 If Boost is unavailable, fails, or cannot be confirmed active, the Agy route
 is unavailable. Use another independent route only when existing user
 preferences or run authority permit it; otherwise report NEEDS YOU. Never

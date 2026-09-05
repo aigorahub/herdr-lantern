@@ -251,6 +251,11 @@ qualification. Pass the absolute workspace to all Boost workers. Keep the
 seat open while children work, and approve only required review actions.
 A parent success or delegation notice is not a final review. Record the
 exact commit, session, model, child completion, and findings.
+A clean Agy review also needs context coverage. Read changed files, relevant
+callers, tests, instructions, and task docs. The host checks the coverage
+record against the diff and read evidence. Missing required context blocks
+a clean result.
+
 `/grill-me` stays an optional planning interview. See the
 [Boost documentation](https://www.antigravity.google/docs/boost/).
 

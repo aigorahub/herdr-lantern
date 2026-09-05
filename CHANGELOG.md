@@ -6,6 +6,9 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Changed
 
+- Agy reviews require context coverage before a clean verdict. The host
+  checks changed files, callers, tests, instructions, and task docs against
+  read evidence. Missing context blocks a pass.
 - Every Agy review and re-review requires `/boost` in plan mode. Prefer
   live Gemini 3.8 Flash High. Use a separate session from the code writers.
 - Boost failure cannot fall back to a plain Agy review. Use an approved
