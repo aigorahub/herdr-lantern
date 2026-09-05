@@ -211,7 +211,8 @@ Reopen Lantern after an upgrade to load it.
 
 - Codex: `astra`, `gpt-6 astra`, and `astra high` select `gpt-6-astra`.
   The default is live Astra at its catalog effort, currently medium, with
-  Fast off. Efforts are low, medium, high, xhigh, max, and ultra. Bare
+  Fast off. The route sets `service_tier="default"` to override inherited
+  priority settings. Efforts are low, medium, high, xhigh, max, and ultra. Bare
   `gpt-6` requires a choice. It never silently selects GPT-5.5.
 - Claude: `fable high` uses the live `fable` alias. `fable 5.1 high` and
   `claude-fable-5-1 high` use the full ID only when `claude --help` lists it.

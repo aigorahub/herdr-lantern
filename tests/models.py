@@ -60,8 +60,8 @@ class Models(unittest.TestCase):
                 self.assertEqual(result["model"], "gpt-6-astra")
                 self.assertEqual(result["effort"], "medium")
                 self.assertFalse(result["fast"])
-                self.assertIsNone(result["service_tier"])
-                self.assertEqual(result["argv"], ["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"'])
+                self.assertEqual(result["service_tier"], "default")
+                self.assertEqual(result["argv"], ["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"', "-c", 'service_tier="default"'])
             read.assert_called_with(["codex", "debug", "models"])
 
     def test_astra_all_efforts(self):
@@ -105,6 +105,13 @@ class Models(unittest.TestCase):
             result = route.codex_route("astra high fast")
             self.assertEqual(result["service_tier"], "live-fast")
             self.assertIn('service_tier="live-fast"', result["argv"])
+
+    def test_normal_route_overrides_inherited_priority(self):
+        with patch.object(route, "run_catalog", return_value=codex_catalog(fast=True)):
+            result = route.codex_route("default")
+        self.assertIn('service_tier="default"', result["argv"])
+        self.assertNotIn('service_tier="priority"', result["argv"])
+        self.assertEqual(result["service_tier"], "default")
 
     def test_cursor_fable_versions_and_exact_ids(self):
         with patch.object(route, "run_catalog", return_value=CURSOR):

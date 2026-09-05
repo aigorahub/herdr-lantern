@@ -158,21 +158,21 @@ def codex_route(phrase: str) -> dict[str, object]:
         fail(f"{model_id} does not support fast service")
     if parsed.fast and len(fast_tier_ids) != 1:
         fail(f"{model_id} does not publish one Fast service tier ID")
-    fast_tier = next(iter(fast_tier_ids)) if parsed.fast else None
+    service_tier = next(iter(fast_tier_ids)) if parsed.fast else "default"
     effort = parsed.effort or model.get("default_reasoning_level")
     if effort and effort not in efforts:
         fail(f"{model_id} has an invalid default effort")
     argv = ["-m", model_id]
     if effort:
         argv.extend(["-c", f'model_reasoning_effort="{effort}"'])
-    if parsed.fast:
-        argv.extend(["-c", f'service_tier="{fast_tier}"'])
+    # Override a user or profile Fast setting on normal routes too.
+    argv.extend(["-c", f'service_tier="{service_tier}"'])
     return {
         "kind": "codex",
         "model": model_id,
         "effort": effort,
         "fast": parsed.fast,
-        "service_tier": fast_tier,
+        "service_tier": service_tier,
         "argv": argv,
     }
 

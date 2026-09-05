@@ -220,7 +220,7 @@ $onboard_note
   result with \`--permission-mode auto\`. It prefers \`grok-4.6\` at high
   effort, then \`grok-4.5\` at high effort. Codex interactive and review
   use \`model-route codex default\`: live Astra, catalog default effort
-  (currently medium), Fast off. Pass
+  (currently medium), Fast off with the explicit normal service tier. Pass
   \`--dangerously-bypass-approvals-and-sandbox\` on every start, resume,
   fork, and review. Do not seat Codex with only \`-a never -s danger-full-access\`;
   the TUI can still ask. The herdr wrapper puts the Codex flag immediately

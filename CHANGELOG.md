@@ -19,6 +19,7 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Fixed
 
+- Normal Codex routes override inherited Fast settings with the default tier.
 - Model parsing now keeps integer generations and distinguishes 5 from 5.1.
   Codex preflight checks effort. Claude rejects unparseable usage results.
 - The prompt wrapper blocks working, blocked, and unknown seats. It checks

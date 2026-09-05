@@ -120,8 +120,8 @@ Check these choices against the live CLI before each seat:
 
 | Kind | Spoken choice | Real argv |
 | --- | --- | --- |
-| Codex | `astra`, `gpt-6 astra` | `-m gpt-6-astra -c 'model_reasoning_effort="medium"'` |
-| Codex | `astra high` | `-m gpt-6-astra -c 'model_reasoning_effort="high"'` |
+| Codex | `astra`, `gpt-6 astra` | `-m gpt-6-astra -c 'model_reasoning_effort="medium"' -c 'service_tier="default"'` |
+| Codex | `astra high` | `-m gpt-6-astra -c 'model_reasoning_effort="high"' -c 'service_tier="default"'` |
 | Codex | `gpt-6` | Ambiguous. Ask for Astra or an exact model. Never silently select GPT-5.5. |
 | Codex | `5.6 sol high [fast]` | `-m gpt-5.6-sol`, verified effort, and a live Fast tier only if requested |
 | Codex | `5.6 terra <effort> [fast]` | `-m gpt-5.6-terra`, one verified `model_reasoning_effort`, and the live Fast service tier ID when requested |
@@ -147,6 +147,7 @@ has Fable 5.1 IDs but no Astra ID in the 2026-09-05 check. Never construct one.
 The kickoff Codex catalog had no Astra Fast tier. The 2026-09-05 live check
 now lists Fast with ID priority. Fast is off by default. Request it only
 when the live model publishes one Fast tier ID. Never hardcode priority.
+Normal Codex routes set `service_tier="default"` to override inherited Fast.
 Claude help on this machine still names fable and claude-fable-5. Do not
 claim its full 5.1 ID is verified until help lists claude-fable-5-1. Use Fable
 5.1 in route reports when that is the observed model. A family alias alone
