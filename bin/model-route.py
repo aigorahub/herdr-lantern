@@ -9,7 +9,10 @@ import re
 import shutil
 import subprocess
 import sys
+
 from dataclasses import dataclass
+
+from model_catalog import listed_codex_models, model_words, parse_claude_capabilities
 
 
 EFFORT_ALIASES = {
@@ -80,7 +83,7 @@ def run_catalog(command: list[str]) -> str:
 
 def words(value: str) -> list[str]:
     value = value.lower().replace("extra high", "xhigh").replace("extra-high", "xhigh")
-    return re.findall(r"\d+(?:\.\d+)+|[a-z][a-z0-9]*", value)
+    return model_words(value)
 
 
 def parse_phrase(value: str, *, keep_effort: bool) -> ParsedPhrase:
@@ -106,6 +109,10 @@ def candidate_tokens(*values: str) -> set[str]:
 
 def choose(candidates: list[tuple[str, set[str]]], terms: tuple[str, ...]) -> str:
     requested = set(terms)
+    # A complete catalog ID wins over token scoring.
+    exact = [name for name, _ in candidates if tuple(words(name)) == terms]
+    if len(exact) == 1:
+        return exact[0]
     matches = [(name, tokens) for name, tokens in candidates if requested <= tokens]
     if not matches:
         fail("model phrase does not match the live catalog")
@@ -117,12 +124,15 @@ def choose(candidates: list[tuple[str, set[str]]], terms: tuple[str, ...]) -> st
 
 
 def codex_route(phrase: str) -> dict[str, object]:
+    if phrase.strip().lower() == "default":
+        phrase = "astra"
     parsed = parse_phrase(phrase, keep_effort=False)
+    if set(parsed.terms) <= {"gpt", "codex", "6"} and "6" in parsed.terms:
+        fail("model phrase is ambiguous: name astra or an exact model such as gpt-5.5")
     try:
-        catalog = json.loads(run_catalog(["codex", "debug", "models"]))
-    except json.JSONDecodeError as error:
-        fail(f"Codex returned an invalid model catalog ({error})")
-    models = [model for model in catalog.get("models", []) if model.get("visibility") == "list"]
+        models = listed_codex_models(run_catalog(["codex", "debug", "models"]))
+    except ValueError as error:
+        fail(str(error))
     model_id = choose(
         [
             (
@@ -149,19 +159,41 @@ def codex_route(phrase: str) -> dict[str, object]:
     if parsed.fast and len(fast_tier_ids) != 1:
         fail(f"{model_id} does not publish one Fast service tier ID")
     fast_tier = next(iter(fast_tier_ids)) if parsed.fast else None
+    effort = parsed.effort or model.get("default_reasoning_level")
+    if effort and effort not in efforts:
+        fail(f"{model_id} has an invalid default effort")
     argv = ["-m", model_id]
-    if parsed.effort:
-        argv.extend(["-c", f'model_reasoning_effort="{parsed.effort}"'])
+    if effort:
+        argv.extend(["-c", f'model_reasoning_effort="{effort}"'])
     if parsed.fast:
         argv.extend(["-c", f'service_tier="{fast_tier}"'])
     return {
         "kind": "codex",
         "model": model_id,
-        "effort": parsed.effort,
+        "effort": effort,
         "fast": parsed.fast,
         "service_tier": fast_tier,
         "argv": argv,
     }
+
+
+def claude_route(phrase: str) -> dict[str, object]:
+    if phrase.strip().lower() == "default":
+        phrase = "opus high"
+    parsed = parse_phrase(phrase, keep_effort=False)
+    try:
+        models, efforts = parse_claude_capabilities(run_catalog(["claude", "--help"]))
+    except ValueError as error:
+        fail(str(error))
+    model_id = choose([(name, candidate_tokens(name)) for name in sorted(models)], parsed.terms)
+    if parsed.fast:
+        fail("Claude help does not publish a Fast route")
+    if parsed.effort and parsed.effort not in efforts:
+        fail(f"Claude does not support effort {parsed.effort}")
+    argv = ["--model", model_id]
+    if parsed.effort:
+        argv.extend(["--effort", parsed.effort])
+    return {"kind": "claude", "model": model_id, "effort": parsed.effort, "fast": False, "argv": argv}
 
 
 def cursor_catalog() -> list[tuple[str, set[str]]]:
@@ -238,12 +270,12 @@ def grok_route(phrase: str) -> dict[str, object]:
 
 
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] not in {"codex", "cursor", "grok"}:
-        print("usage: model-route <codex|cursor|grok> <spoken model phrase|default>", file=sys.stderr)
+    if len(sys.argv) < 3 or sys.argv[1] not in {"codex", "claude", "cursor", "grok"}:
+        print("usage: model-route <codex|claude|cursor|grok> <spoken model phrase|default>", file=sys.stderr)
         return 2
     phrase = " ".join(sys.argv[2:]).strip()
     try:
-        routes = {"codex": codex_route, "cursor": cursor_route, "grok": grok_route}
+        routes = {"claude": claude_route, "codex": codex_route, "cursor": cursor_route, "grok": grok_route}
         route = routes[sys.argv[1]](phrase)
     except RouteError as error:
         print(f"model-route: {error}", file=sys.stderr)

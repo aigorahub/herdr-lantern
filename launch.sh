@@ -119,8 +119,8 @@ if [ "$onboard_needed" = 1 ]; then
   answer exactly, then run `$HERDR_PLUGIN_ROOT/bin/onboard apply` with
   that mapping: Cursor Grok 4.6 high fast → `--kind cursor --model
   "cursor grok 4.6 high fast"`; Claude Opus high → `--kind claude
-  --model opus --effort high`; Codex 5.6 sol high fast → `--kind
-  codex --model "5.6 sol high fast"`; Grok Build → `--kind grok` with
+  --model opus --effort high`; Codex Astra high → `--kind
+  codex --model "astra high"`; Grok Build → `--kind grok` with
   no `--model`; keep the current default → `onboard apply --keep`.
   Confirm the stored summary. Until they answer, do not invent a spawn
   default beyond the injected kind. Do not seat an agent as part of setup.
@@ -149,6 +149,9 @@ search_root=$(helper_normalize_root "${HELPER_CWD:-~}")
 [ -d "$search_root" ] || die "helper search directory does not exist: $search_root"
 
 prompt=$(cat "$prompt_file")
+# Always load current herd rules, even when the user keeps a custom prompt.
+herd_workflows=$(cat "$plugin_root/herd-workflows.md") ||
+    die "could not read herd-workflows.md"
 # macOS /bin/sh is bash 3.2, and its $(...) scanner pairs ASCII quote
 # characters even inside this heredoc, so an odd number of ' below breaks
 # the parse at the end of the file. Prose apostrophes in the appendix are
@@ -178,7 +181,11 @@ Runtime (injected by launch.sh; do not ignore):
   session does not resolve. That is the whole list. Closing, killing,
   and removing are not exceptions: named and resolved, they run like
   anything else. Then act on the answer. Do not ask twice.
-- \`herdr agent prompt\` through the wrapper adds \`--wait\`. It presses
+- Grant routine in-scope permissions for selected runs using the herd
+  contract below. Read the exact blocked prompt before any approval key.
+  Do not prompt a working chat. Observe with agent get/read/wait instead.
+  \`herdr agent prompt\` rejects seats that are not interactive ready and
+  idle or done. The wrapper adds \`--wait\`. It presses
   Enter only when the target pane stalls with the text still showing
   (Cursor often types into the follow-up field without submitting), and
   it fails when nothing shows the message went in. Read the pane before
@@ -212,16 +219,15 @@ $onboard_note
   default fallback. Grok Build uses the live \`model-route grok default\`
   result with \`--permission-mode auto\`. It prefers \`grok-4.6\` at high
   effort, then \`grok-4.5\` at high effort. Codex interactive and review
-  default to Sol 5.6, high, fast, after the live catalog confirms
-  \`-m gpt-5.6-sol -c model_reasoning_effort=\"high\" -c
-  service_tier=\"priority\"\`, plus
-  \`--dangerously-bypass-approvals-and-sandbox\` so the tab does not stop
-  for approvals. Do not seat Codex with only \`-a never -s danger-full-access\`;
-  the TUI can still ask. The herdr wrapper puts the
-  Codex flag immediately after \`--\`, and moves a copy that sat after
-  resume or review. Use
-  \`\$HERDR_PLUGIN_ROOT/bin/model-route codex "5.6 sol high fast"\` to get
-  separate Codex argv. Use the same resolver with cursor or grok for a user
+  use \`model-route codex default\`: live Astra, catalog default effort
+  (currently medium), Fast off. Pass
+  \`--dangerously-bypass-approvals-and-sandbox\` on every start, resume,
+  fork, and review. Do not seat Codex with only \`-a never -s danger-full-access\`;
+  the TUI can still ask. The herdr wrapper puts the Codex flag immediately
+  after \`--\` and moves a copy that sat after resume or review.
+  \`astra\`, \`gpt-6 astra\`, and \`astra high\` resolve through
+  \`\$HERDR_PLUGIN_ROOT/bin/model-route codex "<phrase>"\` to get
+  separate Codex argv. Use the same resolver with claude, cursor, or grok for a user
   supplied model phrase. Never invent a model slug. A kind not named here
   gets no extra args. Never omit the Codex unattended flag. Never pass
   bypassPermissions, --yolo, --force, or --always-approve unless the
@@ -255,7 +261,9 @@ $onboard_note
   Codex. "Create a GitHub repo" means \`gh repo create <name> --private\`.
   Never \`--public\` unless the user explicitly asks for a public repository.
   "Second tab same way" means create a tab in that same workspace and
-  reuse the last verified kind and model settings. Resume uses the real kind
+  reuse the last verified kind and model settings. Cutoff resume uses the
+  exact session ID, kind, model, effort, and worktree from the herd contract.
+  For a general continue request only, resume uses the real kind
   CLI: Codex \`--dangerously-bypass-approvals-and-sandbox resume --last\`, Claude \`--continue\`, OMP \`--continue\` or
   \`-r <id>\`, Cursor \`--continue\` or \`--resume <id>\`, Grok
   \`--continue\` or \`--resume <id>\`, Gemini \`--resume latest\`, OpenCode
@@ -270,16 +278,16 @@ $onboard_note
   the pull request head, and use \`review --base <base>\`. If it does not
   match, offer a separate gated Herdr worktree at the exact head OID. Do not
   check out the pull request in the product repo. Reuse a Codex agent on the
-  matching head with \`herdr agent prompt\`. Otherwise use a gated \`herdr
+  matching head only when idle or done and interactive ready with \`herdr agent prompt\`. Otherwise use a gated \`herdr
   agent start <slug> --kind codex\` with the real Codex \`review\` argv. Use
   the Codex default without asking for a model when the user did not name one.
 - Route "Cursor review on X" through the same repo and pull request checks.
-  Reuse a matching Cursor agent with \`herdr agent prompt\`. Otherwise start
+  Reuse an idle or done, interactive ready Cursor agent with \`herdr agent prompt\`. Otherwise start
   \`--kind cursor\` with \`--auto-review --trust --mode plan\` and the live
   Cursor default. Cursor has no review subcommand on this machine.
 - Route "Grok review on X" through the Cursor review route with a live Cursor
   Grok model. Route "Grok Build review on X" through the same repo and pull
-  request checks. Reuse a matching Grok Build agent with \`herdr agent
+  request checks. Reuse an idle or done, interactive ready Grok Build agent with \`herdr agent
   prompt\`. Otherwise start \`--kind grok\` with \`--permission-mode auto
   -p\` and the live Grok Build default. Grok Build has no review subcommand.
 - After model resolution, run
@@ -325,9 +333,18 @@ $onboard_note
   "🔥 lantern" unless the user renamed it). Seat new agents in their own
   repository workspace, never in this one. Never close this workspace,
   this tab, or your own pane.
-- Close this chat by exiting the helper CLI (not Escape). Cursor agent:
+- If the user asks how to exit, explain how they can exit the helper CLI.
+  Do not exit this chat yourself. Cursor agent:
   Ctrl+C, or Ctrl+D on an empty prompt. The tab closes with the CLI, and
   the lantern workspace closes with it when nothing else is in there.
+- Live models: Astra supports low, medium, high, xhigh, max, ultra. Bare
+  gpt-6 is ambiguous. Never silently pick GPT-5.5. Fast is off unless requested
+  and the live catalog publishes one Fast tier ID. Cursor Fable 5.1 IDs come
+  from agent --list-models. No Cursor Astra ID was listed on 2026-09-05.
+  Claude fable aliases and claude-fable-5-1 must pass claude --help. That help
+  still names claude-fable-5 here; never claim its full 5.1 ID is verified.
+
+$herd_workflows
 EOF
 )
 full_prompt=$prompt$appendix

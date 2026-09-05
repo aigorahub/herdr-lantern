@@ -28,7 +28,8 @@ HELPER_CWD="~"
 # setting. Kind is the herdr --kind (claude, cursor, grok, codex, …).
 # Model is a spoken phrase or catalog id; empty uses that kind’s live
 # default. Set these from the lantern chat ("make X my default spawn")
-# or with `bin/onboard apply`.
+# or with `bin/onboard apply`. Codex example: model "astra high".
+# Claude example: "fable high". Full Fable 5.1 IDs require live CLI help.
 HELPER_SPAWN_KIND="claude"
 HELPER_SPAWN_MODEL=""
 HELPER_SPAWN_EFFORT=""

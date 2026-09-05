@@ -694,6 +694,19 @@ helper_pane_holds_text() {
     printf '%s\n' "$2" | grep -qF -- "$_helper_probe"
 }
 
+helper_prompt_seat_is_ready() {
+    # Older Herdr hook seats omit interactive_ready. Settled state still
+    # permits a prompt; an explicit false value does not.
+    printf '%s\n' "$1" | grep -qE '"agent_status"[[:space:]]*:[[:space:]]*"(idle|done)"' || return 1
+    printf '%s\n' "$1" | grep -qE '"interactive_ready"[[:space:]]*:[[:space:]]*false' && return 1
+    return 0
+}
+
+helper_pane_has_login_picker() {
+    printf '%s\n' "$1" | tr '\n\r' '  ' | grep -qiE \
+        'sign in|log in|login|choose.*account|select.*account|select.*login|authentication method'
+}
+
 helper_relay_agent_prompt() {
     # Submit through Herdr with --wait. The Enter fallback is for one failure
     # only: Cursor leaves the text in the follow-up field and the pane never
@@ -706,6 +719,11 @@ helper_relay_agent_prompt() {
     _helper_target=$3
     _helper_text=$4
     shift 4
+    _helper_got=$("$_helper_real" agent get "$_helper_target" 2>/dev/null) || return $?
+    helper_prompt_seat_is_ready "$_helper_got" || {
+        printf '%s\n' "lantern: $_helper_target is not ready; observe with agent get/read/wait" >&2
+        return 2
+    }
     _helper_extra=
     if ! helper_argv_has_flag --wait "$@"; then
         _helper_extra="--wait --timeout 120000"
@@ -722,6 +740,9 @@ helper_relay_agent_prompt() {
         _helper_before=
     helper_pane_holds_text "$_helper_text" "$_helper_before" ||
         return $_helper_status
+    helper_pane_has_login_picker "$_helper_before" && return "$_helper_status"
+    _helper_got=$("$_helper_real" agent get "$_helper_target" 2>/dev/null) || return $?
+    helper_prompt_seat_is_ready "$_helper_got" || return "$_helper_status"
     "$_helper_real" agent send-keys "$_helper_target" Enter || return $?
     "$_helper_real" agent wait "$_helper_target" --timeout 120000 || return $?
     # The wait proves nothing by itself: a pane that swallowed the Enter is
@@ -754,6 +775,7 @@ helper_codex_pane_is_later_prompt() {
 }
 
 helper_codex_pane_has_trust() {
+    helper_pane_has_login_picker "$1" && return 1
     helper_codex_pane_is_later_prompt "$1" && return 1
     _helper_flat=$(helper_codex_flat_pane "$1")
     case $_helper_flat in
@@ -765,6 +787,7 @@ helper_codex_pane_has_trust() {
 }
 
 helper_claude_pane_has_trust() {
+    helper_pane_has_login_picker "$1" && return 1
     # True when pane text ($1) is Claude's first-run folder trust screen:
     # Accessing workspace, Yes, I trust this folder, Enter to confirm.
     # Later permission prompts are not a match, and neither is the Codex
@@ -781,6 +804,7 @@ helper_claude_pane_has_trust() {
 }
 
 helper_codex_pane_has_yn() {
+    helper_pane_has_login_picker "$1" && return 1
     helper_codex_pane_is_later_prompt "$1" && return 1
     _helper_flat=$(helper_codex_flat_pane "$1")
     case $_helper_flat in
@@ -797,6 +821,7 @@ helper_codex_pane_has_yn() {
 }
 
 helper_codex_startup_key() {
+    helper_pane_has_login_picker "$1" && return 1
     # Prints Enter or y when pane text ($1) is a Codex first-run gate.
     # Trust wins when both are visible on the first key. Later permission
     # prompts are not a match.

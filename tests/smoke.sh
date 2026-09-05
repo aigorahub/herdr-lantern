@@ -658,10 +658,10 @@ model_dir=
 for route_file in prompt.md launch.sh; do
     grep -qiF 'open a review' "$root/$route_file" ||
         fail "$route_file does not name the Codex review route"
-    grep -qF '5.6 sol high fast' "$root/$route_file" ||
-        fail "$route_file does not name the split Sol default"
-    grep -qE 'service_tier=\\?"priority\\?"' "$root/$route_file" ||
-        fail "$route_file does not pass the Codex fast setting"
+    grep -qF 'model-route codex default' "$root/$route_file" ||
+        fail "$route_file does not use the live Codex default"
+    grep -qiF 'Fast is off' "$root/$route_file" ||
+        fail "$route_file does not keep Fast off by default"
     grep -qF 'review PR' "$root/$route_file" ||
         fail "$route_file does not name the pull request review route"
 done
@@ -1196,6 +1196,15 @@ fake_prompt=$(mktemp -d)
 cat >"$fake_prompt/herdr" <<'EOF'
 #!/bin/sh
 case "$1 $2" in
+"agent get")
+    [ "$3" != gone ] || exit 3
+    prompt_status=${FAKE_PROMPT_STATUS:-idle}
+    if [ -n "${FAKE_PROMPT_AFTER_STATUS:-}" ] && [ -s "$FAKE_PANE" ]; then
+        prompt_status=$FAKE_PROMPT_AFTER_STATUS
+    fi
+    printf '{"agent_status":"%s","interactive_ready":true}\n' "$prompt_status"
+    exit 0
+    ;;
 "agent prompt")
     if [ "$3" = gone ]; then
         printf 'no such agent: %s\n' "$3" >&2
@@ -1262,6 +1271,35 @@ fi
 printf '%s\n' "$out" | grep -q 'agent send-keys w1:p1 Enter' ||
     fail "the stall case should still press Enter"
 unset FAKE_PANE_DEAF
+for prompt_status in working blocked unknown; do
+    : >"$FAKE_PANE"
+    export FAKE_PROMPT_STATUS=$prompt_status
+    if out=$(sh "$root/bin/herdr" agent prompt w1:p1 "must not send" 2>"$err"); then
+        fail "prompt accepted $prompt_status seat"
+    fi
+    [ ! -s "$FAKE_PANE" ] || fail "prompt wrote to $prompt_status seat"
+    if printf '%s' "$out" | grep -q 'agent send-keys'; then
+        fail "prompt sent keys to $prompt_status seat"
+    fi
+done
+unset FAKE_PROMPT_STATUS
+: >"$FAKE_PANE"
+export FAKE_PROMPT_AFTER_STATUS=working
+if out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there" 2>"$err"); then
+    fail "a prompt timeout on a now working seat must not report completion"
+fi
+if printf '%s' "$out" | grep -q 'agent send-keys'; then
+    fail "a now working seat received Enter after the prompt timeout"
+fi
+unset FAKE_PROMPT_AFTER_STATUS
+for login_screen in 'Sign in to continue. Yes, continue' 'Select an account. Start a new chat? [y/n]' 'Choose login method. Yes, I trust this folder'; do
+    if helper_codex_startup_key "$login_screen" >/dev/null; then
+        fail "Codex login picker received a startup key"
+    fi
+    if helper_claude_pane_has_trust "$login_screen"; then
+        fail "Claude login picker received a trust key"
+    fi
+done
 unset FAKE_PANE
 unset HERDR_REAL
 rm -rf "$fake_prompt"
@@ -1658,6 +1696,17 @@ check_start_log "$codex_start_head
 <--base>
 <main>" \
     "a Codex review must get the unattended flag before the subcommand"
+rm -f "$FAKE_START_LOG"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 \
+    -- -m gpt-6-astra -c 'model_reasoning_effort="high"' resume exact-session-id) ||
+    fail "exact Codex cutoff resume"
+check_start_log "$codex_start_head
+<-m>
+<gpt-6-astra>
+<-c>
+<model_reasoning_effort=\"high\">
+<resume>
+<exact-session-id>" "exact resume must preserve model and session with unattended flag"
 unset FAKE_START_OK
 
 # The Codex dialog on a Claude seat is somebody else's gate.
@@ -2172,6 +2221,18 @@ argv_is() {
     esac
 }
 
+printf '%s\n' 'Saved custom prompt' >"$argv_dir/config/prompt.md"
+run_launch 'HELPER_AGENT="codex"' >/dev/null || fail "workflow injection launch"
+for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rules/lantern.md; do
+    for invoke in 'sweep <repos>' 'issue harvest <repos>' 'stage <run>' \
+        'landable loop <run>' 'parallel pack <runs and repos>' 'cutoff resume <run>' 'close bar'; do
+        grep -qF "$invoke" "$argv_dir/state/workdir/$rendered_file" ||
+            fail "$rendered_file lacks workflow $invoke with a custom prompt"
+    done
+    grep -qF 'Saved custom prompt' "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file lost the custom prompt"
+done
+
 argv_is "claude" 'HELPER_AGENT="claude"
 HELPER_MODEL="opus"
 HELPER_EFFORT="high"
@@ -2549,3 +2610,8 @@ done
 printf 'ok: field status names every open tab\n'
 
 printf 'ok\n'
+
+# Catalog regressions run on the same Python selected by the wrappers.
+model_test_python=$(helper_detect_python) || fail "model tests need Python 3"
+# shellcheck disable=SC2086
+$model_test_python "$root/tests/models.py" || fail "model regression tests"

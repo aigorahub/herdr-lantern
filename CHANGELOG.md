@@ -2,9 +2,32 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [Unreleased]
+## [0.10.0] - 2026-09-05
 
 ### Added
+
+- Seven herd invokes: sweep, issue harvest, stage, landable loop, parallel
+  pack, cutoff resume, and close bar. Each run has one Elves driver.
+  Lantern monitors through authorized merge and deployment checks.
+- Permission monitoring grants routine approvals within the named run scope.
+  It checks the blocked prompt and result. Login and broad bypass gates stay separate.
+- A shared herd contract loads at each launch, including with custom prompts.
+- Astra routes and all six efforts. Codex defaults to live Astra at medium
+  with Fast off. Bare gpt-6 requires a model choice.
+- Claude model phrase routing from live help. Fable 5.1 works when listed.
+  Cursor Fable 5.1 uses exact live IDs. No Cursor Astra ID is invented.
+
+### Fixed
+
+- Model parsing now keeps integer generations and distinguishes 5 from 5.1.
+  Codex preflight checks effort. Claude rejects unparseable usage results.
+- The prompt wrapper blocks working, blocked, and unknown seats. It checks
+  readiness again before a stalled prompt receives Enter.
+- Login pickers cannot match first run trust or new chat key handlers.
+- Review guidance separates model availability from socket, state, auth,
+  and sandbox access. Named harnesses stay bound to their review routes.
+
+### Included
 
 - `HELPER_AGENT="pi"` support: Pi joins empty-selection detection after the
   existing five, `HELPER_PROVIDER` maps to `--provider`, `HELPER_MODEL` to

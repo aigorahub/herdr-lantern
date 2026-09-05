@@ -9,7 +9,10 @@ import re
 import shutil
 import subprocess
 import sys
+
 from dataclasses import dataclass
+
+from model_catalog import listed_codex_models, model_words, parse_claude_capabilities
 
 
 class CheckError(RuntimeError):
@@ -72,7 +75,7 @@ def run(command: list[str]) -> str:
 
 
 def words(value: str) -> set[str]:
-    return set(re.findall(r"\d+(?:\.\d+)+|[a-z][a-z0-9]*", value.lower()))
+    return set(model_words(value))
 
 
 def cursor_models() -> list[str]:
@@ -97,16 +100,11 @@ def grok_models() -> list[str]:
     return models
 
 
-def codex_models() -> list[str]:
+def codex_models() -> list[dict[str, object]]:
     try:
-        catalog = json.loads(run(["codex", "debug", "models"]))
-        models = [
-            str(model["slug"])
-            for model in catalog["models"]
-            if model.get("visibility") == "list" and model.get("slug")
-        ]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
-        fail(f"availability check failed: Codex returned an unparseable catalog ({error})")
+        models = listed_codex_models(run(["codex", "debug", "models"]))
+    except ValueError as error:
+        fail(f"availability check failed: {error}")
     if not models:
         fail("availability check failed: Codex returned an empty catalog")
     return models
@@ -191,25 +189,10 @@ def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | No
 
 
 def claude_capabilities() -> tuple[set[str], set[str]]:
-    help_text = run(["claude", "--help"])
-    model_block = re.search(
-        r"^[ \t]*--model\s+<model>.*?(?=^[ \t]*--[a-zA-Z]|\Z)",
-        help_text,
-        re.MULTILINE | re.DOTALL,
-    )
-    effort_block = re.search(
-        r"^[ \t]*--effort\s+<level>.*?(?=^[ \t]*--[a-zA-Z]|\Z)",
-        help_text,
-        re.MULTILINE | re.DOTALL,
-    )
-    if model_block is None or effort_block is None:
-        fail("availability check failed: Claude help has no model or effort choices")
-    models = {value.lower() for value in re.findall(r"'([a-zA-Z0-9.-]+)'", model_block.group(0))}
-    effort_choices = re.search(r"\((low(?:\s*,\s*(?:medium|high|xhigh|max))+?)\)", effort_block.group(0))
-    efforts = set(re.findall(r"low|medium|high|xhigh|max", effort_choices.group(1))) if effort_choices else set()
-    if not models or not efforts:
-        fail("availability check failed: Claude returned unparseable model or effort choices")
-    return models, efforts
+    try:
+        return parse_claude_capabilities(run(["claude", "--help"]))
+    except ValueError as error:
+        fail(f"availability check failed: {error}")
 
 
 def claude_alias_available(
@@ -266,6 +249,8 @@ def check(kind: str, model: str, effort: str) -> int:
     if kind == "claude":
         models, efforts = claude_capabilities()
         _, buckets = parse_claude_usage()
+        if not buckets:
+            fail("availability check failed: Claude returned no usage buckets")
         if model.lower() not in models:
             return report_unavailable(
                 kind,
@@ -304,8 +289,12 @@ def check(kind: str, model: str, effort: str) -> int:
             return report_unavailable(kind, model, f"{model} is absent from grok models", substitute)
         return report_available(kind, model, effort)
     models = codex_models()
-    if model not in models:
+    entry = next((entry for entry in models if entry["slug"] == model), None)
+    if entry is None:
         return report_unavailable(kind, model, f"{model} is absent from codex debug models", None)
+    levels = {level.get("effort") for level in entry.get("supported_reasoning_levels", [])}
+    if effort and effort not in levels:
+        return report_unavailable(kind, model, f"{model} does not support effort {effort}", None)
     return report_available(kind, model, effort)
 
 
