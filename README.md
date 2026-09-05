@@ -223,6 +223,7 @@ Ask for a lead with helpers, or compare proposals from several models:
 Brainstorm ways to simplify onboarding. Have three models compare approaches.
 Investigate slow checkout. Give the driver database and frontend helpers.
 Ship saved carts in storefront. Use helpers where useful.
+Ship high ROI issue fixes in storefront, billing-api, and admin-console. Run two repos at once, with up to two helpers per driver.
 Have Claude and Codex propose solutions independently, then compare them.
 ```
 

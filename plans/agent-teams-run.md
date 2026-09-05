@@ -55,3 +55,6 @@ Live Herdr observation also passed. Reports arrive at safe checkpoints and do
 not wake model chats. Elves Windows execution requires WSL2.
 
 The implementation remains in PR 37, linked to Elves PR 275. Merge is not authorized.
+
+The rows above record the original unmerged handoff. The later release request
+authorizes a fresh review, fixes, merge, and GitHub releases for both PRs.

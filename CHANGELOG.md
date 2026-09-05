@@ -26,7 +26,8 @@ All notable changes to Lantern, by Elves are documented here.
 ### Changed
 
 - Updated the prompt, README, and both guides for teams, callback delivery,
-  scoped permissions, and final review outside the contributor group.
+  scoped permissions, and final review outside the contributor group. Added
+  a request example that limits active repos and helpers per driver.
 
 ## [0.11.0] - 2026-09-05
 
