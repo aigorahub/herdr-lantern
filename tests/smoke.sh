@@ -9,9 +9,11 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr bin/model-route bin/model-preflight bin/onboard hsh install.sh tests/smoke.sh; do
+for f in launch.sh open.sh evening.sh lib.sh bin/herdr bin/model-route bin/model-preflight bin/codex-headless bin/onboard hsh install.sh tests/day-boundary.sh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
+
+sh "$root/tests/day-boundary.sh" || fail "day-boundary workflow tests"
 
 # shellcheck disable=SC1091
 . "$root/lib.sh"
@@ -371,6 +373,42 @@ grep -qF '"Clean up" / "I' "$root/prompt.md" ||
     fail "prompt.md no longer refuses an unnamed clean up"
 grep -qF 'Never close Lantern home' "$root/prompt.md" ||
     fail "prompt.md must still protect the lantern home tab"
+# Disposable Codex work has a distinct route. The durable seat remains the
+# default, and cleanup cannot race ahead of saved work or its consumers.
+for policy_file in prompt.md launch.sh herd-workflows.md; do
+    grep -qF 'codex-headless' "$root/$policy_file" ||
+        fail "$policy_file does not carry the headless Codex route"
+    grep -qF 'codex exec --ephemeral' "$root/$policy_file" ||
+        fail "$policy_file does not require ephemeral Codex execution"
+    grep -qiF 'steering' "$root/$policy_file" ||
+        fail "$policy_file does not preserve interactive agents for steering"
+    grep -qiE 'committed|saved durably|saved at a durable' "$root/$policy_file" ||
+        fail "$policy_file cleanup does not require durable results"
+    grep -qiF 'depend' "$root/$policy_file" ||
+        fail "$policy_file cleanup does not check live dependencies"
+done
+for day_file in prompt.md launch.sh herd-workflows.md README.md; do
+    grep -qF 'hsh morning' "$root/$day_file" ||
+        fail "$day_file does not document morning startup"
+    grep -qF 'hsh evening' "$root/$day_file" ||
+        fail "$day_file does not document evening shutdown"
+    grep -qF '5.6 luna xhigh fast' "$root/$day_file" ||
+        fail "$day_file does not pin the Daily-Tasks Luna profile"
+done
+grep -qF 'evening-handoff.md' "$root/launch.sh" ||
+    fail "launch does not load the durable evening handoff"
+if grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$root/bin/codex_headless.py"; then
+    # One occurrence is the explicit forbidden-argv guard, never constructed
+    # argv. Pin the safe permissions directly as well.
+    grep -qF 'forbidden = {"resume", "fork", "--dangerously-bypass-approvals-and-sandbox"}' \
+        "$root/bin/codex_headless.py" || fail "headless Codex accepts dangerous bypass"
+fi
+grep -qF '["-s", "read-only"]' "$root/bin/codex_headless.py" ||
+    fail "headless research is not read-only"
+grep -qF '["--approve-for-me"]' "$root/bin/codex_headless.py" ||
+    fail "headless updates do not use reviewed workspace write"
+grep -qF 'Never close the Lantern home workspace' "$root/launch.sh" ||
+    fail "runtime cleanup rule does not protect the Lantern home workspace"
 # The walkthroughs describe the same posture to the user. Nothing kept
 # them honest before.
 for doc_file in README.md howto.html docs/index.html; do
@@ -2665,3 +2703,5 @@ printf 'ok\n'
 model_test_python=$(helper_detect_python) || fail "model tests need Python 3"
 # shellcheck disable=SC2086
 $model_test_python "$root/tests/models.py" || fail "model regression tests"
+$model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests"
+$model_test_python "$root/tests/session_cleanup.py" || fail "Lantern session cleanup tests"

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Short launcher: open the lantern.
+# Short launcher: open the lantern, or run its day-boundary workflows.
 #
 # Plain `herdr` on purpose. This used to prefer $HERDR_REAL so that
 # `plugin action invoke` would dodge the wrapper inside the lantern pane, but
@@ -9,4 +9,32 @@
 # pane this is the real herdr. Inside it, the wrapper blocks and says how to
 # rerun once the user has said yes.
 set -eu
-exec herdr plugin action invoke aigora.lantern.open
+
+case ${1:-} in
+'')
+    exec herdr plugin action invoke aigora.lantern.open
+    ;;
+evening | nightly)
+    [ $# -eq 1 ] || {
+        printf '%s\n' 'usage: hsh [morning|evening|nightly]' >&2
+        exit 2
+    }
+    exec herdr plugin action invoke aigora.lantern.evening
+    ;;
+morning)
+    [ $# -eq 1 ] || {
+        printf '%s\n' 'usage: hsh [morning|evening|nightly]' >&2
+        exit 2
+    }
+    herdr plugin action invoke aigora.lantern.open
+    # Outside Herdr, attach the UI after the fresh Lantern is seated. Closing
+    # that UI later leaves the persistent server and active agents alone.
+    if [ "${HERDR_ENV:-}" != 1 ]; then
+        exec herdr
+    fi
+    ;;
+*)
+    printf '%s\n' 'usage: hsh [morning|evening|nightly]' >&2
+    exit 2
+    ;;
+esac

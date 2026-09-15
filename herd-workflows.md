@@ -608,6 +608,60 @@ tabs to close. Recheck their evidence and identities before
 `herdr tab close <tab_id>`. A workspace close also requires all child tabs to
 be named and eligible. Never close Lantern home, its pane, or its workspace.
 
+### Temporary Codex jobs and completed-session cleanup
+
+An explicitly temporary, disposable, low-importance, one-shot, or
+Daily-Tasks-style Codex job may use the plugin's `bin/codex-headless` route.
+The work must fit one bounded turn and require no repeated steering, resume,
+team coordination, or durable live context. Unclear and durable work stays in
+a full interactive Herdr agent. Never infer ephemeral routing from size alone.
+
+Use `research` for read-only work and `update` for a bounded edit. The launcher
+resolves and preflights the live Codex model, runs `codex exec --ephemeral`,
+and saves only the final response beneath private Lantern state outside the
+product checkout. It accepts no resume, fork, arbitrary native flags, or
+dangerous approval bypass. It inherits existing Codex authentication without
+reading or copying it. Never include auth/config material in prompts, results,
+logs, task records, or repositories. A successful update still needs diff
+inspection and the repository's required tests. An ephemeral job cannot be
+resumed; work that needs steering moves to a fresh interactive agent with a
+durable handoff.
+
+For `clean completed sessions in <repo/workspace>`, inspect only the named
+scope and exclude verified Lantern home. A tab is eligible only when its agent
+is done or idle with no pending prompt, edit results are committed and the
+checkout is clean or non-edit findings are saved durably, all required task,
+repository, dependency, and integration checks pass, and no active task,
+child actor, handoff, monitor, or downstream job depends on that live session.
+Recheck identity and repository state immediately before closing the exact
+tab. Report failed gates and keep those tabs open. Close a named workspace only
+when all its child tabs pass. Worktree removal remains a separate named action.
+These cleanup rules never permit closing Lantern home. `close bar` retains its
+stricter merge, current-main, and deploy requirements.
+
+The sole home-exit exception is the external `hsh evening` / `hsh nightly`
+action. Lantern first performs the same dependency audit, preserves active and
+unresolved work, closes only completed explicitly temporary workspaces that
+pass every gate, and atomically writes the compact private evening handoff.
+The Codex Lantern records `CODEX_SESSION_ID` plus its exact pane/workspace IDs
+in a private receipt at light-up. The outer action verifies a new handoff ID,
+that receipt, and the exact foreground Codex PID before closing the home pane.
+Only after it proves the pane and PID exited does it invoke the supported
+`codex delete <UUID> --force` for the old chat and its associated child-agent
+records. It never deletes a running session or directly edits Codex history
+files. Missing identity, uncertain exit, unsupported CLI, or deletion failure
+leaves the saved session in place and produces a warning/nonzero result. A
+handoff failure leaves home open. It never stops the Herdr server or kills
+preserved work. `hsh morning` opens a fresh Lantern, loads the durable handoff,
+and reconciles it against the live field before acting.
+
+The Daily-Tasks profile is a fresh one-shot route per instruction:
+`bin/codex-headless research --profile daily-tasks --job <unique-slug>
+<instruction>`. It pins `C:\Claude\Daily-Tasks` as durable context and model
+phrase `5.6 luna xhigh fast`. It is always `codex exec --ephemeral`, never a
+normal Codex desktop/web session and never resumable. Research mode may read
+and report only; it must not edit files or send Slack.
+
 ### Review transport checks
 
 A listed model is not proof that a review can launch. Before a pack starts,

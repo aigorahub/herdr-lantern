@@ -9,6 +9,26 @@ All notable changes to Lantern, by Elves are documented here.
 - Published the interactive team guide on GitHub Pages. It includes a request
   builder, copyable examples, and instructions for model discussions, helpers,
   parallel repo work, monitoring, and merge stop points.
+- Added a bounded `codex-headless` route for explicitly temporary one-shot
+  updates and disposable research. It enforces `codex exec --ephemeral`, live
+  model preflight, safe read/write modes, private result capture outside the
+  product checkout, and no credential copying.
+- Added completed-session cleanup gates: durable committed/saved results,
+  passed task and dependency checks, no live dependents, an identity recheck,
+  and an unconditional exclusion for the Lantern home workspace.
+- Added `hsh evening`/`hsh nightly` and `hsh morning`, including a Windows
+  `hsh.cmd`. Evening verifies a compact private handoff before exiting Lantern
+  home and never stops the Herdr server; morning creates a fresh Lantern and
+  loads that handoff.
+- Codex Lantern light-up now records only its exact session, pane, and workspace
+  IDs in private plugin state. Evening proves the exact Codex PID has exited
+  before using supported `codex delete <UUID> --force`, removing the old chat
+  and child-agent records from normal history. Any identity/exit/delete failure
+  retains the saved session and is reported as incomplete cleanup.
+- Added a Daily-Tasks headless profile pinned to `C:\Claude\Daily-Tasks` and
+  model phrase `5.6 luna xhigh fast`. Each instruction is a fresh ephemeral
+  run, with read-only verification examples that explicitly prohibit edits and
+  Slack delivery.
 
 ## [0.12.0] - 2026-09-05
 
