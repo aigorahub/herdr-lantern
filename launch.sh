@@ -220,9 +220,11 @@ Runtime (injected by launch.sh; do not ignore):
   pane. For Codex: the directory trust dialog with Enter, or a new-chat
   \`[y/n]\` / \`yes (y)\` confirm with y. If both appear, it dismisses them
   in order. For Claude: the folder trust screen (Accessing workspace,
-  \`Yes, I trust this folder\`) with one Enter, and nothing else. It waits
-  until idle or done and \`interactive_ready\`. It does not send keys into
-  any other failure, another agent’s pane, or later permission prompts.
+  \`Yes, I trust this folder\`), confirmed with Enter, or Down then Enter
+  first when the card highlights \`No, exit\` by default, and nothing
+  else. It waits until idle or done and \`interactive_ready\`. It does not
+  send keys into any other failure, another agent’s pane, or later
+  permission prompts.
 - This chat runs $chat_identity. Name that in your light-up line — it is
   how the user tells which CLI and model is answering — and repeat it
   whenever they ask.

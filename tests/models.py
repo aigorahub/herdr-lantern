@@ -47,6 +47,19 @@ CLAUDE_HELP = """
 CLAUDE_CATALOG = (Path(__file__).parent / "fixtures/claude-models.json").read_text()
 
 
+def claude_catalog_with_badged_opus():
+    # Matches the live initialization catalog: Opus's value/resolvedModel now
+    # carry a terminal-style "[1m]" context badge and there is no bare
+    # "opus"/"claude-opus-5" row at all.
+    catalog = json.loads(CLAUDE_CATALOG)
+    for row in catalog["response"]["response"]["models"]:
+        if row["displayName"] == "Opus":
+            row["value"] = "opus[1m]"
+            row["resolvedModel"] = "claude-opus-5[1m]"
+            row["displayName"] = "Opus (1M context)"
+    return json.dumps(catalog)
+
+
 def claude_read(command, *, input_text=None):
     if command == ["claude", "--help"]:
         return CLAUDE_HELP.replace("claude-fable-5-1", "claude-fable-5")
@@ -241,6 +254,35 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
         with patch.object(route, "run_catalog", side_effect=claude_read):
             with self.assertRaises(route.RouteError):
                 route.claude_route("sonnet max")
+
+    def test_claude_catalog_normalizes_badged_opus_identity(self):
+        badged_catalog = claude_catalog_with_badged_opus()
+
+        def badged_read(command, *, input_text=None):
+            if command == ["claude", "--help"]:
+                return CLAUDE_HELP
+            return badged_catalog
+
+        with patch.object(route, "run_catalog", side_effect=badged_read):
+            # The catalog only lists "opus[1m]" / "claude-opus-5[1m]", but the
+            # bare phrase and exact bare model id must still resolve to it.
+            for phrase in ("opus high", "claude-opus-5 high"):
+                result = route.claude_route(phrase)
+                self.assertEqual(result["model"], "claude-opus-5[1m]")
+                self.assertEqual(result["argv"], ["--model", "claude-opus-5[1m]", "--effort", "high"])
+
+        def badged_run(command, *, input_text=None):
+            if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                return json.dumps({"result": "Current session: 0% used"})
+            return badged_read(command, input_text=input_text)
+
+        with patch.object(preflight, "run", side_effect=badged_run):
+            code, result = self.check("claude", "claude-opus-5", "high")
+            self.assertEqual(code, 0)
+            self.assertTrue(result["available"])
+            code, result = self.check("claude", "opus", "high")
+            self.assertEqual(code, 0)
+            self.assertTrue(result["available"])
 
 
     def check(self, kind, model, effort):

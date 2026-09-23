@@ -3,22 +3,6 @@
 import json
 import re
 
-# Headless catalog text can carry ANSI and other control bytes around an id.
-_TERMINAL_CONTROL = re.compile(
-    r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|[\x00-\x1f\x7f]"
-)
-# Claude marks 1M context with a trailing badge such as "[1m]". The badge is
-# part of the resolved id passed to --model. Lookup also accepts the bare name.
-_TERMINAL_BADGE = re.compile(r"\[[^\]]+\]\s*$")
-
-
-def strip_terminal_control(value: str) -> str:
-    return _TERMINAL_CONTROL.sub("", value)
-
-
-def canonical_model_identity(value: str) -> str:
-    return _TERMINAL_BADGE.sub("", strip_terminal_control(value))
-
 
 def listed_codex_models(text: str) -> list[dict[str, object]]:
     try:
@@ -47,6 +31,27 @@ def listed_codex_models(text: str) -> list[dict[str, object]]:
         return models
     except (ValueError, KeyError, TypeError) as error:
         raise ValueError(f"Codex returned an unparseable catalog ({error})") from error
+
+
+_TERMINAL_CONTROL = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"       # OSC ... BEL or ST
+    r"|\x1b[@-Z\\\]^_]"                          # two-byte Fe escapes
+    r"|\x1b\[[0-9:;<=>?]*[ -/]*[@-~]"           # CSI sequences (colors, bold, etc.)
+    r"|[\x00-\x08\x0b-\x1f\x7f]"                 # stray C0/DEL control bytes
+)
+_TERMINAL_BADGE = re.compile(r"(?:\[[0-9]+[a-zA-Z]+\])+$")
+
+
+def strip_terminal_control(value: str) -> str:
+    """Remove ANSI escape sequences and stray control bytes from a model identity."""
+    return _TERMINAL_CONTROL.sub("", value)
+
+
+def canonical_model_identity(value: str) -> str:
+    """Drop a trailing terminal-style badge (e.g. "[1m]" for 1M context) from a
+    model identity. The badge is display decoration, not part of the identity, so
+    lookups by the bare name must still find the model it decorates."""
+    return _TERMINAL_BADGE.sub("", strip_terminal_control(value))
 
 
 def model_words(value: str) -> list[str]:
@@ -110,8 +115,9 @@ def claude_model_catalog(run) -> dict[str, tuple[str, set[str]]]:
             if (not isinstance(value, str) or not value or not isinstance(model, str) or not model
                     or not isinstance(levels, list) or any(not isinstance(level, str) for level in levels)):
                 raise ValueError("invalid model identity or effort levels")
-            # Always pin the argv id to resolvedModel. A badged value such as
-            # opus[1m] is a picker label for that same resolved id.
+            # Pin every lookup to resolvedModel. A badged value such as
+            # opus[1m] is a picker label for that same resolved id. The bare
+            # name is registered too, and it does not replace an explicit row.
             entry = (model, set(levels))
             catalog[model] = entry
             catalog[value] = entry

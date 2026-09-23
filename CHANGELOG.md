@@ -2,6 +2,15 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.14.1] - 2026-09-23
+
+### Fixed
+
+- Claude folder trust no longer sends Enter while `No, exit` is selected.
+  The gate sends Down, then Enter only when the marker is on
+  `Yes, I trust this folder`. The older card, with trust already
+  selected, still gets one Enter.
+
 ## [0.14.0] - 2026-09-23
 
 ### Changed

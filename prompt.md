@@ -343,8 +343,9 @@ words name that task.
      same named pane. For Codex: the directory trust dialog with Enter, or
      a new-chat `[y/n]` / `yes (y)` confirm with y. If both appear, it
      dismisses them in order. For Claude: the folder trust screen
-     (Accessing workspace, `Yes, I trust this folder`, Enter to confirm)
-     with one Enter, and nothing else. It then waits until idle or done and
+     (Accessing workspace, `Yes, I trust this folder`). It sends Enter, or
+     Down then Enter when the card highlights `No, exit`. It sends nothing
+     else. It then waits until idle or done and
      `interactive_ready`. It does not send keys into any other failure,
      another agent's pane, or later permission prompts. Do not send y or
      Enter yourself for those startup gates.

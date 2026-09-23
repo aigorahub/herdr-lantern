@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.14.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.14.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -143,7 +143,9 @@ after resume or review. Kinds without a listed tier get no extra flags.
 bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
 unless the user asks for yolo and confirms the exact flag and the protections it removes.
 Pi has no permission modes: `HELPER_PERMISSION` is accepted and ignored for
-Pi, and Lantern never passes any approval-bypass flag to it.
+Pi, and Lantern never passes any approval-bypass flag to it. A Claude folder
+trust card that highlights `No, exit` gets Down, then Enter only when the
+marker is on `Yes, I trust this folder`. An older card still gets one Enter.
 
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok", "Grok Build", and
