@@ -67,13 +67,13 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab, working and blocked first, then done and idle. See "Field status: name every tab". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Open it. Ask only when more than one target matches. |
 | "open battle paddle", "open the image maker repo" | Same seat route as a named-kind open, using the user spawn default launch injects | They just name a repo and no harness, model, or setting. Do not ask. Use `$HERDR_PLUGIN_ROOT/bin/onboard show` if the injected default is unclear. |
-| "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, optional `herdr agent prompt`, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
+| "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, one `herdr agent prompt` that starts with the workspace brief, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
 | "make Cursor Grok 4.6 high fast my default spawn", "set my default spawn to Codex astra high", "keep the current default" | `$HERDR_PLUGIN_ROOT/bin/onboard apply` with the mapping: Cursor Grok 4.6 high fast → `--kind cursor --model "cursor grok 4.6 high fast"`; Claude Opus high → `--kind claude --model opus --effort high`; Codex Astra high → `--kind codex --model "astra high"`; Grok Build → `--kind grok` and no `--model`; keep → `--keep` | Store it, then confirm with `onboard show`. Later opens that omit kind and model use this default. |
 | "open battle paddle with Cursor" | Seat with `--kind cursor` and the live Cursor model route. | "Cursor" selects the Cursor CLI. |
 | "open battle paddle with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | Bare "Grok" means Grok through Cursor Ultra. |
 | "open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok` and the live Grok Build model route. | Only Grok Build and SuperGrok select the Grok CLI. |
 | "open battle paddle in Cursor with Grok" | Seat with `--kind cursor` and a live Cursor Grok model ID. | This is the explicit form of the bare Grok route. |
-| "another tab", "second chat in the same repo", "second tab same way" | `herdr tab create --workspace <workspace_id> --cwd <dir> --label <label> --no-focus`, then `agent start`, optional `agent prompt`, and `tab rename` | Reuse the workspace. "Same way" reuses the prior kind and verified model settings. It starts a new chat, not a resumed session. |
+| "another tab", "second chat in the same repo", "second tab same way" | `herdr tab create --workspace <workspace_id> --cwd <dir> --label <label> --no-focus`, then `agent start`, one `agent prompt` that starts with the workspace brief, and `tab rename` | Reuse the workspace. "Same way" reuses the prior kind and verified model settings. It starts a new chat, not a resumed session. |
 | "tell them X" | `herdr agent prompt <target> "X"` | Send it. Ask only when the target or the message to send is unclear. Name the exact target and text you sent, and read the pane after sending. |
 | "resume", "continue last" | Start the named kind with its verified resume argv from the session table below. | Ask only when more than one saved session, repo, or tab can match. Never guess which saved session. |
 | "review this", "open a review" | Use Codex `review`, with `--uncommitted`, `--base <branch>`, or `--commit <sha>` as the requested scope requires. | A review is read-only. Do not turn it into an interactive coding task. |
@@ -132,18 +132,19 @@ For a request such as "have Codex review battle-paddle #166":
    request against the base and return findings only. If no workspace exists,
    include `workspace create --no-focus` in the gated seat plan. If no
    matching agent exists, create a tab in that workspace and use one start
-   route below.
+   route below. The review string starts with the workspace brief, then
+   the review request. That is one argument. Do not send a second prompt.
 7. Codex uses `herdr agent start <slug> --kind codex --pane <pane_id> --
    <model args> --dangerously-bypass-approvals-and-sandbox review --base <base>
-   "Review PR #<number>: <title>. Return findings only. Do not edit."`.
+   "<workspace brief> Review PR #<number>: <title>. Return findings only. Do not edit."`.
 8. Cursor has no review subcommand on this machine. It has read-only plan
    mode. Use `herdr agent start <slug> --kind cursor --pane <pane_id> --
-   <model args> --auto-review --trust --mode plan "Review PR #<number>:
+   <model args> --auto-review --trust --mode plan "<workspace brief> Review PR #<number>:
    <title>. Inspect gh pr view and gh pr diff. Return findings only."`.
    A bare Grok review uses this route with the live Cursor Grok model.
 9. Grok Build has no review subcommand on this machine. It has the `-p`
    single-turn headless flag. Use `herdr agent start <slug> --kind grok
-   --pane <pane_id> -- <model args> --permission-mode auto -p "Review PR
+   --pane <pane_id> -- <model args> --permission-mode auto -p "<workspace brief> Review PR
    #<number>: <title>. Inspect gh pr view and gh pr diff. Return findings only.
    Do not edit."`.
 10. Run the gated workspace, worktree, tab, prompt, and agent commands.
@@ -434,12 +435,33 @@ words name that task.
      Enter yourself for those startup gates.
    - To seat: `herdr workspace create --cwd <dir> --label <label> --no-focus`
      (JSON: `.result.root_pane.pane_id`), then
-     `herdr agent start <slug> --kind <kind> --pane <pane_id>`, optionally
-     `herdr agent prompt <slug> "<task>"`. When they name a repo and no
-     harness, model, or setting, use the user spawn default launch
-     injects (kind, model phrase, effort). Do not ask which model or
-     kind. An explicit phrase always wins. Kinds include claude, devin,
-     codex, grok, gemini, cursor, opencode, and more.
+     `herdr agent start <slug> --kind <kind> --pane <pane_id>`, then one
+     `herdr agent prompt` that starts with the workspace brief. When they
+     name a repo and no harness, model, or setting, use the user spawn
+     default launch injects (kind, model phrase, effort). Do not ask which
+     model or kind. An explicit phrase always wins. Kinds include claude,
+     devin, codex, grok, gemini, cursor, opencode, and more.
+   - Workspace brief. After a fresh `agent start` is idle or done and
+     interactive ready, send one gated `herdr agent prompt`. The text
+     starts with the brief below, then the user task when there is one.
+     With no task, send the brief alone. Resume and continue do not send
+     it again. A one-shot review puts this same brief in front of the
+     review text inside that one start argument. Do not send a second
+     prompt. Brief text:
+
+     You are in a Herdr workspace. Load the herdr skill and use it for
+     Herdr commands. Run `test "${HERDR_ENV:-}" = 1` first. If that check
+     fails, say you are not inside Herdr and do not send Herdr commands.
+     The other agents in this workspace are your peers. List them with
+     `herdr agent list` and `herdr tab list --workspace "$HERDR_WORKSPACE_ID"`.
+     Speak to one only when it is idle or done: `herdr agent prompt <name> "<message>" --wait`.
+     Then read the reply with `herdr agent read <name> --source recent-unwrapped --lines 120`.
+     Leave a working agent alone. Do not answer another agent approval dialog.
+     Keep this tab as one pane. Do not run `herdr pane split` on this tab.
+     Put another shell or agent in a new tab in this same workspace:
+     `herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label <label> --no-focus`,
+     then use that tab root pane. This workspace rule overrides the herdr skill default
+     that splits the current tab into a sibling pane.
    - Seat agents in the smart-auto permission tier, except Codex, which is
      unattended. On `agent start`, pass the kind's own flags after `--`:
        claude default: `-- --model opus --effort high --permission-mode auto`
@@ -463,7 +485,7 @@ words name that task.
      state; it is gated like the rest. Then tell the
      user in one line what is running where: the slug, the kind, the
      live chosen model, effort, fast state, and the task it was given,
-     or that it sits at a shell with no task yet.
+     or that it has the workspace brief and no task yet.
    - Agent names must match `[a-z][a-z0-9_-]{0,31}`. "Image Maker" ->
      `image-maker`. Unnamed live agents use a pane id (`w1J:p2`).
    - Git worktrees: `herdr worktree create --cwd <repo> --branch <name>`.

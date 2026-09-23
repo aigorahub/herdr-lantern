@@ -112,8 +112,15 @@ Use these actual Herdr routes with `HERDR_HELPER_OK=1` for mutations:
   --path <worktree> --label <run> --no-focus`.
 - Start at a verified shell: `herdr agent start <slug> --kind <kind>
   --pane <pane_id> -- <verified model and permission args>`.
-- Send the bounded kickoff only to an idle or done, interactive ready seat:
-  `herdr agent prompt <target> "<kickoff>" --wait`.
+- Send one prompt to an idle or done, interactive ready fresh seat:
+  `herdr agent prompt <target> "<workspace brief, then kickoff>" --wait`.
+  The prompt starts with the workspace brief from the launch runtime
+  section. That brief says: Load the herdr skill. List peers with
+  `herdr agent list` and `herdr tab list --workspace "$HERDR_WORKSPACE_ID"`.
+  Prompt one only when it is idle or done. Add work with
+  `herdr tab create` in that workspace. Do not run `herdr pane split`
+  on the seated tab. With no task, send the brief alone. Resume and
+  continue do not send it again.
 - Label the seat: `herdr tab rename <tab_id> "<run> · <kind>"`.
 
 Read IDs from command results. Do not guess them. Do not prompt a working

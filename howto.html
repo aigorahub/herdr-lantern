@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.12.0</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.13.0</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -251,7 +251,7 @@
       </tbody>
     </table>
     <p class="note">The spawn default is separate from the lantern chat CLI: <code>HELPER_SPAWN_KIND</code>, <code>HELPER_SPAWN_MODEL</code>, and <code>HELPER_SPAWN_EFFORT</code> are what Lantern opens when someone just names a repo.</p>
-    <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Pi has no permission modes: <code>HELPER_PERMISSION</code> is accepted and ignored for Pi, and Lantern never passes any approval-bypass flag to it. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task.</p>
+    <p class="note">Claude, Grok, and Cursor seats start in the smart-auto permission tier. Codex seats pass <code>--dangerously-bypass-approvals-and-sandbox</code> so they do not stop for command or sandbox confirms. The herdr wrapper puts that flag immediately after <code>--</code>, including when the seat omitted it or placed it after resume or review. bypassPermissions, <code>--yolo</code>, <code>--force</code>, and <code>--always-approve</code> stay off unless a user asks for yolo and confirms the exact flag and lost protections. Pi has no permission modes: <code>HELPER_PERMISSION</code> is accepted and ignored for Pi, and Lantern never passes any approval-bypass flag to it. Before seating, Lantern checks the live model catalog and availability. After a seat, it renames the tab to <code>&lt;slug&gt; · &lt;kind&gt;</code> and reports the kind, model, effort, Fast state, and task. Every fresh seat also gets one opening prompt: load the herdr skill, prompt the other agents in that workspace, and add work in a new tab instead of splitting the tab.</p>
 
     <h2>Edit your config</h2>
     <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
@@ -380,7 +380,7 @@ HELPER_EXTRA_ARGS=""</pre>
       </li>
       <li>
         “Open the image maker repo with claude.”
-        <span>Reuse the workspace and agent if they are already there. Agent slugs: <code>image-maker</code>, not “Image Maker”.</span>
+        <span>Reuse the workspace and agent if they are already there. Agent slugs: <code>image-maker</code>, not “Image Maker”. A fresh seat gets one opening prompt: load the herdr skill, prompt peers in that workspace, and use a new tab instead of a split.</span>
       </li>
       <li>
         “There is a PR on battle-paddle. Get a Codex review.”

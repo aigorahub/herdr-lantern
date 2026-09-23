@@ -2647,6 +2647,29 @@ for seat_file in prompt.md launch.sh; do
 done
 grep -qF 'tab rename' "$root/prompt.md" ||
     fail "prompt.md should rename a seated agent's tab"
+# A fresh seat must hear how to use Herdr with the other agents in its
+# workspace. The herdr skill defaults to splitting the current tab, so both
+# instruction copies have to carry the override or a seated agent will split.
+for brief_file in prompt.md launch.sh herd-workflows.md; do
+    grep -qF 'Load the herdr skill' "$root/$brief_file" ||
+        fail "$brief_file does not tell a fresh seat to load the herdr skill"
+    grep -qF 'herdr pane split' "$root/$brief_file" ||
+        fail "$brief_file does not forbid splitting the seated tab"
+    grep -qF 'herdr tab create' "$root/$brief_file" ||
+        fail "$brief_file does not tell a seated agent to use a new tab"
+    grep -qF 'HERDR_WORKSPACE_ID' "$root/$brief_file" ||
+        fail "$brief_file does not name the workspace for peer commands"
+done
+for brief_file in prompt.md launch.sh; do
+    grep -qF 'Workspace brief' "$root/$brief_file" ||
+        fail "$brief_file has no workspace brief"
+    grep -qF 'overrides the herdr skill default' "$root/$brief_file" ||
+        fail "$brief_file does not override the herdr skill pane split"
+    grep -qF 'Resume and continue do not send' "$root/$brief_file" ||
+        fail "$brief_file resends the workspace brief on resume"
+    grep -qF 'has the workspace brief and no task yet' "$root/$brief_file" ||
+        fail "$brief_file still announces a seat with no brief"
+done
 printf 'ok: the chat and its seats say what they run\n'
 
 # Field status is the whole field. Light-up and "what's going on" used to

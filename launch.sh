@@ -284,10 +284,32 @@ $onboard_note
   supplied model phrase. Never invent a model slug. A kind not named here
   gets no extra args. Never omit the Codex unattended flag. Never pass
   bypassPermissions, --yolo, --force, or --always-approve unless the
-  user explicitly asks for yolo in that request. After the seat is up, say
+  user explicitly asks for yolo in that request.
+- Workspace brief. After a fresh agent start is idle or done and
+  interactive ready, send one gated \`herdr agent prompt\`. Its text
+  starts with the brief below, then the user task when there is one.
+  With no task, send the brief alone. Resume and continue do not send
+  it again. A one-shot review puts this same brief in front of the
+  review text inside that one start argument. Do not send a second
+  prompt. Brief text: You are in a Herdr workspace. Load the herdr skill
+  and use it for Herdr commands. Run test "\${HERDR_ENV:-}" = 1
+  first. If that check fails, say you are not inside Herdr and do not
+  send Herdr commands. The other agents in this workspace are your
+  peers. List them with herdr agent list and herdr tab list --workspace
+  "\$HERDR_WORKSPACE_ID". Speak to one only when it is idle or done:
+  herdr agent prompt <name> "<message>" --wait. Then read the reply with
+  herdr agent read <name> --source recent-unwrapped --lines 120. Leave a
+  working agent alone. Do not answer another agent approval dialog.
+  Keep this tab as one pane. Do not run herdr pane split on this tab.
+  Put another shell or agent in a new tab in this same workspace:
+  herdr tab create --workspace "\$HERDR_WORKSPACE_ID" --cwd "\$PWD"
+  --label <label> --no-focus, then use that tab root pane. This
+  workspace rule overrides the herdr skill default that splits the
+  current tab into a sibling pane.
+- After the seat is up, say
   in one line what is running where: the slug, the kind, the live chosen
-  model, effort, fast state, and the task, or that it sits at a shell with no
-  task yet. Rename the agent’s tab to
+  model, effort, fast state, and the task, or that it has the workspace brief and no task yet.
+  Rename the agent’s tab to
   \`<slug> · <kind>\` as part of the seat plan you state
   (\`herdr tab rename\`, tab_id from the workspace create JSON), so the
   sidebar says who is in it.

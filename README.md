@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.12.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.13.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -168,7 +168,13 @@ for a public repo.
 After a seat the lantern renames the agent's tab to
 `<slug> · <kind>` and says in one line what is running where: the slug, the
 kind, the live model, effort, fast state, and the task the agent was given, or
-that it has none yet.
+that it has the workspace brief and no task yet.
+
+Every fresh seat gets one opening prompt. The prompt tells the agent to load
+the herdr skill, how to prompt the other agents in that workspace, and to put
+more work in a new tab instead of splitting its own tab. The herdr skill
+defaults to a sibling pane. This prompt overrides that default. A resume does
+not send the prompt again.
 
 ## Temporary Codex jobs and cleanup
 

@@ -2,10 +2,15 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [Unreleased]
+## [0.13.0] - 2026-09-22
 
 ### Added
 
+- Fresh seats get one opening prompt. It tells the agent to load the herdr
+  skill, how to prompt the other agents in that workspace, and to add work
+  in a new tab instead of splitting its tab. That prompt overrides the herdr
+  skill default of a sibling pane. A resume does not send it again. One-shot
+  review text starts with the same brief.
 - Published the interactive team guide on GitHub Pages. It includes a request
   builder, copyable examples, and instructions for model discussions, helpers,
   parallel repo work, monitoring, and merge stop points.
