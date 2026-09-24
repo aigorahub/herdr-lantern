@@ -126,7 +126,8 @@ def cursor_substitute(model: str, models: list[str]) -> dict[str, object] | None
     tokens = words(model)
     choice = None
     if "grok" in tokens:
-        choice = cursor_choice(models, {"cursor", "grok", "high", "fast"}, model)
+        choice = cursor_choice(models, {"grok", "4.7", "high", "fast"}, model)
+        choice = choice or cursor_choice(models, {"grok", "4.6", "high", "fast"}, model)
         choice = choice or cursor_choice(models, {"gpt", "5.6", "sol", "high", "fast"})
     elif "sol" in tokens:
         choice = cursor_choice(models, {"gpt", "5.6", "terra", "high", "fast"})
@@ -225,11 +226,13 @@ def claude_substitute(
     if not claude_global_exhausted(buckets) and "fable" in model.lower() and claude_alias_available(
         "opus", "xhigh", models, buckets
     ):
-        return {"kind": "claude", "model": "opus", "effort": "xhigh", "fast": False, "argv": ["--model", "opus", "--effort", "xhigh"]}
+        opus_id = models["opus"][0]
+        return {"kind": "claude", "model": "opus", "effort": "xhigh", "fast": False, "argv": ["--model", opus_id, "--effort", "xhigh"]}
     if not claude_global_exhausted(buckets) and "opus" in model.lower() and claude_alias_available(
         "sonnet", "high", models, buckets
     ):
-        return {"kind": "claude", "model": "sonnet", "effort": "high", "fast": False, "argv": ["--model", "sonnet", "--effort", "high"]}
+        sonnet_id = models["sonnet"][0]
+        return {"kind": "claude", "model": "sonnet", "effort": "high", "fast": False, "argv": ["--model", sonnet_id, "--effort", "high"]}
     return cursor_sol_substitute()
 
 
@@ -244,7 +247,55 @@ def report_unavailable(kind: str, model: str, reason: str, substitute: dict[str,
     return 3
 
 
+def fugu_models() -> dict[str, set[str]]:
+    path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "fugu.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            catalog = json.load(handle)
+        rows = catalog["models"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        fail(f"availability check failed: Fugu catalog unavailable ({error})")
+    if not isinstance(rows, list):
+        fail("availability check failed: Fugu catalog models is not a list")
+    models: dict[str, set[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or row.get("visibility") != "list":
+            continue
+        slug = row.get("slug")
+        levels = row.get("supported_reasoning_levels", [])
+        if not isinstance(slug, str) or not slug or not isinstance(levels, list):
+            fail("availability check failed: Fugu catalog has an invalid model")
+        models[slug] = {str(level.get("effort")) for level in levels if isinstance(level, dict)}
+    if not models:
+        fail("availability check failed: Fugu catalog is empty")
+    return models
+
+
 def check(kind: str, model: str, effort: str) -> int:
+    if kind == "fugu":
+        models = fugu_models()
+        if model not in models:
+            substitute = None
+            for slug in ("fugu",):
+                if slug in models:
+                    chosen = "high" if "high" in models[slug] else sorted(models[slug])[0]
+                    substitute = {
+                        "kind": "fugu",
+                        "model": slug,
+                        "effort": chosen,
+                        "fast": False,
+                        "argv": ["-p", "fugu", "-m", slug, "-c", f'model_reasoning_effort="{chosen}"'],
+                    }
+                    break
+            return report_unavailable(kind, model, f"{model} is absent from the installed Fugu catalog", substitute)
+        if effort and effort not in models[model]:
+            return report_unavailable(
+                kind,
+                model,
+                f"{model} does not support effort {effort}",
+                None,
+            )
+        return report_available(kind, model, effort)
     if kind == "claude":
         models = claude_capabilities()
         _, buckets = parse_claude_usage()
@@ -281,10 +332,22 @@ def check(kind: str, model: str, effort: str) -> int:
     if kind == "grok":
         models = grok_models()
         if model not in models:
-            choice = cursor_choice(models, {"grok", "4.5"})
+            ranked = (
+                ({"grok", "4.7", "build", "fast"}, "medium"),
+                ({"grok", "4.7"}, "high"),
+                ({"grok", "4.6"}, "high"),
+                ({"grok", "4.5"}, "high"),
+            )
+            choice = None
+            effort = "high"
+            for required, ranked_effort in ranked:
+                choice = cursor_choice(models, required, model)
+                if choice:
+                    effort = ranked_effort
+                    break
             substitute = None
             if choice:
-                substitute = {"kind": "grok", "model": choice, "effort": "high", "fast": False, "argv": ["-m", choice, "--reasoning-effort", "high"]}
+                substitute = {"kind": "grok", "model": choice, "effort": effort, "fast": "fast" in words(choice), "argv": ["-m", choice, "--reasoning-effort", effort]}
             return report_unavailable(kind, model, f"{model} is absent from grok models", substitute)
         return report_available(kind, model, effort)
     models = codex_models()
@@ -298,8 +361,8 @@ def check(kind: str, model: str, effort: str) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) not in {3, 4} or sys.argv[1] not in {"claude", "cursor", "grok", "codex"}:
-        print("usage: model-preflight <claude|cursor|grok|codex> <model> [effort]", file=sys.stderr)
+    if len(sys.argv) not in {3, 4} or sys.argv[1] not in {"claude", "cursor", "grok", "codex", "fugu"}:
+        print("usage: model-preflight <claude|cursor|grok|codex|fugu> <model> [effort]", file=sys.stderr)
         return 2
     try:
         return check(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else "")

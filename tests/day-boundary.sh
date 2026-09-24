@@ -25,7 +25,11 @@ case "${1:-} ${2:-}" in
     printf '%s\n' '{"result":{"pane":{"label":"Lantern","pane_id":"w9:p9","workspace_id":"w9"}}}'
     ;;
 "pane process-info")
-    printf '%s\n' '{"result":{"process_info":{"pane_id":"w9:p9","foreground_processes":[{"name":"codex.exe","argv0":"C:\\\\Codex\\\\codex.exe","pid":2147483646}]}}}'
+    if [ "${FAKE_HELPER_KIND:-codex}" = claude ]; then
+        printf '%s\n' '{"result":{"process_info":{"pane_id":"w9:p9","foreground_processes":[{"name":"claude.exe","pid":2147483646}]}}}'
+    else
+        printf '%s\n' '{"result":{"process_info":{"pane_id":"w9:p9","foreground_processes":[{"name":"codex.exe","argv0":"C:\\\\Codex\\\\codex.exe","pid":2147483646}]}}}'
+    fi
     ;;
 "agent prompt")
     if [ "${FAKE_SKIP_HANDOFF:-}" != 1 ]; then
@@ -125,6 +129,36 @@ fi
 [ -e "$closed" ] || fail "deletion failure happened before exact pane close"
 grep -qF 'saved session retained' "$tmp/delete-fail.err" ||
     fail "deletion failure did not plainly report retained history"
+
+# Other supported Lantern helpers have no Codex receipt or history to delete.
+state_claude=$tmp/state-claude
+mkdir -p "$state_claude"
+printf '%s\n' w9 >"$state_claude/workspace.id"
+printf '%s\n' w9:p9 >"$state_claude/pane.id"
+before_delete=$(wc -l <"$codex_log")
+rm -f "$closed"
+FAKE_HELPER_KIND=claude FAKE_HERDR_LOG=$log FAKE_PANE_CLOSED=$closed \
+    HERDR_PLUGIN_ROOT=$root HERDR_PLUGIN_STATE_DIR=$state_claude \
+    HERDR_BIN_PATH=$fake sh "$root/evening.sh" >"$tmp/claude.out" ||
+    fail "non-Codex evening cleanup"
+[ "$(wc -l <"$codex_log")" -eq "$before_delete" ] ||
+    fail "non-Codex evening tried to delete a Codex session"
+grep -qF 'no Codex history cleanup was needed' "$tmp/claude.out" ||
+    fail "non-Codex evening did not report its cleanup result"
+
+# A Codex pane with no captured receipt still reports incomplete cleanup.
+state_missing=$tmp/state-missing-receipt
+mkdir -p "$state_missing"
+printf '%s\n' w9 >"$state_missing/workspace.id"
+printf '%s\n' w9:p9 >"$state_missing/pane.id"
+rm -f "$closed"
+if FAKE_HERDR_LOG=$log FAKE_PANE_CLOSED=$closed HERDR_PLUGIN_ROOT=$root \
+    HERDR_PLUGIN_STATE_DIR=$state_missing HERDR_BIN_PATH=$fake \
+    sh "$root/evening.sh" >"$tmp/missing.out" 2>"$tmp/missing.err"; then
+    fail "Codex evening succeeded without its exact session receipt"
+fi
+grep -qF 'private Codex session identity could not be proved' "$tmp/missing.err" ||
+    fail "missing Codex receipt did not report retained history"
 
 # hsh and hsh.cmd expose the same simple verbs. HERDR_ENV avoids attaching a
 # nested TUI in this shell-only route test.

@@ -3,6 +3,8 @@
 import importlib.util
 import io
 import json
+import os
+import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 import sys
@@ -47,6 +49,19 @@ CLAUDE_HELP = """
 CLAUDE_CATALOG = (Path(__file__).parent / "fixtures/claude-models.json").read_text()
 
 
+def claude_catalog_with_badged_opus():
+    # Matches the live initialization catalog: Opus's value/resolvedModel now
+    # carry a terminal-style "[1m]" context badge and there is no bare
+    # "opus"/"claude-opus-5" row at all.
+    catalog = json.loads(CLAUDE_CATALOG)
+    for row in catalog["response"]["response"]["models"]:
+        if row["displayName"] == "Opus":
+            row["value"] = "opus[1m]"
+            row["resolvedModel"] = "claude-opus-5[1m]"
+            row["displayName"] = "Opus (1M context)"
+    return json.dumps(catalog)
+
+
 def claude_read(command, *, input_text=None):
     if command == ["claude", "--help"]:
         return CLAUDE_HELP.replace("claude-fable-5-1", "claude-fable-5")
@@ -80,6 +95,105 @@ class Models(unittest.TestCase):
             for phrase in ("astra minimal", "astra none", "astra low high"):
                 with self.assertRaises(route.RouteError):
                     route.codex_route(phrase)
+
+    def test_gpt6_sol_and_luna_need_a_generation(self):
+        catalog = json.dumps({"models": [
+            {"slug": "gpt-6-sol", "display_name": "GPT-6-Sol", "visibility": "list",
+             "default_reasoning_level": "medium",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "medium"}]},
+            {"slug": "gpt-6-luna", "display_name": "GPT-6-Luna", "visibility": "list",
+             "default_reasoning_level": "medium",
+             "supported_reasoning_levels": [{"effort": "medium"}, {"effort": "high"}, {"effort": "max"}]},
+            {"slug": "gpt-5.6-sol", "display_name": "GPT-5.6-Sol", "visibility": "list",
+             "default_reasoning_level": "low",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "low"}]},
+            {"slug": "gpt-5.6-luna", "display_name": "GPT-5.6-Luna", "visibility": "list",
+             "default_reasoning_level": "medium",
+             "supported_reasoning_levels": [{"effort": "high"}]},
+        ]})
+        with patch.object(route, "run_catalog", return_value=catalog):
+            self.assertEqual(route.codex_route("gpt-6 sol high")["model"], "gpt-6-sol")
+            self.assertEqual(route.codex_route("6 sol")["effort"], "medium")
+            self.assertEqual(route.codex_route("gpt-6 luna")["model"], "gpt-6-luna")
+            with self.assertRaisesRegex(route.RouteError, "ultra"):
+                route.codex_route("gpt-6 luna ultra")
+            for phrase in ("sol", "sol high", "luna"):
+                with self.assertRaisesRegex(route.RouteError, "ambiguous"):
+                    route.codex_route(phrase)
+
+    def test_cursor_current_openai_and_grok_ids(self):
+        catalog = """Available models
+grok-4.7-high-fast - Grok 4.7 High Fast
+cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+gpt-5.3-codex-high-fast - Codex 5.3 High Fast
+claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
+"""
+        with patch.object(route, "run_catalog", return_value=catalog):
+            self.assertEqual(route.cursor_route("grok 4.7 high fast")["model"], "grok-4.7-high-fast")
+            self.assertEqual(route.cursor_route("codex 5.3 high fast")["model"], "gpt-5.3-codex-high-fast")
+            self.assertEqual(route.cursor_route("opus 5.5 high fast")["model"], "claude-opus-5-5-high-fast")
+            with self.assertRaises(route.RouteError):
+                route.cursor_route("cursor grok 4.7 high fast")
+
+    def test_grok_default_prefers_47_over_build_fast(self):
+        catalog = """Available models:
+  - grok-4.7
+  * grok-4.7-build-fast (default)
+  - grok-4.6
+"""
+        with patch.object(route, "run_catalog", return_value=catalog):
+            result = route.grok_route("default")
+            self.assertEqual(result["argv"], ["-m", "grok-4.7-build-fast", "--reasoning-effort", "medium"])
+            self.assertEqual(route.grok_route("grok 4.7 build fast")["model"], "grok-4.7-build-fast")
+
+    def test_badged_opus_pins_resolved_model(self):
+        catalog = json.dumps({"type": "control_response", "response": {
+            "subtype": "success", "request_id": "lantern-model-catalog", "response": {"models": [
+                {"value": "opus[1m]", "resolvedModel": "claude-opus-5-5[1m]",
+                 "displayName": "Opus (1M context)",
+                 "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
+                {"value": "claude-fable-5-1[1m]", "resolvedModel": "claude-fable-5-1",
+                 "displayName": "Fable",
+                 "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
+            ]}}})
+
+        def read(command, *, input_text=None):
+            if command == ["claude", "--help"]:
+                return CLAUDE_HELP
+            return catalog
+
+        with patch.object(route, "run_catalog", side_effect=read):
+            result = route.claude_route("opus high")
+            self.assertEqual(result["argv"], ["--model", "claude-opus-5-5[1m]", "--effort", "high"])
+            self.assertEqual(route.claude_route("fable high")["model"], "claude-fable-5-1")
+
+    def test_fugu_routes_current_catalog(self):
+        catalog = json.dumps({"models": [
+            {"slug": "fugu-max", "display_name": "Fugu Max", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+            {"slug": "fugu-ultra-v2.0", "display_name": "Fugu Ultra v2.0", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+            {"slug": "fugu-ultra", "display_name": "Fugu Ultra", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+            {"slug": "fugu", "display_name": "Fugu", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+            {"slug": "fugu-ultra-v1.1", "display_name": "Fugu Ultra v1.1", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"}]},
+        ]})
+        with tempfile.TemporaryDirectory() as home:
+            path = os.path.join(home, "fugu.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(catalog)
+            with patch.dict(os.environ, {"CODEX_HOME": home}):
+                default = route.fugu_route("default")
+                self.assertEqual(default["model"], "fugu")
+                self.assertEqual(default["effort"], "high")
+                self.assertEqual(route.fugu_route("fugu")["model"], "fugu")
+                self.assertEqual(route.fugu_route("fugu ultra")["model"], "fugu-ultra-v2.0")
+                self.assertEqual(route.fugu_route("fugu max")["model"], "fugu-max")
+                self.assertEqual(route.fugu_route("ultra max")["model"], "fugu-ultra-v1.1")
+                self.assertEqual(route.fugu_route("fugu ultra max")["model"], "fugu-ultra-v1.1")
+                self.assertEqual(route.fugu_route("fugu-ultra-v1.1 max")["effort"], "max")
 
     def test_bare_generation_requires_choice(self):
         with patch.object(route, "run_catalog", return_value=codex_catalog()):
@@ -170,6 +284,35 @@ class Models(unittest.TestCase):
         with patch.object(route, "run_catalog", side_effect=claude_read):
             with self.assertRaises(route.RouteError):
                 route.claude_route("sonnet max")
+
+    def test_claude_catalog_normalizes_badged_opus_identity(self):
+        badged_catalog = claude_catalog_with_badged_opus()
+
+        def badged_read(command, *, input_text=None):
+            if command == ["claude", "--help"]:
+                return CLAUDE_HELP
+            return badged_catalog
+
+        with patch.object(route, "run_catalog", side_effect=badged_read):
+            # The catalog only lists "opus[1m]" / "claude-opus-5[1m]", but the
+            # bare phrase and exact bare model id must still resolve to it.
+            for phrase in ("opus high", "claude-opus-5 high"):
+                result = route.claude_route(phrase)
+                self.assertEqual(result["model"], "claude-opus-5[1m]")
+                self.assertEqual(result["argv"], ["--model", "claude-opus-5[1m]", "--effort", "high"])
+
+        def badged_run(command, *, input_text=None):
+            if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                return json.dumps({"result": "Current session: 0% used"})
+            return badged_read(command, input_text=input_text)
+
+        with patch.object(preflight, "run", side_effect=badged_run):
+            code, result = self.check("claude", "claude-opus-5", "high")
+            self.assertEqual(code, 0)
+            self.assertTrue(result["available"])
+            code, result = self.check("claude", "opus", "high")
+            self.assertEqual(code, 0)
+            self.assertTrue(result["available"])
 
 
     def check(self, kind, model, effort):

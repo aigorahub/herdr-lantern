@@ -15,6 +15,7 @@ plugin_root=$(helper_posix_path "$plugin_root")
 
 state_dir=${HERDR_PLUGIN_STATE_DIR:-}
 [ -n "$state_dir" ] || die "HERDR_PLUGIN_STATE_DIR is not set; invoke this as a plugin action"
+state_dir=$(helper_posix_path "$state_dir")
 herdr=${HERDR_BIN_PATH:-herdr}
 workspace_file=$state_dir/workspace.id
 pane_file=$state_dir/pane.id
@@ -82,15 +83,20 @@ codex_pid=
 if [ -z "$helper_python" ]; then
     cleanup_ready=0
     cleanup_reason="no Python 3 interpreter; saved Codex session retained"
-elif ! session_id=$($helper_python "$session_helper" show \
-    --path "$session_receipt" --pane "$pane" --workspace "$workspace"); then
-    cleanup_ready=0
-    cleanup_reason="private Codex session identity could not be proved; saved session retained"
 else
     process_json=$("$herdr" pane process-info --pane "$pane" 2>/dev/null) || process_json=
-    if [ -z "$process_json" ] ||
-        ! codex_pid=$(printf '%s\n' "$process_json" | $helper_python \
-            "$session_helper" pid-from-json --pane "$pane"); then
+    if [ -z "$process_json" ] || ! helper_kind=$(printf '%s\n' "$process_json" | \
+        $helper_python "$session_helper" kind-from-json --pane "$pane"); then
+        cleanup_ready=0
+        cleanup_reason="exact Lantern helper process could not be proved; saved session retained if Codex"
+    elif [ "$helper_kind" = other ]; then
+        cleanup_ready=skip
+    elif ! session_id=$($helper_python "$session_helper" show \
+        --path "$session_receipt" --pane "$pane" --workspace "$workspace"); then
+        cleanup_ready=0
+        cleanup_reason="private Codex session identity could not be proved; saved session retained"
+    elif ! codex_pid=$(printf '%s\n' "$process_json" | $helper_python \
+        "$session_helper" pid-from-json --pane "$pane"); then
         cleanup_ready=0
         cleanup_reason="exact Lantern Codex process could not be proved; saved session retained"
     fi
@@ -133,6 +139,11 @@ if [ "$cleanup_ready" = 1 ]; then
 fi
 
 if [ "$cleanup_ready" != 1 ]; then
+    if [ "$cleanup_ready" = skip ]; then
+        printf 'Lantern home exited; no Codex history cleanup was needed.\n'
+        printf 'Close the Herdr window normally; do not stop the server.\n'
+        exit 0
+    fi
     printf 'WARNING: %s\n' "$cleanup_reason" >&2
     printf 'Lantern home exited, but Codex history cleanup was not completed.\n' >&2
     exit 1

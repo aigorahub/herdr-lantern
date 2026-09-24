@@ -69,6 +69,16 @@ class LanternSessionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "12345")
 
+    def test_kind_parser_distinguishes_codex_and_other_helpers(self):
+        for name, expected in (("codex.exe", "codex"), ("claude.exe", "other")):
+            with self.subTest(name=name):
+                payload = json.dumps({"result": {"process_info": {
+                    "pane_id": "w1:p1", "foreground_processes": [{"name": name, "pid": 12345}]
+                }}})
+                result = self.run_script("kind-from-json", "--pane", "w1:p1", stdin=payload)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
     def test_delete_refuses_current_running_process(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "session.json"

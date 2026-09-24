@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.13.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.15.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -80,7 +80,7 @@ Leave `HELPER_AGENT` empty to use the first of `agent`, `devin`, `claude`, `code
 
 | Helper you want | Install that CLI | `helper.conf` |
 | --- | --- | --- |
-| Cursor Ultra | Cursor CLI on `PATH` as `agent` (also `cursor-agent`) | `HELPER_AGENT="agent"` · `HELPER_MODEL="cursor-grok-4.6-high-fast"` (empty also defaults to that) · `HELPER_PERMISSION="smart"` (`--auto-review`) |
+| Cursor Ultra | Cursor CLI on `PATH` as `agent` (also `cursor-agent`) | `HELPER_AGENT="agent"` · `HELPER_MODEL="grok-4.7-high-fast"` (empty also defaults to that) · `HELPER_PERMISSION="smart"` (`--auto-review`) |
 | Devin | [Devin CLI](https://docs.devin.ai) — typically `~/.local/bin/devin` | `HELPER_AGENT="devin"` · leave `HELPER_MODEL` empty (Free rejects `--model`; Devin uses `~/.config/devin/config.json`) · `HELPER_PERMISSION="smart"` |
 | Claude Code | [Claude Code](https://code.claude.com/docs) on `PATH` as `claude` | `HELPER_AGENT="claude"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`--effort`) |
 | Codex | [Codex CLI](https://github.com/openai/codex) on `PATH` as `codex` | `HELPER_AGENT="codex"` · optional `HELPER_MODEL` · optional `HELPER_EFFORT` (`model_reasoning_effort`) |
@@ -95,7 +95,7 @@ $EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"
 
 ```sh
 HELPER_AGENT="agent"         # agent, devin, claude, codex, grok, pi; empty = first on PATH
-HELPER_MODEL="cursor-grok-4.6-high-fast"  # optional --model; leave empty for Devin
+HELPER_MODEL="grok-4.7-high-fast"  # optional --model; leave empty for Devin
 HELPER_PROVIDER=""           # pi only: --provider; unused by other helpers
 HELPER_EFFORT=""             # unused for Devin and Cursor agent; pi -> --thinking <value>
 HELPER_CWD="~"               # search root mentioned to the helper
@@ -143,12 +143,18 @@ after resume or review. Kinds without a listed tier get no extra flags.
 bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
 unless the user asks for yolo and confirms the exact flag and the protections it removes.
 Pi has no permission modes: `HELPER_PERMISSION` is accepted and ignored for
-Pi, and Lantern never passes any approval-bypass flag to it.
+Pi, and Lantern never passes any approval-bypass flag to it. A Claude folder
+trust card that highlights `No, exit` gets Down, then Enter only when the
+marker is on `Yes, I trust this folder`. An older card still gets one Enter.
 
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
-cursor` with the live Cursor Sol default. Bare "Grok" uses `--kind cursor`
-with a live Cursor Grok model. "Grok Build" and "SuperGrok" use `--kind
-grok`. Lantern checks the selected model with `bin/model-preflight` before it
+cursor` with the live Cursor Sol default. Bare "Grok", "Grok Build", and
+"SuperGrok" use `--kind grok`. The Grok default is `grok-4.7-build-fast` at
+medium effort. "In Cursor with Grok" uses `--kind cursor`. "Fugu" uses
+`--kind codex` with the `codex-fugu` profile (`-p fugu`) and a model from
+the installed `fugu.json`. The default is regular `fugu` at high effort.
+Fugu Max, Ultra, and effort max are selected only when the user names them.
+Lantern checks the selected model with `bin/model-preflight` before it
 seats anything. It stops on a failed check or a model it knows
 will not work, and names one live substitute. A usage line with no reset
 time is still valid. Missing quota info on a harness that has no usage
@@ -202,7 +208,7 @@ interactive agent—an ephemeral job cannot be resumed.
 For Daily-Tasks, use the pinned profile:
 
 ```powershell
-bin\codex-headless.cmd research --profile daily-tasks --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send Slack."
+bin\codex-headless.cmd research --profile daily-tasks --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send external messages."
 ```
 
 It always reads durable context from `C:\Claude\Daily-Tasks` and resolves the

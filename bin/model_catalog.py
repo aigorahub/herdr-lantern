@@ -33,6 +33,27 @@ def listed_codex_models(text: str) -> list[dict[str, object]]:
         raise ValueError(f"Codex returned an unparseable catalog ({error})") from error
 
 
+_TERMINAL_CONTROL = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"       # OSC ... BEL or ST
+    r"|\x1b[@-Z\\\]^_]"                          # two-byte Fe escapes
+    r"|\x1b\[[0-9:;<=>?]*[ -/]*[@-~]"           # CSI sequences (colors, bold, etc.)
+    r"|[\x00-\x08\x0b-\x1f\x7f]"                 # stray C0/DEL control bytes
+)
+_TERMINAL_BADGE = re.compile(r"(?:\[[0-9]+[a-zA-Z]+\])+$")
+
+
+def strip_terminal_control(value: str) -> str:
+    """Remove ANSI escape sequences and stray control bytes from a model identity."""
+    return _TERMINAL_CONTROL.sub("", value)
+
+
+def canonical_model_identity(value: str) -> str:
+    """Drop a trailing terminal-style badge (e.g. "[1m]" for 1M context) from a
+    model identity. The badge is display decoration, not part of the identity, so
+    lookups by the bare name must still find the model it decorates."""
+    return _TERMINAL_BADGE.sub("", strip_terminal_control(value))
+
+
 def model_words(value: str) -> list[str]:
     # Keep integer generations. Normalize dotted and hyphenated versions alike.
     value = re.sub(r"(?<=\d)-(?=\d)", ".", value.lower())
@@ -86,15 +107,28 @@ def claude_model_catalog(run) -> dict[str, tuple[str, set[str]]]:
         catalog = {}
         for row in rows:
             value, model = row["value"], row["resolvedModel"]
+            if isinstance(value, str):
+                value = strip_terminal_control(value)
+            if isinstance(model, str):
+                model = strip_terminal_control(model)
             levels = row.get("supportedEffortLevels", [])
             if (not isinstance(value, str) or not value or not isinstance(model, str) or not model
                     or not isinstance(levels, list) or any(not isinstance(level, str) for level in levels)):
                 raise ValueError("invalid model identity or effort levels")
-            catalog[model] = (model, set(levels))
-            catalog[value] = (value if "[" in value else model, set(levels))
-            alias = row.get("displayName", "").lower()
+            # Pin every lookup to resolvedModel. A badged value such as
+            # opus[1m] is a picker label for that same resolved id. The bare
+            # name is registered too, and it does not replace an explicit row.
+            entry = (model, set(levels))
+            catalog[model] = entry
+            catalog[value] = entry
+            for identity in (model, value):
+                canonical = canonical_model_identity(identity)
+                if canonical and canonical != identity:
+                    catalog.setdefault(canonical, entry)
+            display_name = row.get("displayName", "")
+            alias = strip_terminal_control(display_name).lower() if isinstance(display_name, str) else ""
             if alias in aliases:
-                catalog[alias] = (model, set(levels))
+                catalog[alias] = entry
         return catalog
     except (ValueError, KeyError, TypeError, AttributeError, StopIteration) as error:
         raise ValueError(f"Claude returned an unparseable initialization catalog ({error})") from error

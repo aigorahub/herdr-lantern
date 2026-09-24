@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -111,6 +112,33 @@ class CodexJobs(unittest.TestCase):
         command = self.run_one("update")
         self.assertIn("--approve-for-me", command)
         self.assertNotIn("danger-full-access", command)
+
+    def test_live_route_passes_current_fast_tier_to_headless_codex(self):
+        actual_route = jobs.load_module("headless_route_integration", "model-route.py")
+        catalog = json.dumps({"models": [{
+            "slug": "gpt-5.6-luna", "display_name": "GPT-5.6 Luna",
+            "visibility": "list", "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [{"effort": "xhigh"}, {"effort": "medium"}],
+            "service_tiers": [{"id": "live-fast", "name": "Fast"}],
+            "additional_speed_tiers": ["fast"],
+        }]})
+        runner = Runner()
+        with tempfile.TemporaryDirectory() as root, patch.object(
+            actual_route, "run_catalog", return_value=catalog
+        ):
+            cwd = Path(root) / "repo"
+            cwd.mkdir()
+            report = jobs.run_job(
+                mode="research", cwd=cwd, state_dir=Path(root) / "state",
+                job="daily-route", model_phrase="5.6 luna xhigh fast",
+                prompt="Read only.", route_module=actual_route,
+                checker_module=checker_module(), runner=runner,
+                resolver=lambda command: command,
+            )
+        command = runner.calls[0][0]
+        self.assertEqual(report["model"], "gpt-5.6-luna")
+        self.assertIn('model_reasoning_effort="xhigh"', command)
+        self.assertIn('service_tier="live-fast"', command)
 
     def test_result_must_be_outside_checkout_and_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as root:

@@ -2,18 +2,10 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [0.13.0] - 2026-09-22
+## Unreleased (local integration)
 
 ### Added
 
-- Fresh seats get one opening prompt. It tells the agent to load the herdr
-  skill, how to prompt the other agents in that workspace, and to add work
-  in a new tab instead of splitting its tab. That prompt overrides the herdr
-  skill default of a sibling pane. A resume does not send it again. One-shot
-  review text starts with the same brief.
-- Published the interactive team guide on GitHub Pages. It includes a request
-  builder, copyable examples, and instructions for model discussions, helpers,
-  parallel repo work, monitoring, and merge stop points.
 - Added a bounded `codex-headless` route for explicitly temporary one-shot
   updates and disposable research. It enforces `codex exec --ephemeral`, live
   model preflight, safe read/write modes, private result capture outside the
@@ -33,7 +25,53 @@ All notable changes to Lantern, by Elves are documented here.
 - Added a Daily-Tasks headless profile pinned to `C:\Claude\Daily-Tasks` and
   model phrase `5.6 luna xhigh fast`. Each instruction is a fresh ephemeral
   run, with read-only verification examples that explicitly prohibit edits and
-  Slack delivery.
+  outbound messages.
+
+## [0.15.0] - 2026-09-24
+
+### Added
+
+- Fugu seats use the Codex profile `codex-fugu` (`--kind codex` and `-p fugu`).
+  `model-route fugu` reads the installed `fugu.json`. The default is regular
+  `fugu` at high effort. Ultra prefers `fugu-ultra-v2.0`, then `fugu-ultra`,
+  then `fugu-ultra-v1.1`. Effort `max` stays on the first of those rows that
+  lists it. The Fugu Max model `fugu-max` is selected only when named.
+
+## [0.14.1] - 2026-09-23
+
+### Fixed
+
+- Claude folder trust no longer sends Enter while `No, exit` is selected.
+  The gate sends Down, then Enter only when the marker is on
+  `Yes, I trust this folder`. The older card, with trust already
+  selected, still gets one Enter.
+
+## [0.14.0] - 2026-09-23
+
+### Changed
+
+- Claude Opus routes pin the live resolved id. A catalog badge such as
+  `opus[1m]` still selects that id, currently `claude-opus-5-5[1m]`.
+- Bare Grok seats use Grok Build. The default is `grok-4.7-build-fast` at
+  medium effort, then `grok-4.7` at high effort, then `grok-4.6`, then
+  `grok-4.5`. "Cursor" or "in Cursor with Grok" still selects the Cursor
+  CLI. The Grok 4.6 Cursor id remains `cursor-grok-4.6-high-fast`.
+- Codex routes name `gpt-6-sol` and `gpt-6-luna`. Bare `sol`, bare `luna`,
+  and bare `gpt-6` stay ambiguous. Cursor routes name Codex 5.3 and Opus 5.5.
+- The README, both guides, and the team page show version 0.14.0.
+
+## [0.13.0] - 2026-09-22
+
+### Added
+
+- Fresh seats get one opening prompt. It tells the agent to load the herdr
+  skill, how to prompt the other agents in that workspace, and to add work
+  in a new tab instead of splitting its tab. That prompt overrides the herdr
+  skill default of a sibling pane. A resume does not send it again. One-shot
+  review text starts with the same brief.
+- Published the interactive team guide on GitHub Pages. It includes a request
+  builder, copyable examples, and instructions for model discussions, helpers,
+  parallel repo work, monitoring, and merge stop points.
 
 ## [0.12.0] - 2026-09-05
 

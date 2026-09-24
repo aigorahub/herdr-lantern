@@ -329,7 +329,7 @@ helper_cursor_default_model() {
     # The one model default the plugin owns: Cursor agent with an empty
     # HELPER_MODEL. launch.sh builds the argv from this and the chat
     # identity names it, so it lives here once.
-    printf 'cursor-grok-4.6-high-fast'
+    printf 'grok-4.7-high-fast'
 }
 
 helper_chat_identity() {
@@ -805,6 +805,42 @@ helper_claude_pane_has_trust() {
     return 1
 }
 
+helper_claude_trust_needs_down() {
+    # True when the Claude folder trust card (pane text $1) is the newer
+    # layout that highlights "No, exit" first instead of "Yes, I trust
+    # this folder". A bare Enter on that layout quits the seat rather
+    # than trusting it, so the gate must move the selection down to the
+    # trust option before confirming. Only ever called after
+    # helper_claude_pane_has_trust already matched this exact card.
+    case $(helper_codex_flat_pane "$1") in
+    *"No, exit"*) return 0 ;;
+    esac
+    return 1
+}
+
+helper_claude_trust_confirmed_on_yes() {
+    # True when the newer Claude trust card (pane text $1) currently
+    # marks "Yes, I trust this folder" as the selected option, so Enter
+    # is safe to send. False when the cursor is still on "No, exit", or
+    # the mark cannot be placed at all - a dropped or no-op Down, or
+    # anything ambiguous - so the caller must never send Enter into
+    # that default. A narrow pane can wrap the selected label across
+    # lines; helper_codex_flat_pane turns that wrap into extra
+    # whitespace, so the label match tolerates any run of whitespace
+    # between its words without loosening which option the marker must
+    # sit directly in front of. Only ever called after
+    # helper_claude_trust_needs_down matched the same card's pre-Down
+    # text.
+    _helper_flat=$(helper_codex_flat_pane "$1")
+    case $_helper_flat in
+    *'❯ No, exit'*) return 1 ;;
+    esac
+    printf '%s\n' "$_helper_flat" |
+        grep -qE '❯[[:space:]]*Yes,[[:space:]]+I[[:space:]]+trust[[:space:]]+this[[:space:]]+folder' &&
+        return 0
+    return 1
+}
+
 helper_codex_pane_has_yn() {
     helper_pane_has_login_picker "$1" && return 1
     helper_codex_pane_is_later_prompt "$1" && return 1
@@ -871,8 +907,13 @@ helper_codex_seat_ok() {
 
 helper_claude_startup_gate() {
     # Claude first-run folder trust. Only that screen, only the named
-    # start pane, and only one Enter. $1 real herdr, $2 name, $3 pane,
-    # $4 the start status to return when this is not that gate.
+    # start pane, and only the displayed default confirmation for "Yes,
+    # I trust this folder" - a Down first when the card highlights "No,
+    # exit" by default, so it lands on trust instead of quitting through
+    # it. The Down is verified to have actually moved the selection onto
+    # trust before Enter follows; a dropped or no-op Down never reaches
+    # Enter. $1 real herdr, $2 name, $3 pane, $4 the start status to
+    # return when this is not that gate.
     _helper_real=$1
     _helper_name=$2
     _helper_pane=$3
@@ -893,6 +934,31 @@ helper_claude_startup_gate() {
         "$_helper_real" agent wait "$_helper_name" --until idle --until done \
             --timeout 2000 >/dev/null 2>&1 || true
     done
+    if helper_claude_trust_needs_down "$_helper_before"; then
+        _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
+            return "$_helper_status"
+        helper_seat_ok "$_helper_got" "$_helper_pane" claude ||
+            return "$_helper_status"
+        "$_helper_real" agent send-keys "$_helper_name" Down || return $?
+        "$_helper_real" agent wait "$_helper_name" --until idle --until done \
+            --timeout 2000 >/dev/null 2>&1 || true
+        _helper_before=$("$_helper_real" agent read "$_helper_name" --lines 60 2>/dev/null) ||
+            _helper_before=
+        # The Down must still land on the same documented trust card. A
+        # pane that moved on to anything else is left alone rather than
+        # risk an Enter into a screen this gate never signed up to answer.
+        helper_claude_pane_has_trust "$_helper_before" || {
+            printf '%s\n' "lantern: Claude in $_helper_name left the folder trust gate before it was confirmed" >&2
+            return 1
+        }
+        # Still the same card is not enough: a dropped or no-op Down
+        # leaves the mark on "No, exit", and the Enter below must never
+        # be sent into that default. Confirm the mark actually moved.
+        helper_claude_trust_confirmed_on_yes "$_helper_before" || {
+            printf '%s\n' "lantern: Claude in $_helper_name did not move off the No, exit default after Down" >&2
+            return 1
+        }
+    fi
     _helper_got=$("$_helper_real" agent get "$_helper_name" 2>/dev/null) ||
         return "$_helper_status"
     helper_seat_ok "$_helper_got" "$_helper_pane" claude ||
@@ -916,7 +982,8 @@ helper_relay_agent_start() {
     # first-run gate kills the seat. For Codex, trust and a new-chat
     # confirm can appear in sequence, and a [y/n] prompt may still need
     # Enter after y. For Claude, the only gate handled is the folder
-    # trust screen, and the only key is one Enter. This stays on that
+    # trust screen. A card that highlights No, exit gets Down, then Enter
+    # only after the marker is on Yes. An older card gets one Enter. This stays on that
     # same named pane and sends only those keys. Any other failure,
     # another kind, or another agent's pane is left alone.
     _helper_real=$1
@@ -1096,22 +1163,42 @@ helper_relay_agent_start() {
 helper_json_value() {
     # Print the first string value for a JSON key read from stdin.
     # Splits on JSON punctuation first so the match cannot run past the
-    # field it belongs to. Only for flat string fields.
+    # field it belongs to. Only for flat string fields. Shell extraction keeps
+    # four-byte UTF-8 labels intact in Git Bash's Windows locale.
     _helper_json_key=$1
+    _helper_json_prefix="\"$_helper_json_key\":\""
     tr '{},' '\n\n\n' |
-        sed -n "s/.*\"$_helper_json_key\":\"\([^\"]*\)\".*/\1/p" |
-        sed -n '1p'
+        while IFS= read -r _helper_json_part; do
+            case $_helper_json_part in
+            *"$_helper_json_prefix"*)
+                _helper_json_result=${_helper_json_part#*"$_helper_json_prefix"}
+                printf '%s\n' "${_helper_json_result%%'"'*}"
+                break
+                ;;
+            esac
+        done
 }
 
 helper_workspace_id_by_label() {
     # $1 real herdr, $2 label. Prints the first workspace id with that label.
     # Objects in `workspace list` are flat, so one '{' fragment is one
-    # workspace and key order does not matter.
+    # workspace and key order does not matter. Compare the label in the shell:
+    # Git Bash grep can recode a Unicode argv pattern on Windows.
     "$1" workspace list 2>/dev/null |
         tr '{' '\n' |
-        grep -F "\"label\":\"$2\"," |
-        sed -n 's/.*"workspace_id":"\([^"]*\)".*/\1/p' |
-        sed -n '1p'
+        while IFS= read -r _helper_ws_part; do
+            case $_helper_ws_part in
+            *"\"label\":\"$2\""*)
+                case $_helper_ws_part in
+                *'"workspace_id":"'*)
+                    _helper_ws_id=${_helper_ws_part#*'"workspace_id":"'}
+                    printf '%s\n' "${_helper_ws_id%%'"'*}"
+                    ;;
+                esac
+                break
+                ;;
+            esac
+        done
 }
 
 helper_workspace_label() {

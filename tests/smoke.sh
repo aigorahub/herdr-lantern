@@ -465,7 +465,10 @@ cat <<'MODELS'
 Available models
 auto - Auto (default)
 gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+grok-4.7-high-fast - Grok 4.7 High Fast
 cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+gpt-5.3-codex-high-fast - Codex 5.3 High Fast
+claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
 claude-opus-5-high-fast - Claude Opus 5 1M Fast
 claude-opus-5-high - Claude Opus 5 1M
 MODELS
@@ -474,9 +477,11 @@ cat >"$model_dir/grok" <<'EOF'
 #!/bin/sh
 [ "$1" = "models" ] || exit 2
 cat <<'MODELS'
-Default model: grok-4.6
+Default model: grok-4.7-build-fast
 Available models:
-  * grok-4.6 (default)
+  - grok-4.7
+  * grok-4.7-build-fast (default)
+  - grok-4.6
   - grok-4.5
 MODELS
 EOF
@@ -526,16 +531,21 @@ if not "%1"=="--list-models" exit /b 2
 echo Available models
 echo auto - Auto (default)
 echo gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+echo grok-4.7-high-fast - Grok 4.7 High Fast
 echo cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
+echo gpt-5.3-codex-high-fast - Codex 5.3 High Fast
+echo claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
 echo claude-opus-5-high-fast - Claude Opus 5 1M Fast
 echo claude-opus-5-high - Claude Opus 5 1M
 EOF
 cat >"$model_dir/grok.cmd" <<'EOF'
 @echo off
 if not "%1"=="models" exit /b 2
-echo Default model: grok-4.6
+echo Default model: grok-4.7-build-fast
 echo Available models:
-echo   * grok-4.6 (default)
+echo   - grok-4.7
+echo   * grok-4.7-build-fast (default)
+echo   - grok-4.6
 echo   - grok-4.5
 EOF
 cat >"$model_dir/claude.cmd" <<'EOF'
@@ -596,14 +606,49 @@ grok_route=$(run_model_route cursor \
     "cursor grok 4.6 high fast") || fail "Cursor Grok spoken model route"
 printf '%s\n' "$grok_route" | grep -qF '"argv":["--model","cursor-grok-4.6-high-fast"]' ||
     fail "Cursor Grok route did not use the listed model ID"
+grok47_route=$(run_model_route cursor \
+    "grok 4.7 high fast") || fail "Cursor Grok 4.7 spoken model route"
+printf '%s\n' "$grok47_route" | grep -qF '"argv":["--model","grok-4.7-high-fast"]' ||
+    fail "Cursor Grok 4.7 route did not use the listed model ID"
+if run_model_route cursor "cursor grok 4.7 high fast" >/dev/null 2>&1; then
+    fail "Cursor route invented a cursor-grok-4.7 id"
+fi
+codex53_route=$(run_model_route cursor \
+    "codex 5.3 high fast") || fail "Cursor Codex 5.3 spoken model route"
+printf '%s\n' "$codex53_route" | grep -qF '"argv":["--model","gpt-5.3-codex-high-fast"]' ||
+    fail "Cursor Codex 5.3 route did not use the listed model ID"
+opus55_route=$(run_model_route cursor \
+    "opus 5.5 high fast") || fail "Cursor Opus 5.5 spoken model route"
+printf '%s\n' "$opus55_route" | grep -qF '"argv":["--model","claude-opus-5-5-high-fast"]' ||
+    fail "Cursor Opus 5.5 route did not use the listed model ID"
 opus_route=$(run_model_route cursor \
     "opus 5 high fast") || fail "Cursor Opus spoken model route"
 printf '%s\n' "$opus_route" | grep -qF '"argv":["--model","claude-opus-5-high-fast"]' ||
     fail "Cursor Opus route did not use the listed model ID"
 grok_default=$(run_model_route grok \
     default) || fail "Grok live default route"
-printf '%s\n' "$grok_default" | grep -qF '"argv":["-m","grok-4.6","--reasoning-effort","high"]' ||
-    fail "Grok default did not use live Grok 4.6 at high effort"
+printf '%s\n' "$grok_default" | grep -qF '"argv":["-m","grok-4.7-build-fast","--reasoning-effort","medium"]' ||
+    fail "Grok default did not use live grok-4.7-build-fast at medium effort"
+fugu_home=$(mktemp -d)
+cat >"$fugu_home/fugu.json" <<'EOF'
+{"models":[
+  {"slug":"fugu-max","display_name":"Fugu Max","visibility":"list","supported_reasoning_levels":[{"effort":"high"},{"effort":"xhigh"}]},
+  {"slug":"fugu-ultra-v2.0","display_name":"Fugu Ultra v2.0","visibility":"list","supported_reasoning_levels":[{"effort":"high"},{"effort":"xhigh"}]},
+  {"slug":"fugu","display_name":"Fugu","visibility":"list","supported_reasoning_levels":[{"effort":"high"},{"effort":"xhigh"}]}
+]}
+EOF
+CODEX_HOME=$fugu_home
+export CODEX_HOME
+fugu_default=$(run_model_route fugu default) ||
+    fail "Fugu default route"
+printf '%s\n' "$fugu_default" | grep -qF '"model":"fugu"' ||
+    fail "Fugu default did not use regular fugu"
+fugu_ultra=$(run_model_route fugu "fugu ultra") ||
+    fail "Fugu Ultra route"
+printf '%s\n' "$fugu_ultra" | grep -qF '"model":"fugu-ultra-v2.0"' ||
+    fail "Fugu Ultra route did not use the v2 slug"
+unset CODEX_HOME
+rm -rf "$fugu_home"
 if fable_check=$(run_model_preflight claude fable high); then
     fail "Claude preflight accepted an exhausted Fable bucket"
 else
@@ -676,16 +721,16 @@ fi
 [ "$preflight_status" -eq 3 ] || fail "Cursor catalog miss should return unavailable"
 printf '%s\n' "$cursor_miss" | grep -qF '"available":false' ||
     fail "Cursor catalog miss did not fail closed"
-printf '%s\n' "$cursor_miss" | grep -qF '"substitute":{"kind":"cursor","model":"cursor-grok-4.6-high-fast"' ||
+printf '%s\n' "$cursor_miss" | grep -qF '"substitute":{"kind":"cursor","model":"grok-4.7-high-fast"' ||
     fail "Cursor Grok miss did not propose the next live Cursor Grok model"
-if grok_miss=$(run_model_preflight grok grok-4.7 high); then
+if grok_miss=$(run_model_preflight grok grok-4.8 high); then
     fail "Grok preflight accepted a missing catalog model"
 else
     preflight_status=$?
 fi
 [ "$preflight_status" -eq 3 ] || fail "Grok catalog miss should return unavailable"
-printf '%s\n' "$grok_miss" | grep -qF '"substitute":{"kind":"grok","model":"grok-4.5","effort":"high"' ||
-    fail "Grok Build miss did not propose live Grok 4.5 high"
+printf '%s\n' "$grok_miss" | grep -qF '"substitute":{"kind":"grok","model":"grok-4.7-build-fast","effort":"medium"' ||
+    fail "Grok Build miss did not propose live grok-4.7-build-fast"
 if run_model_route codex \
     "5.6 terra high fast" >/dev/null 2>&1; then
     fail "model route accepted fast for a model without fast service"
@@ -723,14 +768,16 @@ for review_kind in Cursor Grok; do
 done
 grep -qF '"Cursor" means `--kind cursor`' "$root/prompt.md" ||
     fail "prompt.md does not route Cursor to the Cursor kind"
-grep -qF '"open battle paddle with Grok" | Seat with `--kind cursor`' "$root/prompt.md" ||
-    fail "prompt.md does not route bare Grok through Cursor"
+grep -qF '"open battle paddle with Grok" | Seat with `--kind grok`' "$root/prompt.md" ||
+    fail "prompt.md does not route bare Grok through Grok Build"
 grep -qF '"open battle paddle with Grok Build", "open with SuperGrok" | Seat with `--kind grok`' "$root/prompt.md" ||
     fail "prompt.md does not route Grok Build to the Grok CLI"
 grep -qF '"open battle paddle in Cursor with Grok"' "$root/prompt.md" ||
     fail "prompt.md does not name the explicit Cursor Grok route"
-grep -qF '"Grok review on XYZ", "have Cursor Grok review that PR" | Use the named pull request route with Cursor plan mode' "$root/prompt.md" ||
-    fail "prompt.md does not route bare Grok review through Cursor"
+grep -qF '"Grok review on XYZ", "have Grok review that PR" | Use the named pull request route with Grok Build single-turn mode' "$root/prompt.md" ||
+    fail "prompt.md does not route bare Grok review through Grok Build"
+grep -qF '"Cursor Grok review on XYZ", "have Cursor Grok review that PR"' "$root/prompt.md" ||
+    fail "prompt.md does not keep Cursor Grok review on the Cursor CLI"
 grep -qF '"Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode' "$root/prompt.md" ||
     fail "prompt.md does not route Grok Build review through the Grok CLI"
 for preflight_file in prompt.md launch.sh README.md; do
@@ -739,8 +786,8 @@ for preflight_file in prompt.md launch.sh README.md; do
     grep -qF 'usage line with no reset' "$root/$preflight_file" ||
         fail "$preflight_file still requires a reset time on Claude usage"
 done
-grep -qF '"Grok" also' "$root/launch.sh" ||
-    fail "launch.sh does not route bare Grok through Cursor"
+grep -qF 'Grok" means \`--kind grok\`' "$root/launch.sh" ||
+    fail "launch.sh does not route bare Grok through Grok Build"
 grep -qF '"Grok Build" and' "$root/launch.sh" ||
     fail "launch.sh does not route Grok Build to the Grok CLI"
 grep -qF 'Never merge' "$root/prompt.md" ||
@@ -845,7 +892,8 @@ missing=$(printf '%s' '{"result":{}}' | helper_json_value pane_id)
 # The chat is found by pane title, so open.sh and the manifest must agree.
 grep -q 'pane_title=Lantern' "$root/open.sh" || fail "open.sh pane title"
 grep -q '^title = "Lantern"$' "$root/herdr-plugin.toml" || fail "manifest pane title"
-grep -q "workspace_label='🔥 lantern'" "$root/open.sh" || fail "open.sh lantern label"
+label_bytes=$(sed -n 's/^workspace_label=//p' "$root/open.sh" | od -An -tx1 | tr -d ' \n')
+[ "$label_bytes" = 27f09f94a5206c616e7465726e270a ] || fail "open.sh lantern label"
 
 fake_ws=$(mktemp -d)
 cat >"$fake_ws/herdr" <<'EOF'
@@ -958,7 +1006,12 @@ run_open() {
         HERDR_PLUGIN_ROOT="$root" \
         sh "$root/open.sh" >/dev/null 2>&1
 }
-logged() { grep -qF -e "$1" "$STUB_LOG"; }
+logged() {
+    while IFS= read -r logged_line; do
+        case $logged_line in *"$1"*) return 0 ;; esac
+    done <"$STUB_LOG"
+    return 1
+}
 
 # First open: create the lantern workspace, seat the chat, drop the shell.
 reset_open
@@ -1449,6 +1502,92 @@ fi
 if helper_claude_pane_has_trust 'claude is starting...'; then
     fail "unrelated pane text must not look like the Claude gate"
 fi
+
+# Newer Claude builds default the trust card's highlight to "No, exit"
+# instead of "Yes, I trust this folder". A bare Enter would pick that
+# default and quit rather than trust, so the gate must recognize this
+# shape needs a Down before Enter - and must not say so for the older
+# layout where trust is already the default.
+helper_claude_trust_needs_down "$(printf '%s\n' \
+    'Accessing workspace:' \
+    '/tmp/demo' \
+    'Quick safety check: is this a project you trust?' \
+    '❯ No, exit' \
+    '  Yes, I trust this folder' \
+    'Enter to confirm · Esc to cancel')" ||
+    fail "the No, exit default should need a Down before Enter"
+if helper_claude_trust_needs_down "$(printf '%s\n' \
+    'Accessing workspace' \
+    '/tmp/demo' \
+    '› 1. Yes, I trust this folder' \
+    '  2. No, choose another folder' \
+    'Enter to confirm')"; then
+    fail "the older Yes-first layout should not need a Down"
+fi
+if helper_claude_trust_needs_down 'Start a new chat? [y/n]'; then
+    fail "an unrelated pane must not need a Down"
+fi
+
+# Codex P2: after sending Down, the gate must verify the selection
+# actually moved onto "Yes, I trust this folder", not just that the same
+# trust-card text is still on screen. A dropped or no-op Down leaves the
+# mark on "No, exit" and must never read as confirmed.
+helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
+    'Accessing workspace:' \
+    '/tmp/demo' \
+    'Quick safety check: is this a project you trust?' \
+    '  No, exit' \
+    '❯ Yes, I trust this folder' \
+    'Enter to confirm · Esc to cancel')" ||
+    fail "a mark on Yes, I trust this folder should read as confirmed"
+if helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
+    'Accessing workspace:' \
+    '/tmp/demo' \
+    'Quick safety check: is this a project you trust?' \
+    '❯ No, exit' \
+    '  Yes, I trust this folder' \
+    'Enter to confirm · Esc to cancel')"; then
+    fail "a mark still on No, exit must not read as confirmed"
+fi
+if helper_claude_trust_confirmed_on_yes 'Start a new chat? [y/n]'; then
+    fail "an unrelated pane must not read as confirmed"
+fi
+
+# Codex P2: a narrow pane wraps the selected label across lines (for
+# example after "I"). helper_codex_flat_pane turns that wrap into extra
+# whitespace, so the match must tolerate any run of whitespace between
+# the label's words without loosening which option the marker sits in
+# front of.
+helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
+    'Accessing workspace:' \
+    '/tmp/demo' \
+    'Quick safety check: is this a project you trust?' \
+    '  No, exit' \
+    '❯ Yes, I' \
+    '  trust this folder' \
+    'Enter to confirm · Esc to cancel')" ||
+    fail "a wrapped Yes selection should still read as confirmed"
+helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
+    'Accessing workspace:' \
+    '/tmp/demo' \
+    'Quick safety check: is this a project you trust?' \
+    '  No, exit' \
+    '❯ Yes,   I    trust  this   folder' \
+    'Enter to confirm · Esc to cancel')" ||
+    fail "extra whitespace inside the Yes label should still read as confirmed"
+# Wrapping must not blur the marker into matching the wrong option: the
+# unselected label always sits in the pane too, unmarked.
+if helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
+    'Accessing workspace:' \
+    '/tmp/demo' \
+    'Quick safety check: is this a project you trust?' \
+    '❯ No,' \
+    '  exit' \
+    '  Yes, I' \
+    '  trust this folder' \
+    'Enter to confirm · Esc to cancel')"; then
+    fail "a wrapped No, exit selection must not read as confirmed"
+fi
 if helper_codex_startup_key 'press enter to confirm or esc to cancel' >/dev/null; then
     fail "a later confirm prompt must not look like a first-run gate"
 fi
@@ -1929,6 +2068,118 @@ if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
 fi
 export FAKE_AGENT_PANE=w1:p1
 
+# Reproduces the reported defect: newer Claude builds default the trust
+# card's highlighted choice to "No, exit" instead of "Yes, I trust this
+# folder". A bare Enter would pick that default and quit, so the seat
+# never becomes ready and Herdr keeps returning agent_not_ready on this
+# named pane - and a caller retry then hits agent_name_taken instead of
+# a seated agent. The gate must send Down to reach the trust option
+# before the Enter that confirms it.
+claude_trust_pane_no_exit_default() {
+    printf '%s\n' 'Accessing workspace:' \
+        '/tmp/demo' \
+        "Quick safety check: is this a project you created or one you trust?" \
+        'Claude Code will be able to read, edit, and execute files here.' \
+        '❯ No, exit' \
+        '  Yes, I trust this folder' \
+        'Enter to confirm · Esc to cancel' >"$FAKE_PANE"
+}
+# Same card, but with the selection actually moved onto trust - what a
+# Down that really worked looks like on screen.
+claude_trust_pane_yes_selected() {
+    printf '%s\n' 'Accessing workspace:' \
+        '/tmp/demo' \
+        "Quick safety check: is this a project you created or one you trust?" \
+        'Claude Code will be able to read, edit, and execute files here.' \
+        '  No, exit' \
+        '❯ Yes, I trust this folder' \
+        'Enter to confirm · Esc to cancel' >"$1"
+}
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
+claude_trust_pane_no_exit_default
+claude_trust_pane_yes_selected "$FAKE_PANE_NEXT"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
+    fail "the No, exit default trust card should still recover once Down lands"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down' ||
+    fail "the No, exit default did not move the selection down first"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "the No, exit default did not confirm trust with Enter"
+[ "$(printf '%s\n' "$out" | grep -n 'agent send-keys reviewer' | head -n1)" = "$(printf '%s\n' "$out" | grep -n 'agent send-keys reviewer Down' | head -n1)" ] ||
+    fail "Down must be sent before Enter on the No, exit default"
+[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Down')" -eq 1 ] &&
+    [ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -eq 1 ] ||
+    fail "the No, exit default should send exactly one Down and one Enter"
+
+# Codex P2 regression: a dropped or no-op Down leaves the mark on "No,
+# exit" - the same trust card, unmoved. Enter must never follow it.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
+claude_trust_pane_no_exit_default
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a dropped Down that leaves No, exit marked must not be reported as seated"
+fi
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down' ||
+    fail "a dropped Down should still have been attempted"
+if printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter'; then
+    fail "a dropped Down must not still be followed by Enter"
+fi
+grep -q 'did not move off the No, exit default' "$err" ||
+    fail "a dropped Down should say why it stopped"
+
+# Codex P2 regression: a narrow pane wraps the selected "Yes, I trust
+# this folder" label across lines after a real, working Down. That must
+# still read as confirmed and reach Enter, not be mistaken for a
+# dropped Down.
+claude_trust_pane_yes_selected_wrapped() {
+    printf '%s\n' 'Accessing workspace:' \
+        '/tmp/demo' \
+        "Quick safety check: is this a project you created or one you trust?" \
+        'Claude Code will be able to read, edit, and execute files here.' \
+        '  No, exit' \
+        '❯ Yes, I' \
+        '  trust this folder' \
+        'Enter to confirm · Esc to cancel' >"$1"
+}
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
+claude_trust_pane_no_exit_default
+claude_trust_pane_yes_selected_wrapped "$FAKE_PANE_NEXT"
+out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
+    fail "a wrapped Yes selection after Down should still recover"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down' ||
+    fail "a wrapped Yes selection did not move the selection down first"
+printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
+    fail "a wrapped Yes selection did not confirm trust with Enter"
+[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -eq 1 ] ||
+    fail "a wrapped Yes selection should send exactly one Enter"
+
+# The older layout, where trust is already the highlighted default,
+# still takes just the one Enter - no regression for that shape.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+claude_trust_pane
+out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
+    fail "the Yes-first trust card should still recover with one Enter"
+if printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down'; then
+    fail "the Yes-first trust card must not receive a Down"
+fi
+[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys')" -eq 1 ] ||
+    fail "the Yes-first trust card should still send exactly one key"
+
+# A Down that lands somewhere else - not the documented trust card - must
+# not be followed by a blind Enter.
+rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
+claude_trust_pane_no_exit_default
+printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
+if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
+    printf '%s\n' "$out" >&2
+    fail "a Down that leaves the trust card must not be reported as seated"
+fi
+if printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter'; then
+    fail "a Down that leaves the trust card must not still send Enter"
+fi
+grep -q 'left the folder trust gate' "$err" ||
+    fail "leaving the trust card after Down should say why"
+rm -f "$FAKE_PANE_NEXT"
+
 # Unrelated start failure, even with the folder trust screen on show.
 export FAKE_START_ERR=pane_not_found
 rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
@@ -2302,7 +2553,7 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
     for monitor_rule in '### Recurring monitor and task list' \
         'CronCreate' 'CronDelete' 'active_loop' 'paused_needs_user' \
         'all registered tasks' 'outcome: no_change' 'Do not edit Elves task' \
-        'LANTERN_HERD_STATE_DIR' "$argv_dir/state/herd"; do
+        'LANTERN_HERD_STATE_DIR' "$(helper_native_path "$argv_dir/state/herd")"; do
         grep -qF "$monitor_rule" "$argv_dir/state/workdir/$rendered_file" ||
             fail "$rendered_file lacks monitor rule $monitor_rule with a custom prompt"
     done
@@ -2310,6 +2561,8 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
         fail "$rendered_file lacks the native callback executable in runtime instructions"
     grep -qF "$(helper_native_path "$argv_dir/state/herd") (environment: LANTERN_TEAM_STATE_DIR)" "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lacks the native callback state path in runtime instructions"
+    grep -qF "$(helper_native_path "$argv_dir/state/herd/lantern-codex-session.json")" "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file lacks the native Codex receipt path in runtime instructions"
     grep -qF 'Saved custom prompt' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lost the custom prompt"
 done
@@ -2325,6 +2578,9 @@ argv_is "claude" 'HELPER_AGENT="claude"
 HELPER_MODEL="opus"
 HELPER_EFFORT="high"
 HELPER_CWD="~"' ' [--model] [opus] [--effort] [high]'
+if grep -qF 'capture --path' "$argv_dir/state/workdir/CLAUDE.md"; then
+    fail "non-Codex launch asks for a Codex session receipt"
+fi
 
 argv_is "codex" 'HELPER_AGENT="codex"
 HELPER_MODEL="gpt-x"
@@ -2375,7 +2631,7 @@ HELPER_CWD="~"' ' [--permission-mode] [smart]'
 argv_is "cursor agent" 'HELPER_AGENT="agent"
 HELPER_MODEL=""
 HELPER_PERMISSION="smart"
-HELPER_CWD="~"' ' [--model] [cursor-grok-4.6-high-fast] [--trust] [--sandbox] [disabled] [--auto-review]'
+HELPER_CWD="~"' ' [--model] [grok-4.7-high-fast] [--trust] [--sandbox] [disabled] [--auto-review]'
 
 argv_is "cursor alias" 'HELPER_AGENT="cursor"
 HELPER_MODEL="m"

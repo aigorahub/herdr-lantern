@@ -96,15 +96,35 @@ def show(args: argparse.Namespace) -> None:
     print(record["codex_session_id"])
 
 
-def pid_from_json(args: argparse.Namespace) -> None:
+def foreground_processes(pane: str) -> list[dict]:
     try:
         payload = json.load(sys.stdin)
         info = payload["result"]["process_info"]
-        if info["pane_id"] != args.pane:
+        if info["pane_id"] != pane:
             fail("process metadata belongs to a different pane")
         processes = info["foreground_processes"]
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         fail("could not parse exact pane process metadata")
+    if not isinstance(processes, list) or not all(isinstance(item, dict) for item in processes):
+        fail("invalid foreground process metadata")
+    return processes
+
+
+def process_name(process: dict) -> str:
+    name = str(process.get("name", "")).lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def kind_from_json(args: argparse.Namespace) -> None:
+    names = [process_name(item) for item in foreground_processes(args.pane)]
+    known = [name for name in names if name in {"codex", "claude", "grok", "agent", "devin", "pi"}]
+    if len(known) != 1:
+        fail("expected exactly one recognized foreground helper process")
+    print("codex" if known[0] == "codex" else "other")
+
+
+def pid_from_json(args: argparse.Namespace) -> None:
+    processes = foreground_processes(args.pane)
     matches = []
     for process in processes:
         name = str(process.get("name", "")).lower()
@@ -190,6 +210,9 @@ def parser() -> argparse.ArgumentParser:
     pid_parser = commands.add_parser("pid-from-json")
     pid_parser.add_argument("--pane", required=True)
     pid_parser.set_defaults(func=pid_from_json)
+    kind_parser = commands.add_parser("kind-from-json")
+    kind_parser.add_argument("--pane", required=True)
+    kind_parser.set_defaults(func=kind_from_json)
     delete_parser = commands.add_parser("delete", parents=[common])
     delete_parser.add_argument("--pid", required=True, type=int)
     delete_parser.add_argument("--codex", default="codex")

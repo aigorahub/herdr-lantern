@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.13.0 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.15.0 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -371,7 +371,7 @@
       <div class="shots">
         <figure class="shot">
           <div class="frame">
-            <div class="chrome"><span class="dot live"></span> 🔥 lantern · home · cursor agent · cursor-grok-4.6-high-fast</div>
+            <div class="chrome"><span class="dot live"></span> 🔥 lantern · home · cursor agent · grok-4.7-high-fast</div>
             <pre class="term"><span class="dim">THE HERD IN THE FIELD</span>
 
 <span class="need">NEEDS YOU</span>
@@ -427,7 +427,7 @@ No Elves install required. If there are no
       <h2>Temporary Codex jobs and cleanup</h2>
       <p>Full interactive Herdr agents remain the default for work that needs repeated steering, resume, team coordination, or a durable live session. When you explicitly call a bounded Codex task temporary, disposable, low-importance, one-shot, or Daily-Tasks-style, Lantern can run it with <code>codex exec --ephemeral</code>. Disposable research is read-only; bounded updates use workspace-write automatic review. These jobs create no normal Codex desktop history entry and no Herdr agent workspace or tab.</p>
       <p>The launcher resolves and preflights the live Codex model, passes the task on stdin, and saves only the final response in private Lantern state outside the product checkout. It inherits the existing Codex login without copying, printing, or serializing authentication/config material. Ephemeral jobs cannot resume; work that needs steering moves to a fresh interactive agent. Update results still require diff inspection and the repository's required tests.</p>
-      <p>Daily-Tasks has a pinned Windows profile: <code>bin\codex-headless.cmd research --profile daily-tasks --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send Slack."</code>. Git Bash uses <code>bin/codex-headless</code>. It reads <code>C:\Claude\Daily-Tasks</code> with model phrase <code>5.6 luna xhigh fast</code>. Every instruction uses a unique job name and starts a fresh ephemeral run; it cannot resume and creates no normal Codex desktop/web session.</p>
+      <p>Daily-Tasks has a pinned Windows profile: <code>bin\codex-headless.cmd research --profile daily-tasks --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send external messages."</code>. Git Bash uses <code>bin/codex-headless</code>. It reads <code>C:\Claude\Daily-Tasks</code> with model phrase <code>5.6 luna xhigh fast</code>. Every instruction uses a unique job name and starts a fresh ephemeral run; it cannot resume and creates no normal Codex desktop/web session.</p>
       <p>Ask <code>clean completed sessions in &lt;repo or workspace&gt;</code> to clean a named scope. Lantern closes only settled tabs with committed clean edits or durably saved findings, passed task/dependency/integration checks, and no active dependents. It rechecks identity and repo state before close. Ineligible tabs stay open with the failed gate reported. Workspace cleanup requires every child tab to pass. Worktree removal is separate. The Lantern home tab, pane, and workspace are never cleanup targets.</p>
       <p>Run <code>hsh evening</code> (or <code>hsh nightly</code>) from an outside terminal. Lantern dependency-audits the field, preserves active/unresolved work, closes only completed explicitly temporary workspaces that pass every gate, and atomically writes a compact private handoff. For a Codex Lantern, light-up privately records only <code>CODEX_SESSION_ID</code> and exact pane/workspace identity. Evening verifies the handoff, identity, and foreground PID; closes the exact home pane; proves the pane and Codex process exited; then runs supported <code>codex delete &lt;UUID&gt; --force</code> to remove the old chat and child-agent records from normal desktop history. It never deletes a running session or edits history files directly. Missing identity, uncertain exit, unsupported deletion, or command failure leaves the saved session in place and returns an explicit warning/nonzero result. Handoff failure leaves home open, and the Herdr server is never stopped. Close the Herdr window normally afterward. Run <code>hsh morning</code> to open a fresh Lantern, load and reconcile the handoff, and attach Herdr. Windows can use the included <code>hsh.cmd</code>.</p>
 
@@ -481,7 +481,8 @@ No Elves install required. If there are no
         <li>“Open battle paddle.”<span>No harness named: uses your spawn default. Set that on first run, or say “make Cursor Grok 4.6 high fast my default spawn”. The new agent gets one opening prompt: load the herdr skill, prompt peers in that workspace, and use a new tab instead of a split.</span></li>
         <li>“Open the image maker repo with claude.”<span>Reuse if they are already there. An explicit kind or model always wins. Slugs: <code>image-maker</code>, not “Image Maker”.</span></li>
         <li>“There is a PR on battle-paddle. Get a Codex review.”<span>Resolve the repository and PR first. Check the model before any workspace or tab change. Lantern does not edit the repository.</span></li>
-        <li>“Open battle paddle with Grok.”<span>Bare Grok means Cursor with a live Cursor Grok model. Say Grok Build to use the Grok CLI.</span></li>
+        <li>“Open battle paddle with Grok.”<span>Bare Grok means Grok Build. The default is grok-4.7-build-fast at medium effort. Say “in Cursor with Grok” to use the Cursor CLI.</span></li>
+        <li>“Open battle paddle with Fugu.”<span>Fugu uses the Codex profile. The default is regular fugu at high effort. Name Ultra, Fugu Max, or effort max when you want those.</span></li>
         <li>“Create a GitHub repo for X.”<span>Always <code>gh repo create --private</code>. Public only when you ask for public.</span></li>
         <li>“Make a worktree on herdr for branch helper-tests.”<span><code>herdr worktree create</code>, not a second workspace on the main checkout.</span></li>
         <li>“How’s the night shift?”<span>If Elves session files are around, it reads that floor. It does not cobble or land.</span></li>
@@ -498,7 +499,7 @@ No Elves install required. If there are no
           <tr>
             <td>Cursor</td>
             <td>Cursor CLI as <code>agent</code></td>
-            <td><code>HELPER_AGENT="agent"</code> · <code>HELPER_MODEL="cursor-grok-4.6-high-fast"</code> · <code>smart</code> uses <code>--auto-review</code></td>
+            <td><code>HELPER_AGENT="agent"</code> · <code>HELPER_MODEL="grok-4.7-high-fast"</code> · <code>smart</code> uses <code>--auto-review</code></td>
           </tr>
           <tr>
             <td>Devin</td>
@@ -529,7 +530,7 @@ No Elves install required. If there are no
       </table>
       <pre>$EDITOR "$(herdr plugin config-dir aigora.lantern)/helper.conf"</pre>
       <pre>HELPER_AGENT="agent"
-HELPER_MODEL="cursor-grok-4.6-high-fast"
+HELPER_MODEL="grok-4.7-high-fast"
 HELPER_PROVIDER=""
 HELPER_EFFORT=""
 HELPER_CWD="~"

@@ -7,7 +7,7 @@
 HELPER_AGENT=""
 
 # Optional --model. For devin, leave empty (uses ~/.config/devin/config.json).
-# For Cursor `agent`, empty defaults to cursor-grok-4.6-high-fast.
+# For Cursor `agent`, empty defaults to grok-4.7-high-fast.
 HELPER_MODEL=""
 
 # Optional provider. pi only: passed as --provider <value>. Unused by the other helpers.
