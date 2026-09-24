@@ -2928,53 +2928,22 @@ for brief_file in prompt.md launch.sh; do
 done
 printf 'ok: the chat and its seats say what they run\n'
 
-# Field status is the whole field. Light-up and "what's going on" used to
-# name only the panes that needed the user or were moving, so a quiet tab
-# was invisible in a chat that claims to light the field. Every instruction
-# surface must now name every open tab, and both prompt.md and the rendered
-# appendix carry the same rule, because a lantern seated on Cursor or Codex
-# reads the appendix copy and never the file in this repo.
-grep -qF 'Field status: name every tab' "$root/prompt.md" ||
-    fail "prompt.md has no field status section"
+# The shipped prompt can be customized at install time, so the launch appendix
+# must also carry the Field Status route for every supported helper.
 for field_file in prompt.md launch.sh; do
-    for field_word in 'herdr tab list' 'herdr agent list' \
-        'herdr workspace list' 'workspace label' 'tab label'; do
+    for field_word in 'Field Status' 'herdr tab list' 'herdr agent list' \
+        'herdr workspace list' 'Daily Tasks' 'Lantern Home' \
+        'Important / Needs You' 'Review' '15 minutes' 'In Motion' \
+        'Done' 'Keep' 'Closed'; do
         grep -qF -- "$field_word" "$root/$field_file" ||
-            fail "$field_file field status does not name $field_word"
+            fail "$field_file omits Field Status rule $field_word"
     done
-    # The sidebar name is the point: elves-run, chrome, and a second lantern
-    # tab in the same workspace are what the user reads in Herdr, and a
-    # per-workspace roll-up would drop the second one.
-    for field_example in 'elves-run' 'chrome' 'lantern · 2'; do
-        grep -qF -- "$field_example" "$root/$field_file" ||
-            fail "$field_file field status does not keep the sidebar name $field_example"
-    done
-    grep -qF 'Two tabs in one' "$root/$field_file" ||
-        fail "$field_file does not name both tabs in one workspace"
-    grep -qiE 'quiet and idle tabs stay|a quiet tab still gets its line' \
-        "$root/$field_file" ||
-        fail "$field_file drops quiet tabs from the field status"
+    grep -qF 'LANTERN_FIELD_STATUS' "$root/$field_file" ||
+        fail "$field_file does not route through the repo-backed command"
 done
-# Who needs the user still comes first, and the answer stays a lamp.
-grep -qF 'lead with who needs the user' "$root/launch.sh" ||
-    fail "the launch.sh appendix should still lead with who needs the user"
-grep -qF 'Then name every open tab' "$root/prompt.md" ||
-    fail "the prompt.md light-up should name every open tab after who needs you"
-grep -qF 'Keep answers short' "$root/prompt.md" ||
-    fail "prompt.md should still keep answers short"
-for field_file in prompt.md launch.sh; do
-    grep -qF 'Sort the tab list by state' "$root/$field_file" ||
-        fail "$field_file field status does not sort working tabs above idle"
-    grep -qF 'working, then blocked, then done, then idle' "$root/$field_file" ||
-        fail "$field_file field status does not name the working-to-idle order"
-    grep -qF 'sorts with idle' "$root/$field_file" ||
-        fail "$field_file field status does not sort shell tabs with idle"
-    grep -qF 'keep the order from' "$root/$field_file" ||
-        fail "$field_file field status does not keep herdr tab list order within a state"
-    grep -qF 'Do not add group headings' "$root/$field_file" ||
-        fail "$field_file field status adds group headings"
-done
-printf 'ok: field status names every open tab\n'
+grep -qF 'Never close Lantern Home' "$root/prompt.md" ||
+    fail "Field Status must preserve Lantern Home"
+printf 'ok: Field Status command and runtime routes\n'
 
 printf 'ok\n'
 
@@ -2983,4 +2952,5 @@ model_test_python=$(helper_detect_python) || fail "model tests need Python 3"
 # shellcheck disable=SC2086
 $model_test_python "$root/tests/models.py" || fail "model regression tests"
 $model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests"
+$model_test_python "$root/tests/field_status.py" || fail "Field Status tests"
 $model_test_python "$root/tests/session_cleanup.py" || fail "Lantern session cleanup tests"

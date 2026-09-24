@@ -160,6 +160,10 @@ LANTERN_TEAM_MAILBOX=$(helper_native_path "$plugin_root/bin/team_mailbox.py")
 export LANTERN_TEAM_MAILBOX
 LANTERN_TEAM_STATE_DIR=$LANTERN_HERD_STATE_DIR
 export LANTERN_TEAM_STATE_DIR
+LANTERN_FIELD_STATUS=$(helper_native_path "$plugin_root/bin/field_status.py")
+export LANTERN_FIELD_STATUS
+LANTERN_HOME_PANE_ID=${HERDR_PANE_ID:-}
+export LANTERN_HOME_PANE_ID
 (umask 077; mkdir -p "$herd_state_dir") ||
     die "could not create herd state directory"
 [ ! -L "$session_receipt" ] ||
@@ -214,6 +218,16 @@ Runtime (injected by launch.sh; do not ignore):
   (environment: LANTERN_HERD_STATE_DIR). Load unfinished packs at light-up.
   Reconcile live owner and job identities before restoring a monitor.
   These are Lantern records, not permission to edit product run records.
+
+- Field Status executable: $LANTERN_FIELD_STATUS
+  (environment: LANTERN_FIELD_STATUS). Run with the detected Python 3 command.
+  For a Field Status request, invoke \`pane\` to open or reuse the compact
+  right-side view. The pane runs \`watch\` and redraws on meaningful changes.
+  Reconcile unfinished pack records and review evidence before opening it.
+  Use \`note needs-you set/clear\` for exact user actions and
+  \`note review-gate set/clear\` for gates needing no user action. Do not
+  paste Ran command transcripts into the chat. Keep Daily Tasks and Lantern
+  Home open.
 
 $session_capture_note
 
@@ -338,17 +352,18 @@ $onboard_note
 - A yolo request does not select every bypass. Name the one
   provider-specific flag and the protections it removes in the gated seat
   plan. Run it only after the user confirms that exact plan.
-- Field status names every open tab. On light-up, and for "what’s going on"
-  or any field question, lead with who needs the user, then give one line per
-  open Herdr tab: workspace label, tab label, kind, state (working / blocked /
-  done / idle). Join \`herdr tab list\` with \`herdr agent list\` on
-  \`tab_id\` and with \`herdr workspace list\` on \`workspace_id\`. Use the
-  tab label exactly as the sidebar shows it (\`elves-run\`, \`chrome\`,
-  \`lantern · 2\`). Sort the tab list by state so working tabs sit above
-  idle ones: working, then blocked, then done, then idle, then unknown. A
-  tab with no agent (\`shell\`) sorts with idle. Within a state, keep the order from \`herdr tab list\`. Do not add group headings. Quiet and idle tabs stay in the list. Two tabs in one workspace are two lines, both
-  named. A tab with no agent is \`shell\`. Add
-  nothing else to those lines; keep the answer short.
+- Field Status uses $LANTERN_FIELD_STATUS. On light-up, use \`--plain refresh\`
+  for the initial readout. For "Field Status", "what’s going on", or any field
+  question, use the detected Python 3 command with \`pane\` to open or reuse one
+  right-side pane beside Lantern Home; \`watch\` keeps the display current.
+  Join \`herdr tab list\`, \`herdr agent list\`, and \`herdr workspace list\`
+  by ID. Keep every open tab, including quiet/idle, Daily Tasks, and Lantern
+  Home. Agent names yellow; In Motion yellow, Done green, Keep blue, Closed red.
+  Idle, blocked, unknown, and shell are Keep, never proof of completion.
+  Closed Done agents stay for 15 minutes, then prune on the next refresh.
+  Important / Needs You states the exact user action. Review gates requiring
+  no user action stay in their own section. Refresh at meaningful completion,
+  closure, and review events. Never close Lantern Home or Daily Tasks.
 - Route loose phrases. "What’s going on" means field status and agent,
   workspace, and tab lists. "Open the tab" means an exact agent, workspace,
   or tab focus: open it and say which tab you opened. "Tell

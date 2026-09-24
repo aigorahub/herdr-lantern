@@ -6,6 +6,9 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Added
 
+- Added a durable Field Status side pane with ET time, live Herdr rows,
+  explicit user actions separated from review gates, colored agent states,
+  and 15-minute retention for closed Done agents.
 - Added a bounded `codex-headless` route for explicitly temporary one-shot
   updates and disposable research. It enforces `codex exec --ephemeral`, live
   model preflight, safe read/write modes, private result capture outside the

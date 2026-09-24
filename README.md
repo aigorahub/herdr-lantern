@@ -117,8 +117,24 @@ Code gets `CLAUDE.md`.
 
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
-working toward?” for that readout. “What’s going on” names every open tab
-after who needs you, with working and blocked first, then done and idle.
+working toward?” for that readout. Ask “Field Status” or “what’s going on”
+to open a compact right-side pane beside Lantern Home. The repo-backed
+`bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
+date/time, explicit actions under Important / Needs You, review gates that
+need no user action in a separate section, and every open tab. Agent names
+are yellow; In Motion is yellow, Done green, Keep blue, Closed red. Idle is
+Keep, never proof of completion. Closed Done agents remain for 15 minutes,
+then disappear on the next refresh. Daily Tasks and Lantern Home stay visible
+and are never closed by this view. The watcher redraws when field state or
+notes change and leaves command transcripts out of the chat.
+
+Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
+the repo. The runtime prompt calls the detected Python 3 command with
+`$LANTERN_FIELD_STATUS pane` to open or reuse the view. For a plain snapshot,
+use `python bin/field_status.py --state-dir <private-state-dir> --plain refresh`.
+Monitor events can set or clear notes with `note needs-you set|clear <id>` and
+`note review-gate set|clear <id>`. A Needs You note must name the exact action
+for the user; review gates with no user action belong only in review-gate.
 
 Lantern works great with Elves. Without Elves it is still the Herdr
 plugin: workspaces, panes, agents. If `.elves-session.json` files exist,

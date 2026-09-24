@@ -64,7 +64,7 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "clean completed sessions in <repo/workspace>" | Inspect the named scope, verify durable results and dependency gates, then `herdr tab close <tab_id>` for eligible tabs | Close only settled sessions whose edits are committed or whose findings are saved, whose required checks pass, and which no active task depends on. Recheck identity immediately before close. Never close Lantern home. |
 | "evening shutdown", "nightly" | The external `hsh evening` / `hsh nightly` action prompts this audit, verifies `$LANTERN_HERD_STATE_DIR/evening-handoff.md`, then closes only this Lantern pane | Dependency-audit the full field. Preserve active, unresolved, ambiguous, or depended-on work. Close only completed explicitly temporary workspaces that pass every cleanup gate. Atomically write the compact handoff before the outer action may close Lantern home. Never stop the Herdr server. |
 | morning startup | Run `hsh morning` outside Herdr | Start/attach Herdr, create a fresh Lantern session, load `evening-handoff.md`, reconcile it with the live field, and report stale facts rather than trusting them. |
-| "what's going on", "status", "show the field" | `herdr status`, `herdr agent list`, `herdr agent read/get/wait/explain`, `herdr workspace list`, `herdr tab list` | Read-only. Lead with who needs the user, then name every open tab, working and blocked first, then done and idle. See "Field status: name every tab". |
+| "Field Status", "what's going on", "status", "show the field" | Detected Python 3 command with `$LANTERN_FIELD_STATUS pane` | Open or reuse the compact field view in the side pane. Never paste a Ran command transcript. See "Field Status". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Open it. Ask only when more than one target matches. |
 | "open battle paddle", "open the image maker repo" | Same seat route as a named-kind open, using the user spawn default launch injects | They just name a repo and no harness, model, or setting. Do not ask. Use `$HERDR_PLUGIN_ROOT/bin/onboard show` if the injected default is unclear. |
 | "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, one `herdr agent prompt` that starts with the workspace brief, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
@@ -573,29 +573,41 @@ words name that task.
    - `herdr agent focus <target>` opens the tab for them. Asked for it,
      one target: open it and say which tab you opened.
 
-### Field status: name every tab
+### Field Status
 
-On light-up, and for "what's going on" or any field question, lead with who
-needs the user. Then name every open Herdr tab. Not only NEEDS YOU and
-IN MOTION. A quiet tab still gets its line.
+On light-up, use `$LANTERN_FIELD_STATUS --plain refresh` for the initial
+readout. Whenever the user asks for Field Status, "what's going on", "status",
+or "show the field", run `$LANTERN_FIELD_STATUS pane` with the detected
+Python 3 command. The repo-backed command joins
+`herdr tab list`, `herdr agent list`, and `herdr workspace list` by IDs and
+prints a compact view with ET date/time. Keep every open tab visible, including
+quiet tabs, Daily Tasks, and Lantern Home. Never close Daily Tasks or Lantern
+Home as part of Field Status.
 
-- Read `herdr tab list` for the tabs, `herdr agent list` for the kind in
-  each one, and `herdr workspace list` for the workspace label. Join tabs
-  to agents on `tab_id` and to workspaces on `workspace_id`.
-- One line per tab, in this order: workspace label, tab label, kind, state.
-  State is the tab's `agent_status`: working, blocked, done, or idle
-  (unknown when Herdr says so).
-- Sort the tab list by state so working tabs sit above idle ones: working, then blocked, then done, then idle, then unknown. A tab with no agent
-  (`shell`) sorts with idle. Within a state, keep the order from
-  `herdr tab list`. Do not add group headings.
-- Use the tab `label` exactly as the sidebar shows it, such as `elves-run`,
-  `chrome`, or `lantern · 2`. Do not shorten it, translate it, or replace it
-  with a repository name.
-- One line per `tab_id`. Two tabs in one workspace are two lines, both
-  named. Never fold them into a workspace count.
-- A tab with no agent has no kind. Say `shell`.
-- Add nothing else to these lines. Goals, recaps, and next actions belong
-  to the who-needs-you part above, not to this list.
+- Show an explicitly requested view in the Field Status side pane with `pane`, which opens or
+  reuses a right-side pane beside the Lantern Home pane and starts `watch`.
+  Do not paste tool output, command transcripts, or "Ran command" lines into
+  the chat. If the side pane cannot be opened, give the compact plain result in
+  the chat and say why the pane is unavailable.
+- Agent names are yellow. In Motion is yellow, Done green, Keep blue, and
+  Closed red. Idle, blocked, unknown, and shell mean Keep; idle alone is not
+  completion. A closed agent last seen Done remains visible for 15 minutes
+  after closure, then is pruned on the next refresh.
+- Important / Needs You contains only a concrete action the user must take.
+  A blocked Herdr state by itself does not qualify. Review gates that require
+  no user action go under Review Gates, never Needs You. Before opening the
+  pane and at each monitor checkpoint, reconcile unfinished pack records and
+  review evidence, then use `$LANTERN_FIELD_STATUS note needs-you set <id> "<exact user action>"`
+  or `note review-gate set <id> "<gate>"` when a monitor finds one. Clear its
+  stable ID when resolved. Notes persist in private Lantern state.
+- Refresh at meaningful agent completion, closure, and review events. The
+  watcher redraws when field rows, notes, or the ET minute change; it polls to
+  detect events and prune expired closed Done rows. Keep existing recurring monitors.
+  Do not turn an idle event into Done or a user interruption.
+- The first Field Status request opens one reusable right-side pane beside
+  Lantern Home. The command uses the explicit Lantern home pane ID,
+  `--no-focus`, and a compact width. Reuse that pane on later requests; do not
+  create another split. Never close Lantern Home.
 
 Ground rules:
 
@@ -668,8 +680,8 @@ Elves — say that once, briefly, not as a pitch, and in the same line
 name the CLI and model this chat runs (the runtime note carries them),
 so the user always knows what is answering. Lead with who needs the
 user (NEEDS YOU, then live goals waiting on them). If none, one line
-about the field. Then name every open tab, one line each, by the rules
-in "Field status: name every tab", working and blocked first. If `elves_detected 1`, add the
+about the field. Then use the compact view by the rules in "Field Status".
+If `elves_detected 1`, add the
 IN PROGRESS count and names (or one line each if few). If
 `elves_detected 0`, at most one short pairing line. If the runtime note
 says first-run setup is needed, ask once for the default spawn
