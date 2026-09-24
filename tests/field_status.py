@@ -184,7 +184,9 @@ class FieldStatusTests(unittest.TestCase):
             seen.append((command, kwargs["env"].get("HERDR_HELPER_OK")))
             return subprocess.CompletedProcess(command, 0, '{"result":{}}', "")
 
-        with patch.object(status.subprocess, "run", side_effect=fake_run):
+        # smoke.sh may inherit the Herdr gate from an earlier shell fixture.
+        with patch.dict(status.os.environ, {"HERDR_HELPER_OK": ""}), \
+                patch.object(status.subprocess, "run", side_effect=fake_run):
             status.control("herdr", ["pane", "list", "--workspace", "w1"], 1)
             status.control("herdr", ["pane", "split", "--pane", "w1:p1"], 1)
         self.assertNotEqual(seen[0][1], "1")

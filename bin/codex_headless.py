@@ -225,7 +225,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    # The optional prompt may follow flags after the mode positional. Python
+    # 3.12 parse_args rejects that order; the CLI has always documented it.
+    args = parser().parse_intermixed_args(argv)
     cwd = args.cwd
     model_phrase = args.model or "default"
     if args.profile == "daily-tasks":
