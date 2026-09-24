@@ -591,6 +591,26 @@ grok_default=$(run_model_route grok \
     default) || fail "Grok live default route"
 printf '%s\n' "$grok_default" | grep -qF '"argv":["-m","grok-4.7-build-fast","--reasoning-effort","medium"]' ||
     fail "Grok default did not use live grok-4.7-build-fast at medium effort"
+fugu_home=$(mktemp -d)
+cat >"$fugu_home/fugu.json" <<'EOF'
+{"models":[
+  {"slug":"fugu-max","display_name":"Fugu Max","visibility":"list","supported_reasoning_levels":[{"effort":"high"},{"effort":"xhigh"}]},
+  {"slug":"fugu-ultra-v2.0","display_name":"Fugu Ultra v2.0","visibility":"list","supported_reasoning_levels":[{"effort":"high"},{"effort":"xhigh"}]},
+  {"slug":"fugu","display_name":"Fugu","visibility":"list","supported_reasoning_levels":[{"effort":"high"},{"effort":"xhigh"}]}
+]}
+EOF
+CODEX_HOME=$fugu_home
+export CODEX_HOME
+fugu_default=$(run_model_route fugu default) ||
+    fail "Fugu default route"
+printf '%s\n' "$fugu_default" | grep -qF '"model":"fugu"' ||
+    fail "Fugu default did not use regular fugu"
+fugu_ultra=$(run_model_route fugu "fugu ultra") ||
+    fail "Fugu Ultra route"
+printf '%s\n' "$fugu_ultra" | grep -qF '"model":"fugu-ultra-v2.0"' ||
+    fail "Fugu Ultra route did not use the v2 slug"
+unset CODEX_HOME
+rm -rf "$fugu_home"
 if fable_check=$(run_model_preflight claude fable high); then
     fail "Claude preflight accepted an exhausted Fable bucket"
 else

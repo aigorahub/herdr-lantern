@@ -276,13 +276,151 @@ def grok_route(phrase: str) -> dict[str, object]:
     return {"kind": "grok", "model": model_id, "effort": parsed.effort, "fast": parsed.fast, "argv": argv}
 
 
+def fugu_catalog_path() -> str:
+    home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    return os.path.join(home, "fugu.json")
+
+
+def listed_fugu_models(text: str) -> list[dict[str, object]]:
+    try:
+        catalog = json.loads(text)
+        rows = catalog["models"]
+        if not isinstance(rows, list):
+            raise ValueError("models is not a list")
+        models = []
+        for model in rows:
+            if not isinstance(model, dict):
+                raise ValueError("model is not an object")
+            if model.get("visibility") != "list":
+                continue
+            slug = model.get("slug")
+            levels = model.get("supported_reasoning_levels", [])
+            if not isinstance(slug, str) or not slug:
+                raise ValueError("model has no slug")
+            if not isinstance(levels, list) or any(
+                not isinstance(level, dict) or not isinstance(level.get("effort"), str)
+                for level in levels
+            ):
+                raise ValueError("model has invalid effort levels")
+            models.append(model)
+        if not models:
+            raise ValueError("models is empty")
+        return models
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise ValueError(f"Fugu returned an unparseable catalog ({error})") from error
+
+
+def read_fugu_catalog() -> list[dict[str, object]]:
+    path = fugu_catalog_path()
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as error:
+        fail(f"catalog unavailable: {path} ({error})")
+    try:
+        return listed_fugu_models(text)
+    except ValueError as error:
+        fail(str(error))
+
+
+def fugu_effort(model: dict[str, object], requested: str | None) -> str:
+    levels = {str(level.get("effort")) for level in model.get("supported_reasoning_levels", [])}
+    slug = str(model.get("slug"))
+    if requested and requested not in levels:
+        fail(f"{slug} does not support effort {requested}")
+    if requested:
+        return requested
+    if "high" in levels:
+        return "high"
+    if not levels:
+        fail(f"{slug} has no effort levels")
+    return sorted(levels)[0]
+
+
+def fugu_result(model: dict[str, object], effort: str) -> dict[str, object]:
+    slug = str(model.get("slug"))
+    return {
+        "kind": "fugu",
+        "model": slug,
+        "effort": effort,
+        "fast": False,
+        "argv": ["-p", "fugu", "-m", slug, "-c", f'model_reasoning_effort="{effort}"'],
+    }
+
+
+def fugu_route(phrase: str) -> dict[str, object]:
+    models = read_fugu_catalog()
+    by_slug = {str(model.get("slug")): model for model in models}
+    normalized = phrase.strip().lower()
+    if normalized == "default":
+        if "fugu" not in by_slug:
+            fail("Fugu catalog has no regular fugu model")
+        return fugu_result(by_slug["fugu"], fugu_effort(by_slug["fugu"], None))
+    tokens = words(phrase)
+    if "fast" in tokens:
+        fail("Fugu does not publish a Fast route")
+    name_max = "max" in tokens and "ultra" not in tokens and not any(
+        token[:1].isdigit() or token.startswith("v") and any(char.isdigit() for char in token)
+        for token in tokens
+    )
+    effort_words = {"high", "xhigh"} if name_max else {"high", "xhigh", "max"}
+    efforts = [token for token in tokens if token in effort_words]
+    if len(set(efforts)) > 1:
+        fail("model phrase has more than one effort")
+    effort = efforts[0] if efforts else None
+    terms = tuple(token for token in tokens if token not in {*effort_words, "fast", *STOP_WORDS})
+    if not terms:
+        fail("model phrase does not name a model family")
+    ultra_preference = ("fugu-ultra-v2.0", "fugu-ultra", "fugu-ultra-v1.1")
+    versioned = any(
+        token[:1].isdigit() or (token.startswith("v") and any(char.isdigit() for char in token))
+        for token in terms
+    )
+    if "ultra" in terms and not versioned:
+        chosen = None
+        if effort == "max":
+            for slug in ultra_preference:
+                row = by_slug.get(slug)
+                levels = {
+                    str(level.get("effort"))
+                    for level in (row or {}).get("supported_reasoning_levels", [])
+                    if isinstance(level, dict)
+                }
+                if "max" in levels:
+                    chosen = slug
+                    break
+        if chosen is None:
+            chosen = next((slug for slug in ultra_preference if slug in by_slug), None)
+        if chosen is None:
+            fail("Fugu catalog has no Ultra model")
+        return fugu_result(by_slug[chosen], fugu_effort(by_slug[chosen], effort))
+    model_id = choose(
+        [
+            (
+                str(model.get("slug", "")),
+                candidate_tokens(str(model.get("slug", "")), str(model.get("display_name", ""))),
+            )
+            for model in models
+        ],
+        terms,
+    )
+    model = by_slug[model_id]
+    return fugu_result(model, fugu_effort(model, effort))
+
+
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] not in {"codex", "claude", "cursor", "grok"}:
-        print("usage: model-route <codex|claude|cursor|grok> <spoken model phrase|default>", file=sys.stderr)
+    if len(sys.argv) < 3 or sys.argv[1] not in {"codex", "claude", "cursor", "grok", "fugu"}:
+        print("usage: model-route <codex|claude|cursor|grok|fugu> <spoken model phrase|default>", file=sys.stderr)
         return 2
     phrase = " ".join(sys.argv[2:]).strip()
     try:
-        routes = {"claude": claude_route, "codex": codex_route, "cursor": cursor_route, "grok": grok_route}
+        routes = {
+            "claude": claude_route,
+            "codex": codex_route,
+            "cursor": cursor_route,
+            "grok": grok_route,
+            "fugu": fugu_route,
+        }
         route = routes[sys.argv[1]](phrase)
     except RouteError as error:
         print(f"model-route: {error}", file=sys.stderr)
