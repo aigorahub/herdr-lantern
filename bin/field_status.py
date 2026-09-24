@@ -77,10 +77,30 @@ def resolve_herdr(explicit: str) -> str:
     raise RuntimeError("Herdr binary unavailable")
 
 
+def herdr_command(binary: str, args: list[str]) -> list[str]:
+    """Run Lantern's extensionless shell wrapper through Git sh on Windows."""
+    if os.name == "nt" and Path(binary).suffix == "":
+        shell = shutil.which("sh")
+        if not shell:
+            raise RuntimeError("Git sh unavailable for Lantern's Herdr wrapper")
+        return [shell, binary, *args]
+    return [binary, *args]
+
+
+def herdr_environment(binary: str) -> dict[str, str]:
+    env = os.environ.copy()
+    if os.name == "nt" and Path(binary).suffix == "":
+        # Git Bash exports this as C:/... to native Python. Passing that form
+        # back to sh makes bin/herdr mistake itself for the real binary.
+        env.pop("HERDR_BIN_PATH", None)
+    return env
+
+
 def herdr_list(binary: str, item: str, timeout: float) -> list[dict]:
     try:
-        proc = subprocess.run([binary, item, "list"], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=timeout, check=False)
+        proc = subprocess.run(herdr_command(binary, [item, "list"]), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=timeout, check=False,
+                              env=herdr_environment(binary))
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f"Herdr {item} list unavailable: {exc}") from exc
     if proc.returncode:
@@ -103,13 +123,8 @@ def snapshot(binary: str, timeout: float) -> tuple[list[dict], list[dict], list[
 
 def control(binary: str, args: list[str], timeout: float) -> dict:
     """Use Lantern's gated Herdr wrapper for layout changes."""
-    command = [binary, *args]
-    if os.name == "nt" and Path(binary).suffix == "":
-        shell = shutil.which("sh")
-        if not shell:
-            raise RuntimeError("Git sh unavailable for Lantern's Herdr gate")
-        command = [shell, binary, *args]
-    env = os.environ.copy()
+    command = herdr_command(binary, args)
+    env = herdr_environment(binary)
     if args[:2] in (["pane", "split"], ["pane", "rename"], ["pane", "run"]):
         env["HERDR_HELPER_OK"] = "1"
     try:

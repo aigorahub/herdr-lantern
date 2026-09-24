@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -190,6 +193,64 @@ class FieldStatusTests(unittest.TestCase):
     def test_watcher_command_quotes_windows_user_path_for_sh(self):
         path = Path("C:/Users/O'Brien/Lantern")
         self.assertEqual(shlex.split(status.shell_quote(path)), [path.as_posix()])
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows Python")
+    def test_native_windows_refresh_and_watch_use_launcher_wrapper(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            fake_dir = root_path / "fake-bin"
+            fake_dir.mkdir()
+            fake_herdr = fake_dir / "herdr"
+            shutil.copyfile(Path(__file__).parent / "fixtures" / "field_status_herdr", fake_herdr)
+            fake_herdr.chmod(0o755)
+            env = os.environ.copy()
+            env.pop("HERDR_REAL", None)  # launch.sh removes this before entering the pane.
+            # Git Bash exports the launch.sh POSIX wrapper path in this native form.
+            env["HERDR_BIN_PATH"] = (BIN / "herdr").as_posix()
+            env["LANTERN_HERD_STATE_DIR"] = str(root_path / "state")
+            env["PATH"] = os.pathsep.join((str(BIN), str(fake_dir), env["PATH"]))
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(Path(status.resolve_herdr("")).resolve(),
+                                 (BIN / "herdr").resolve())
+            script = str(BIN / "field_status.py")
+            base = [sys.executable, script, "--plain"]
+            refreshed = subprocess.run([*base, "refresh"], env=env, capture_output=True,
+                                       text=True, timeout=15, check=False)
+            self.assertEqual(refreshed.returncode, 0, refreshed.stderr)
+            self.assertIn("Fixture Lantern Home", refreshed.stdout)
+            self.assertIn("In Motion", refreshed.stdout)
+            self.assertIn(" ET", refreshed.stdout)
+            watcher = subprocess.Popen([*base, "watch", "--interval", "0.1"],
+                                       env=env, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True)
+            lines = []
+            ready = threading.Event()
+
+            def collect() -> None:
+                assert watcher.stdout is not None
+                for line in watcher.stdout:
+                    lines.append(line)
+                    if "Fixture Lantern Home" in line:
+                        ready.set()
+
+            reader = threading.Thread(target=collect, daemon=True)
+            reader.start()
+            try:
+                self.assertTrue(ready.wait(20), f"watch produced no field frame: {lines}")
+                self.assertIsNone(watcher.poll(), "watch exited after its first refresh")
+            finally:
+                if watcher.poll() is None:
+                    watcher.terminate()
+                watcher.wait(timeout=5)
+                reader.join(timeout=5)
+                if watcher.stdout is not None:
+                    watcher.stdout.close()
+                if watcher.stderr is not None:
+                    watcher.stderr.close()
+            output = "".join(lines)
+            self.assertIn("Fixture Lantern Home", output)
+            self.assertIn("In Motion", output)
+            self.assertNotIn("unavailable", output)
 
     def test_reused_pane_restarts_idle_watcher_but_not_other_process(self):
         with tempfile.TemporaryDirectory() as root:
