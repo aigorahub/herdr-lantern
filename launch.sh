@@ -392,6 +392,14 @@ $onboard_note
   Do not exit this chat yourself. Cursor agent:
   Ctrl+C, or Ctrl+D on an empty prompt. The tab closes with the CLI, and
   the lantern workspace closes with it when nothing else is in there.
+- Fugu seats use \`--kind codex\` and the argv from \`model-route fugu\`.
+  Require \`codex-fugu\` on PATH. If it is missing, stop and name the
+  Sakana install command. Do not start plain Codex. The route reads the
+  installed \`fugu.json\`. Current catalogs prefer \`fugu-max\` at high,
+  then \`fugu\`. \`fugu ultra\` selects listed \`fugu-ultra\` (Ultra v2).
+  \`fugu max\` selects the model \`fugu-max\`. \`fugu-ultra-v1.1\` is the
+  older Ultra and the only row that currently lists effort max. Run
+  \`codex-fugu --check\` when the catalog is stale. Do not invent a slug.
 - Live models: Astra supports low, medium, high, xhigh, max, ultra. Codex
   also lists gpt-6-sol and gpt-6-luna. Bare gpt-6 is ambiguous: ask for
   Astra, Sol, or Luna. Bare sol and bare luna are ambiguous between

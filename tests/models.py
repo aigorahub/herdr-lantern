@@ -3,6 +3,8 @@
 import importlib.util
 import io
 import json
+import os
+import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 import sys
@@ -164,6 +166,32 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             result = route.claude_route("opus high")
             self.assertEqual(result["argv"], ["--model", "claude-opus-5-5[1m]", "--effort", "high"])
             self.assertEqual(route.claude_route("fable high")["model"], "claude-fable-5-1")
+
+    def test_fugu_routes_current_catalog(self):
+        catalog = json.dumps({"models": [
+            {"slug": "fugu-max", "display_name": "Fugu Max", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+            {"slug": "fugu-ultra", "display_name": "Fugu Ultra v2.0", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+            {"slug": "fugu", "display_name": "Fugu", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+            {"slug": "fugu-ultra-v1.1", "display_name": "Fugu Ultra v1.1", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"}]},
+        ]})
+        with tempfile.TemporaryDirectory() as home:
+            path = os.path.join(home, "fugu.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(catalog)
+            with patch.dict(os.environ, {"CODEX_HOME": home}):
+                default = route.fugu_route("default")
+                self.assertEqual(default["model"], "fugu-max")
+                self.assertEqual(default["argv"][:4], ["-p", "fugu", "-m", "fugu-max"])
+                self.assertEqual(route.fugu_route("fugu")["model"], "fugu")
+                self.assertEqual(route.fugu_route("fugu ultra")["model"], "fugu-ultra")
+                self.assertEqual(route.fugu_route("fugu max")["model"], "fugu-max")
+                self.assertEqual(route.fugu_route("fugu-ultra-v1.1 max")["effort"], "max")
+                with self.assertRaisesRegex(route.RouteError, "does not support effort max"):
+                    route.fugu_route("fugu ultra max")
 
     def test_bare_generation_requires_choice(self):
         with patch.object(route, "run_catalog", return_value=codex_catalog()):

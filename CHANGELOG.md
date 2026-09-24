@@ -2,6 +2,16 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Fugu seats use the Codex profile `codex-fugu` (`--kind codex` and `-p fugu`).
+  `model-route fugu` reads the installed `fugu.json`. The default is
+  `fugu-max` at high effort when that slug is listed, then `fugu`.
+  `fugu ultra` selects `fugu-ultra` (Fugu Ultra v2). `fugu-ultra-v1.1`
+  stays available only by its exact slug.
+
 ## [0.14.1] - 2026-09-23
 
 ### Fixed

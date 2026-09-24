@@ -150,7 +150,10 @@ marker is on `Yes, I trust this folder`. An older card still gets one Enter.
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok", "Grok Build", and
 "SuperGrok" use `--kind grok`. The Grok default is `grok-4.7-build-fast` at
-medium effort. "In Cursor with Grok" uses `--kind cursor`. Lantern checks the selected model with `bin/model-preflight` before it
+medium effort. "In Cursor with Grok" uses `--kind cursor`. "Fugu" uses
+`--kind codex` with the `codex-fugu` profile (`-p fugu`) and a model from
+the installed `fugu.json`. The current default is `fugu-max` at high effort
+when that slug is listed. Lantern checks the selected model with `bin/model-preflight` before it
 seats anything. It stops on a failed check or a model it knows
 will not work, and names one live substitute. A usage line with no reset
 time is still valid. Missing quota info on a harness that has no usage

@@ -189,6 +189,12 @@ Check these choices against the live CLI before each seat:
 | Grok Build | `grok 4.7 build fast` | `-m grok-4.7-build-fast --reasoning-effort medium` when effort is omitted on the default route |
 | Grok Build | `grok 4.6 high` | `-m grok-4.6 --reasoning-effort high` if listed |
 | Grok Build | A model from `grok models`, plus an effort | `-m <listed-model> --reasoning-effort <effort>` |
+| Fugu | no variant | `model-route fugu default`. Current catalogs prefer `fugu-max` at high, then `fugu`. |
+| Fugu | `fugu` | `-m fugu` when that exact slug is listed. This is the latency model, not Fugu Max. |
+| Fugu | `fugu ultra`, `ultra` | `-m fugu-ultra` when that slug is listed. That slug is Fugu Ultra v2. Do not select `fugu-ultra-v1.1` for this phrase. |
+| Fugu | `fugu max` | `-m fugu-max` when listed. This is the model, not effort max. |
+| Fugu | `fugu-ultra-v1.1` | The exact listed slug. This is the only current row whose catalog includes effort `max`. |
+| Fugu | `fugu cyber` | `-m fugu-cyber` only when the user asks for cyber and the slug is listed. |
 
 Codex Astra supports low, medium, high, xhigh, max, and ultra. Its live
 default is medium. Sol, Terra, and Luna remain available only while listed.
@@ -232,6 +238,15 @@ When the user does not name a model:
   `grok-4.7-build-fast` at medium effort, then `grok-4.7` at high effort,
   then `grok-4.6`, then `grok-4.5`.
 - An explicit user model phrase always wins.
+- Fugu is a Codex profile, not a Herdr kind. Require `codex-fugu` on PATH.
+  If it is missing, stop and name `curl -fsSL https://sakana.ai/fugu/install | bash`.
+  Do not start plain Codex. Run `model-route fugu "<phrase>"` against
+  `$CODEX_HOME/fugu.json`, or `~/.codex/fugu.json` when that variable is empty.
+  Pass its argv after `--` on `herdr agent start <slug> --kind codex`.
+  The wrapper still adds the Codex unattended flag. A missing or stale
+  catalog stops the seat. Run `codex-fugu --check` before inventing a slug.
+  `fugu-ultra` is Fugu Ultra v2. `fugu-ultra-v1.1` is the older Ultra.
+  Effort `max` is valid only when that installed row lists it.
 
 Smart-auto is the default permission tier for Claude, Grok, and Cursor.
 Claude and Grok use `--permission-mode auto`. Cursor uses `--auto-review

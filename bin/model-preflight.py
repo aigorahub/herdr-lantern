@@ -247,7 +247,55 @@ def report_unavailable(kind: str, model: str, reason: str, substitute: dict[str,
     return 3
 
 
+def fugu_models() -> dict[str, set[str]]:
+    path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "fugu.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            catalog = json.load(handle)
+        rows = catalog["models"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        fail(f"availability check failed: Fugu catalog unavailable ({error})")
+    if not isinstance(rows, list):
+        fail("availability check failed: Fugu catalog models is not a list")
+    models: dict[str, set[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or row.get("visibility") != "list":
+            continue
+        slug = row.get("slug")
+        levels = row.get("supported_reasoning_levels", [])
+        if not isinstance(slug, str) or not slug or not isinstance(levels, list):
+            fail("availability check failed: Fugu catalog has an invalid model")
+        models[slug] = {str(level.get("effort")) for level in levels if isinstance(level, dict)}
+    if not models:
+        fail("availability check failed: Fugu catalog is empty")
+    return models
+
+
 def check(kind: str, model: str, effort: str) -> int:
+    if kind == "fugu":
+        models = fugu_models()
+        if model not in models:
+            substitute = None
+            for slug in ("fugu-max", "fugu"):
+                if slug in models:
+                    chosen = "high" if "high" in models[slug] else sorted(models[slug])[0]
+                    substitute = {
+                        "kind": "fugu",
+                        "model": slug,
+                        "effort": chosen,
+                        "fast": False,
+                        "argv": ["-p", "fugu", "-m", slug, "-c", f'model_reasoning_effort="{chosen}"'],
+                    }
+                    break
+            return report_unavailable(kind, model, f"{model} is absent from the installed Fugu catalog", substitute)
+        if effort and effort not in models[model]:
+            return report_unavailable(
+                kind,
+                model,
+                f"{model} does not support effort {effort}",
+                None,
+            )
+        return report_available(kind, model, effort)
     if kind == "claude":
         models = claude_capabilities()
         _, buckets = parse_claude_usage()
@@ -313,8 +361,8 @@ def check(kind: str, model: str, effort: str) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) not in {3, 4} or sys.argv[1] not in {"claude", "cursor", "grok", "codex"}:
-        print("usage: model-preflight <claude|cursor|grok|codex> <model> [effort]", file=sys.stderr)
+    if len(sys.argv) not in {3, 4} or sys.argv[1] not in {"claude", "cursor", "grok", "codex", "fugu"}:
+        print("usage: model-preflight <claude|cursor|grok|codex|fugu> <model> [effort]", file=sys.stderr)
         return 2
     try:
         return check(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else "")
