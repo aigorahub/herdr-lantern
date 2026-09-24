@@ -276,7 +276,7 @@ def check(kind: str, model: str, effort: str) -> int:
         models = fugu_models()
         if model not in models:
             substitute = None
-            for slug in ("fugu-max", "fugu"):
+            for slug in ("fugu",):
                 if slug in models:
                     chosen = "high" if "high" in models[slug] else sorted(models[slug])[0]
                     substitute = {

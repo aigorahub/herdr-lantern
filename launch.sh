@@ -395,11 +395,15 @@ $onboard_note
 - Fugu seats use \`--kind codex\` and the argv from \`model-route fugu\`.
   Require \`codex-fugu\` on PATH. If it is missing, stop and name the
   Sakana install command. Do not start plain Codex. The route reads the
-  installed \`fugu.json\`. Current catalogs prefer \`fugu-max\` at high,
-  then \`fugu\`. \`fugu ultra\` selects listed \`fugu-ultra\` (Ultra v2).
-  \`fugu max\` selects the model \`fugu-max\`. \`fugu-ultra-v1.1\` is the
-  older Ultra and the only row that currently lists effort max. Run
-  \`codex-fugu --check\` when the catalog is stale. Do not invent a slug.
+  installed \`fugu.json\`. The default is regular \`fugu\` at high. Do not
+  upgrade from task size. \`fugu xhigh\` is the deep route. \`fugu ultra\`
+  prefers \`fugu-ultra-v2.0\`, then \`fugu-ultra\`, then
+  \`fugu-ultra-v1.1\`. Effort max stays on the first of those rows that
+  lists it. That is not the Fugu Max model \`fugu-max\`. \`fugu max\`
+  selects that model only when the user names it. Never select
+  \`fugu-ultra-v1.0\`. A review prompt ranks areas, excludes known
+  findings, and requires an ordered P0-P3 report. Run \`codex-fugu
+  --check\` when the catalog is stale. Do not invent a slug.
 - Live models: Astra supports low, medium, high, xhigh, max, ultra. Codex
   also lists gpt-6-sol and gpt-6-luna. Bare gpt-6 is ambiguous: ask for
   Astra, Sol, or Luna. Bare sol and bare luna are ambiguous between

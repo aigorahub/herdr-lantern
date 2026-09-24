@@ -189,12 +189,12 @@ Check these choices against the live CLI before each seat:
 | Grok Build | `grok 4.7 build fast` | `-m grok-4.7-build-fast --reasoning-effort medium` when effort is omitted on the default route |
 | Grok Build | `grok 4.6 high` | `-m grok-4.6 --reasoning-effort high` if listed |
 | Grok Build | A model from `grok models`, plus an effort | `-m <listed-model> --reasoning-effort <effort>` |
-| Fugu | no variant | `model-route fugu default`. Current catalogs prefer `fugu-max` at high, then `fugu`. |
-| Fugu | `fugu` | `-m fugu` when that exact slug is listed. This is the latency model, not Fugu Max. |
-| Fugu | `fugu ultra`, `ultra` | `-m fugu-ultra` when that slug is listed. That slug is Fugu Ultra v2. Do not select `fugu-ultra-v1.1` for this phrase. |
-| Fugu | `fugu max` | `-m fugu-max` when listed. This is the model, not effort max. |
-| Fugu | `fugu-ultra-v1.1` | The exact listed slug. This is the only current row whose catalog includes effort `max`. |
-| Fugu | `fugu cyber` | `-m fugu-cyber` only when the user asks for cyber and the slug is listed. |
+| Fugu | no variant, `fugu`, `use Fugu` | `model-route fugu default`. That is regular `fugu` at high. Do not upgrade from task size. |
+| Fugu | `fugu deep`, `fugu xhigh` | Same slug `fugu` at `xhigh`. Use this after plain Fugu fails or returns a thin answer. |
+| Fugu | `fugu ultra`, `ultra` | The first listed slug in this order: `fugu-ultra-v2.0`, `fugu-ultra`, `fugu-ultra-v1.1`. Effort high. Only when the user asks for Ultra. |
+| Fugu | `fugu max` | `-m fugu-max` when listed. This is the Fugu Max model. It is not effort max. |
+| Fugu | effort max | The first Ultra slug in the order above that lists effort `max`. On current catalogs that is `fugu-ultra-v1.1`. Only when the user asks for that effort. |
+| Fugu | `fugu cyber` | `-m fugu-cyber` at `xhigh` only when the user asks for a security review and the slug is listed. |
 
 Codex Astra supports low, medium, high, xhigh, max, and ultra. Its live
 default is medium. Sol, Terra, and Luna remain available only while listed.
@@ -245,8 +245,17 @@ When the user does not name a model:
   Pass its argv after `--` on `herdr agent start <slug> --kind codex`.
   The wrapper still adds the Codex unattended flag. A missing or stale
   catalog stops the seat. Run `codex-fugu --check` before inventing a slug.
-  `fugu-ultra` is Fugu Ultra v2. `fugu-ultra-v1.1` is the older Ultra.
-  Effort `max` is valid only when that installed row lists it.
+  Elves is the use rule. A flagless call stays `fugu` at high. `--deep` is
+  the same model at `xhigh`. Cyber is only an explicit security review.
+  Ultra prefers `fugu-ultra-v2.0`, then `fugu-ultra`, then
+  `fugu-ultra-v1.1`. Effort `max` stays on the first of those rows that
+  lists it. That is not the Fugu Max model `fugu-max`. Never select
+  `fugu-ultra-v1.0`. Do not upgrade from task size. A Fugu review prompt
+  names the goal, the paths, the constraints, and the done-when. It ranks
+  the areas, excludes findings already fixed, and asks for ordered P0-P3
+  findings with `file:line` and a failure scenario. It says the report is
+  the deliverable and that time must be reserved to write it. Verify every
+  finding in the repo before acting on it.
 
 Smart-auto is the default permission tier for Claude, Grok, and Cursor.
 Claude and Grok use `--permission-mode auto`. Cursor uses `--auto-review

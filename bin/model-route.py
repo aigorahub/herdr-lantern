@@ -353,11 +353,9 @@ def fugu_route(phrase: str) -> dict[str, object]:
     by_slug = {str(model.get("slug")): model for model in models}
     normalized = phrase.strip().lower()
     if normalized == "default":
-        for slug in ("fugu-max", "fugu"):
-            if slug in by_slug:
-                model = by_slug[slug]
-                return fugu_result(model, fugu_effort(model, None))
-        fail("Fugu catalog has no approved default")
+        if "fugu" not in by_slug:
+            fail("Fugu catalog has no regular fugu model")
+        return fugu_result(by_slug["fugu"], fugu_effort(by_slug["fugu"], None))
     tokens = words(phrase)
     if "fast" in tokens:
         fail("Fugu does not publish a Fast route")
@@ -373,6 +371,29 @@ def fugu_route(phrase: str) -> dict[str, object]:
     terms = tuple(token for token in tokens if token not in {*effort_words, "fast", *STOP_WORDS})
     if not terms:
         fail("model phrase does not name a model family")
+    ultra_preference = ("fugu-ultra-v2.0", "fugu-ultra", "fugu-ultra-v1.1")
+    versioned = any(
+        token[:1].isdigit() or (token.startswith("v") and any(char.isdigit() for char in token))
+        for token in terms
+    )
+    if "ultra" in terms and not versioned:
+        chosen = None
+        if effort == "max":
+            for slug in ultra_preference:
+                row = by_slug.get(slug)
+                levels = {
+                    str(level.get("effort"))
+                    for level in (row or {}).get("supported_reasoning_levels", [])
+                    if isinstance(level, dict)
+                }
+                if "max" in levels:
+                    chosen = slug
+                    break
+        if chosen is None:
+            chosen = next((slug for slug in ultra_preference if slug in by_slug), None)
+        if chosen is None:
+            fail("Fugu catalog has no Ultra model")
+        return fugu_result(by_slug[chosen], fugu_effort(by_slug[chosen], effort))
     model_id = choose(
         [
             (
