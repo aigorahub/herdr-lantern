@@ -32,7 +32,9 @@ case "${1:-} ${2:-}" in
     fi
     ;;
 "agent prompt")
-    if [ "${FAKE_SKIP_HANDOFF:-}" != 1 ]; then
+    if [ -n "${FAKE_NATIVE_WRITER:-}" ]; then
+        python "$FAKE_NATIVE_WRITER" "$4" "$FAKE_NATIVE_EXPECTED" || exit $?
+    elif [ "${FAKE_SKIP_HANDOFF:-}" != 1 ]; then
         {
             printf 'handoff-id: %s\n' "$LANTERN_EVENING_ID"
             printf '%s\n' 'active: preserved w2' 'closed-temporary: w3' 'next: reconcile morning'
@@ -71,10 +73,19 @@ state=$tmp/state
 mkdir -p "$state"
 printf '%s\n' w9 >"$state/workspace.id"
 printf '%s\n' w9:p9 >"$state/pane.id"
+native_writer=
+native_expected=
+case $(uname -s 2>/dev/null || printf unknown) in
+MINGW* | MSYS* | CYGWIN*)
+    native_writer=$root/tests/fixtures/native_evening_handoff_writer.py
+    native_expected=$(cygpath -w "$state/herd/evening-handoff.md")
+    ;;
+esac
 CODEX_SESSION_ID=01999999-9999-7999-8999-999999999999 \
     python "$root/bin/lantern_session.py" capture \
     --path "$state/herd/lantern-codex-session.json" --pane w9:p9 --workspace w9
 FAKE_HERDR_LOG=$log FAKE_PANE_CLOSED=$closed FAKE_CODEX_LOG=$codex_log \
+    FAKE_NATIVE_WRITER=$native_writer FAKE_NATIVE_EXPECTED=$native_expected \
     HERDR_PLUGIN_ROOT=$root HERDR_PLUGIN_STATE_DIR=$state HERDR_BIN_PATH=$fake \
     CODEX_BIN_PATH=$fake_codex sh "$root/evening.sh" >"$tmp/evening.out" ||
     fail "successful evening action"

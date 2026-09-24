@@ -131,7 +131,8 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
 
 def shell_quote(path: Path) -> str:
     value = path.as_posix()
-    return "'" + (value.replace("'", "''") if os.name == "nt" else value.replace("'", "'\"'\"'")) + "'"
+    # The pane command runs in sh on every platform, including Windows.
+    return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
 def start_watcher(binary: str, pane_id: str, plugin_root: Path, state_dir: Path, timeout: float) -> None:

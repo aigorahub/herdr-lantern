@@ -434,7 +434,7 @@ $onboard_note
   create a Herdr workspace, tab, agent, or saved Codex session for that route.
   It inherits Codex login in place; never copy, print, log, export, or put auth
   or config material in a repo or job result. Inspect update diffs and run the
-  repo's required tests before calling the task complete. An ephemeral job
+  required tests for the repo before calling the task complete. An ephemeral job
   cannot be resumed; promote work needing steering to a fresh interactive
   session with a durable handoff.
 - "Clean completed sessions in <repo/workspace>" names a cleanup scope.

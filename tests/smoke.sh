@@ -13,6 +13,15 @@ for f in launch.sh open.sh evening.sh lib.sh bin/herdr bin/model-route bin/model
     sh -n "$f" || fail "sh -n $f"
 done
 
+# Bash 3.2 on macOS pairs ASCII apostrophes while scanning a command
+# substitution, even inside the appendix heredoc. Keep prose there quote-free.
+awk '
+    /^appendix=\$\($/ { in_appendix = 1; next }
+    in_appendix && /^EOF$/ { found_end = 1; exit }
+    in_appendix && index($0, sprintf("%c", 39)) { exit 1 }
+    END { if (!found_end) exit 1 }
+' "$root/launch.sh" || fail "ASCII apostrophe in launch appendix heredoc"
+
 sh "$root/tests/day-boundary.sh" || fail "day-boundary workflow tests"
 
 # shellcheck disable=SC1091

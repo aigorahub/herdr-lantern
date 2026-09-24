@@ -30,6 +30,7 @@ live_workspace=$(helper_lantern_pane_workspace "$herdr" "$pane" Lantern) ||
 
 handoff_dir=$state_dir/herd
 handoff=$handoff_dir/evening-handoff.md
+handoff_native=$(helper_native_path "$handoff")
 session_receipt=$handoff_dir/lantern-codex-session.json
 session_helper=$plugin_root/bin/lantern_session.py
 (umask 077; mkdir -p "$handoff_dir") || die "could not create private handoff directory"
@@ -53,7 +54,7 @@ Run the authorized evening shutdown workflow now.
    close only exact tabs/workspaces that pass every gate. Do not remove a
    worktree. Do not close the Lantern home pane or workspace.
 3. After the audit and eligible closes, atomically write a compact Markdown
-   handoff to this exact path: $handoff
+   handoff to this exact path: $handoff_native
    Its first line must be exactly: handoff-id: $handoff_id
    Include UTC time, preserved active/unresolved workspace IDs and reasons,
    completed temporary workspace IDs closed with evidence, failed gates,

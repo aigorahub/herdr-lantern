@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -185,6 +186,10 @@ class FieldStatusTests(unittest.TestCase):
             status.control("herdr", ["pane", "split", "--pane", "w1:p1"], 1)
         self.assertNotEqual(seen[0][1], "1")
         self.assertEqual(seen[1][1], "1")
+
+    def test_watcher_command_quotes_windows_user_path_for_sh(self):
+        path = Path("C:/Users/O'Brien/Lantern")
+        self.assertEqual(shlex.split(status.shell_quote(path)), [path.as_posix()])
 
     def test_reused_pane_restarts_idle_watcher_but_not_other_process(self):
         with tempfile.TemporaryDirectory() as root:

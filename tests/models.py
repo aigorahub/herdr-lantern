@@ -179,6 +179,8 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
              "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
             {"slug": "fugu-ultra-v1.1", "display_name": "Fugu Ultra v1.1", "visibility": "list",
              "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"}]},
+            {"slug": "fugu-ultra-v1.0", "display_name": "Fugu Ultra v1.0", "visibility": "list",
+             "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
         ]})
         with tempfile.TemporaryDirectory() as home:
             path = os.path.join(home, "fugu.json")
@@ -189,11 +191,18 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                 self.assertEqual(default["model"], "fugu")
                 self.assertEqual(default["effort"], "high")
                 self.assertEqual(route.fugu_route("fugu")["model"], "fugu")
+                self.assertEqual(route.fugu_route("fugu deep")["model"], "fugu")
+                self.assertEqual(route.fugu_route("fugu deep")["effort"], "xhigh")
+                self.assertEqual(route.fugu_route("fugu ultra deep")["effort"], "xhigh")
+                with self.assertRaises(route.RouteError):
+                    route.fugu_route("fugu deep high")
                 self.assertEqual(route.fugu_route("fugu ultra")["model"], "fugu-ultra-v2.0")
                 self.assertEqual(route.fugu_route("fugu max")["model"], "fugu-max")
                 self.assertEqual(route.fugu_route("ultra max")["model"], "fugu-ultra-v1.1")
                 self.assertEqual(route.fugu_route("fugu ultra max")["model"], "fugu-ultra-v1.1")
                 self.assertEqual(route.fugu_route("fugu-ultra-v1.1 max")["effort"], "max")
+                with self.assertRaises(route.RouteError):
+                    route.fugu_route("fugu-ultra-v1.0")
 
     def test_bare_generation_requires_choice(self):
         with patch.object(route, "run_catalog", return_value=codex_catalog()):
