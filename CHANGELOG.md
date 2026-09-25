@@ -2,7 +2,7 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## Unreleased (local integration)
+## [0.16.0] - 2026-09-25
 
 ### Added
 
