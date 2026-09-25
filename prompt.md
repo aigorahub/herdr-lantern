@@ -589,20 +589,32 @@ Home as part of Field Status.
   Do not paste tool output, command transcripts, or "Ran command" lines into
   the chat. If the side pane cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
-- Agent names are yellow. In Motion is yellow, Done green, Keep blue, and
-  Closed red. Idle, blocked, unknown, and shell mean Keep; idle alone is not
-  completion. A closed agent last seen Done remains visible for 15 minutes
-  after closure, then is pruned on the next refresh.
-- Important / Needs You contains only a concrete action the user must take.
-  A blocked Herdr state by itself does not qualify. Review gates that require
-  no user action go under Review Gates, never Needs You. Before opening the
+- Show separate Important (red) and Needs You (purple) sections. The In Motion
+  (yellow), Done (green), and Keep (blue) labels are section headers, not
+  per-agent status suffixes. Show human-readable workspace names in yellow,
+  such as Lantern, Daily-Tasks, or Finance-Tracker Sol6 Fixes; never print a
+  generic shell label or an internal agent slug as the display name. Include
+  the tab name beneath when it distinguishes sessions. Keep shows only Lantern
+  Home by default. An idle, blocked, unknown, or shell tab appears there only
+  when the user specifically asks to keep it, recorded with
+  `$LANTERN_FIELD_STATUS note keep set <pane-or-tab-id> "<reason>"`.
+  Do not close a quiet tab merely because it is hidden from Keep.
+  For each Done agent retained in the field, inspect its final output and set
+  `$LANTERN_FIELD_STATUS note done set <pane-id> "<short verified outcome>"`.
+  Never present a task title alone as an accomplished outcome.
+  Before closing a Done session, verify its repo/worktree has no uncommitted
+  work, its output is durable, and no other agent relies on it. Close only
+  verified settled sessions; they disappear from Field Status immediately.
+- Needs You contains only a concrete action the user must take. A blocked
+  Herdr state by itself does not qualify. Important contains noteworthy status
+  or review gates that require no user action; there is no Review Gates section.
+  Before opening the
   pane and at each monitor checkpoint, reconcile unfinished pack records and
   review evidence, then use `$LANTERN_FIELD_STATUS note needs-you set <id> "<exact user action>"`
-  or `note review-gate set <id> "<gate>"` when a monitor finds one. Clear its
+  or `note important set <id> "<noteworthy status>"` when a monitor finds one. Clear its
   stable ID when resolved. Notes persist in private Lantern state.
 - Refresh at meaningful agent completion, closure, and review events. The
-  watcher redraws when field rows, notes, or the ET minute change; it polls to
-  detect events and prune expired closed Done rows. Keep existing recurring monitors.
+  watcher redraws when field rows, notes, or the ET minute change. Keep existing recurring monitors.
   Do not turn an idle event into Done or a user interruption.
 - The first Field Status request opens one reusable right-side pane beside
   Lantern Home. The command uses the explicit Lantern home pane ID,
