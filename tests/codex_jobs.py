@@ -94,6 +94,7 @@ class CodexJobs(unittest.TestCase):
             self.assertEqual(Path(report["result"]).read_text(encoding="utf-8"), "saved result\n")
             self.assertFalse(report["session_persisted"])
             self.assertIn("--ephemeral", command)
+            self.assertIn("--skip-git-repo-check", command)
             self.assertEqual(command[:2], ["codex", "exec"])
             self.assertNotIn("resume", command)
             self.assertNotIn("fork", command)
@@ -102,6 +103,18 @@ class CodexJobs(unittest.TestCase):
             self.assertIn("Do not expose, copy, or persist authentication material", kwargs["input"])
             self.assertIsNone(kwargs.get("env"))
             return command
+
+    def test_windows_batch_shim_escapes_cmd_metacharacters(self):
+        from win_cmd import cmd_argv
+
+        argv = cmd_argv(
+            [r"C:\Tools\codex.cmd", "exec", "-C", r"C:\Work\R&D\repo", "-o", r"C:\Users\O\R&D Space\out.md"],
+            r"C:\Windows\System32\cmd.exe",
+        )
+        self.assertEqual(argv[:4], [r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c"])
+        self.assertIn(r"C:\Work\R^&D\repo", argv[4])
+        self.assertIn(r'"C:\Users\O\R&D Space\out.md"', argv[4])
+        self.assertNotIn("R&D Space", argv[4].split('"')[0])
 
     def test_research_is_ephemeral_and_read_only(self):
         command = self.run_one("research")

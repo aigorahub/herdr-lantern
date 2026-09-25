@@ -25,7 +25,15 @@ def main() -> None:
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent,
                                      prefix=".evening-handoff.", delete=False) as stream:
         stream.write(f"handoff-id: {id_match.group(1)}\n")
-        stream.write("active: preserved w2\nclosed-temporary: w3\nnext: reconcile morning\n")
+        stream.write(
+            "utc: 2026-09-25T00:00:00Z\n"
+            "active: preserved w2\n"
+            "closed-temporary: w3\n"
+            "failed-gates: none\n"
+            "durable-results: none\n"
+            "dependencies: none\n"
+            "next: reconcile morning\n"
+        )
         temp_name = stream.name
     os.replace(temp_name, target)
 

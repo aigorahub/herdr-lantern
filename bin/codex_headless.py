@@ -17,8 +17,10 @@ import sys
 import tempfile
 from typing import Callable, Sequence
 
-
 BIN = Path(__file__).resolve().parent
+if str(BIN) not in sys.path:
+    sys.path.insert(0, str(BIN))
+from win_cmd import cmd_argv
 JOB_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 DAILY_TASKS_CWD = Path(r"C:\Claude\Daily-Tasks")
 DAILY_TASKS_MODEL = "5.6 luna xhigh fast"
@@ -68,8 +70,7 @@ def resolve_codex(argv: list[str]) -> list[str]:
         raise JobError("codex command not found")
     command = [executable, *argv[1:]]
     if os.name == "nt" and executable.lower().endswith((".cmd", ".bat")):
-        command_line = subprocess.list2cmdline(command)
-        return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line]
+        return cmd_argv(command, os.environ.get("COMSPEC", "cmd.exe"))
     return command
 
 
@@ -87,6 +88,7 @@ def build_command(
         "codex",
         "exec",
         "--ephemeral",
+        "--skip-git-repo-check",
         *model_argv,
         *permission_argv,
         "-C",

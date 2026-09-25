@@ -146,13 +146,60 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
 
 def shell_quote(path: Path) -> str:
     value = path.as_posix()
-    # The pane command runs in sh on every platform, including Windows.
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
+def powershell_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def watcher_command(plugin_root: Path, state_dir: Path, *, shell: str, python: str) -> str:
+    """Build the text pane run will type into the new pane's own shell."""
+    if shell == "sh":
+        script = plugin_root / "bin" / "field-status"
+        return f"sh {shell_quote(script)} --state-dir {shell_quote(state_dir)} watch"
+    if shell == "powershell":
+        # Windows panes start in PowerShell. POSIX quotes never reach sh.
+        # Keep backslashes on every host so the typed command does not depend
+        # on which OS built the string.
+        script = str(plugin_root / "bin" / "field_status.py").replace("/", "\\")
+        state = str(state_dir).replace("/", "\\")
+        return (
+            f"& {powershell_quote(python)} {powershell_quote(script)} "
+            f"--state-dir {powershell_quote(state)} watch"
+        )
+    raise RuntimeError(f"unsupported Field Status pane shell: {shell}")
+
+
+def pane_shell() -> str:
+    return "powershell" if os.name == "nt" else "sh"
+
+
 def start_watcher(binary: str, pane_id: str, plugin_root: Path, state_dir: Path, timeout: float) -> None:
-    command = f"sh {shell_quote(plugin_root / 'bin' / 'field-status')} --state-dir {shell_quote(state_dir)} watch"
+    command = watcher_command(
+        plugin_root, state_dir, shell=pane_shell(), python=sys.executable
+    )
     control(binary, ["pane", "run", pane_id, command], timeout)
+
+
+def watcher_occupancy(info: object) -> str:
+    """Return running or idle. An unrelated foreground process is an error."""
+    if not isinstance(info, dict):
+        raise RuntimeError("Field Status pane process state unavailable")
+    processes = info.get("foreground_processes")
+    if not isinstance(processes, list):
+        raise RuntimeError("Field Status pane process state unavailable")
+    if any(
+        isinstance(proc, dict)
+        and "field_status.py" in str(proc.get("cmdline", ""))
+        and "watch" in str(proc.get("cmdline", ""))
+        for proc in processes
+    ):
+        return "running"
+    shell_pid = info.get("shell_pid")
+    if any(isinstance(proc, dict) and proc.get("pid") != shell_pid for proc in processes):
+        raise RuntimeError("Field Status pane is occupied by another process")
+    return "idle"
 
 
 def open_pane(state_dir: Path, plugin_root: Path, binary: str, timeout: float) -> tuple[str, bool]:
@@ -180,16 +227,8 @@ def open_pane(state_dir: Path, plugin_root: Path, binary: str, timeout: float) -
     if saved and any(pane.get("pane_id") == saved and pane.get("tab_id") == tab
                      and not pane.get("agent") for pane in panes):
         info = control(binary, ["pane", "process-info", "--pane", saved], timeout).get("process_info", {})
-        processes = info.get("foreground_processes") if isinstance(info, dict) else None
-        if not isinstance(processes, list):
-            raise RuntimeError("Field Status pane process state unavailable")
-        if any("field_status.py" in str(proc.get("cmdline", "")) and "watch" in str(proc.get("cmdline", ""))
-               for proc in processes if isinstance(proc, dict)):
-            return saved, False
-        shell_pid = info.get("shell_pid")
-        if any(proc.get("pid") != shell_pid for proc in processes if isinstance(proc, dict)):
-            raise RuntimeError("Field Status pane is occupied by another process")
-        start_watcher(binary, saved, plugin_root, state_dir, timeout)
+        if watcher_occupancy(info) == "idle":
+            start_watcher(binary, saved, plugin_root, state_dir, timeout)
         return saved, False
     # Recovery after state loss: the pane label is visible in pane list on
     # supported Herdr versions. It is never an agent pane.
@@ -197,8 +236,11 @@ def open_pane(state_dir: Path, plugin_root: Path, binary: str, timeout: float) -
                      and pane.get("label") == "Field Status" and not pane.get("agent")), None)
     if existing:
         pane_id = existing["pane_id"]
+        info = control(binary, ["pane", "process-info", "--pane", pane_id], timeout).get("process_info", {})
+        state = watcher_occupancy(info)
         write_json(path, {"schema": 1, "home_pane_id": home, "pane_id": pane_id, "tab_id": tab})
-        start_watcher(binary, pane_id, plugin_root, state_dir, timeout)
+        if state == "idle":
+            start_watcher(binary, pane_id, plugin_root, state_dir, timeout)
         return pane_id, False
     split = control(binary, ["pane", "split", "--pane", home, "--direction", "right",
                              "--ratio", "0.30", "--cwd", str(Path.cwd()), "--no-focus"], timeout)

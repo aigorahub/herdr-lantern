@@ -196,6 +196,48 @@ class FieldStatusTests(unittest.TestCase):
         path = Path("C:/Users/O'Brien/Lantern")
         self.assertEqual(shlex.split(status.shell_quote(path)), [path.as_posix()])
 
+    def test_windows_watcher_command_is_powershell(self):
+        command = status.watcher_command(
+            Path("C:/Program Files/Lantern"),
+            Path("C:/Users/O'Brien/state"),
+            shell="powershell",
+            python=r"C:\Program Files\Python\python.exe",
+        )
+        self.assertTrue(command.startswith("& "))
+        self.assertIn("'C:\\Program Files\\Python\\python.exe'", command)
+        self.assertIn("'C:\\Program Files\\Lantern\\bin\\field_status.py'", command)
+        self.assertIn("'C:\\Users\\O''Brien\\state'", command)
+        self.assertNotIn("'\"'\"'", command)
+        self.assertNotIn(" sh ", command)
+
+    def test_recovered_label_checks_occupancy_before_watcher(self):
+        with tempfile.TemporaryDirectory() as root:
+            state_dir = Path(root)
+            calls = []
+            occupied = True
+
+            def fake_control(_binary, args, _timeout):
+                calls.append(args)
+                if args[:2] == ["pane", "list"]:
+                    return {"panes": [
+                        {"pane_id": "w1:p1", "tab_id": "w1:t1", "agent": "codex"},
+                        {"pane_id": "w1:p2", "tab_id": "w1:t1", "label": "Field Status"},
+                    ]}
+                if args[:2] == ["pane", "process-info"]:
+                    processes = [{"pid": 2, "cmdline": "other job"}] if occupied else []
+                    return {"process_info": {"shell_pid": 1, "foreground_processes": processes}}
+                return {}
+
+            env = {"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1", "HERDR_TAB_ID": "w1:t1",
+                   "HERDR_WORKSPACE_ID": "w1", "LANTERN_HOME_PANE_ID": "w1:p1"}
+            with patch.dict(status.os.environ, env), patch.object(status, "control", side_effect=fake_control):
+                with self.assertRaisesRegex(RuntimeError, "occupied"):
+                    status.open_pane(state_dir, BIN.parent, "herdr", 1)
+                occupied = False
+                self.assertEqual(status.open_pane(state_dir, BIN.parent, "herdr", 1), ("w1:p2", False))
+            self.assertEqual(sum(args[:2] == ["pane", "run"] for args in calls), 1)
+            self.assertFalse(any(args[:2] == ["pane", "split"] for args in calls))
+
     @unittest.skipUnless(os.name == "nt", "requires native Windows Python")
     def test_native_windows_refresh_and_watch_use_launcher_wrapper(self):
         with tempfile.TemporaryDirectory() as root:

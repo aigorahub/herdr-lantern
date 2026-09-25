@@ -34,10 +34,19 @@ case "${1:-} ${2:-}" in
 "agent prompt")
     if [ -n "${FAKE_NATIVE_WRITER:-}" ]; then
         python "$FAKE_NATIVE_WRITER" "$4" "$FAKE_NATIVE_EXPECTED" || exit $?
+    elif [ "${FAKE_ID_ONLY:-}" = 1 ]; then
+        printf 'handoff-id: %s\n' "$LANTERN_EVENING_ID" >"$LANTERN_EVENING_HANDOFF"
     elif [ "${FAKE_SKIP_HANDOFF:-}" != 1 ]; then
         {
             printf 'handoff-id: %s\n' "$LANTERN_EVENING_ID"
-            printf '%s\n' 'active: preserved w2' 'closed-temporary: w3' 'next: reconcile morning'
+            printf '%s\n' \
+                'utc: 2026-09-25T00:00:00Z' \
+                'active: preserved w2' \
+                'closed-temporary: w3' \
+                'failed-gates: none' \
+                'durable-results: none' \
+                'dependencies: none' \
+                'next: reconcile morning'
         } >"$LANTERN_EVENING_HANDOFF"
     fi
     ;;
@@ -81,8 +90,13 @@ MINGW* | MSYS* | CYGWIN*)
     native_expected=$(cygpath -w "$state/herd/evening-handoff.md")
     ;;
 esac
+if command -v python3 >/dev/null 2>&1; then
+    host_python=python3
+else
+    host_python=python
+fi
 CODEX_SESSION_ID=01999999-9999-7999-8999-999999999999 \
-    python "$root/bin/lantern_session.py" capture \
+    $host_python "$root/bin/lantern_session.py" capture \
     --path "$state/herd/lantern-codex-session.json" --pane w9:p9 --workspace w9
 FAKE_HERDR_LOG=$log FAKE_PANE_CLOSED=$closed FAKE_CODEX_LOG=$codex_log \
     FAKE_NATIVE_WRITER=$native_writer FAKE_NATIVE_EXPECTED=$native_expected \
@@ -119,6 +133,23 @@ fi
 after=$(grep -cF '<pane close w9:p9>' "$log")
 [ "$before" = "$after" ] || fail "evening closed home after handoff failure"
 
+# An ID-only file is not a handoff the morning session can reconcile.
+state_thin=$tmp/state-thin
+mkdir -p "$state_thin"
+printf '%s\n' w9 >"$state_thin/workspace.id"
+printf '%s\n' w9:p9 >"$state_thin/pane.id"
+before=$(grep -cF '<pane close w9:p9>' "$log")
+rm -f "$closed"
+if FAKE_ID_ONLY=1 FAKE_HERDR_LOG=$log FAKE_PANE_CLOSED=$closed \
+    HERDR_PLUGIN_ROOT=$root HERDR_PLUGIN_STATE_DIR=$state_thin \
+    HERDR_BIN_PATH=$fake sh "$root/evening.sh" >/dev/null 2>"$tmp/thin.err"; then
+    fail "evening succeeded with an ID-only handoff"
+fi
+grep -qF 'handoff is missing utc:' "$tmp/thin.err" ||
+    fail "ID-only handoff did not name the missing field"
+after=$(grep -cF '<pane close w9:p9>' "$log")
+[ "$before" = "$after" ] || fail "evening closed home after a thin handoff"
+
 # A deletion failure is reported after pane close; no fuzzy name or direct
 # session-file removal is attempted.
 state_delete_fail=$tmp/state-delete-fail
@@ -126,7 +157,7 @@ mkdir -p "$state_delete_fail"
 printf '%s\n' w9 >"$state_delete_fail/workspace.id"
 printf '%s\n' w9:p9 >"$state_delete_fail/pane.id"
 CODEX_SESSION_ID=01999999-9999-7999-8999-999999999998 \
-    python "$root/bin/lantern_session.py" capture \
+    $host_python "$root/bin/lantern_session.py" capture \
     --path "$state_delete_fail/herd/lantern-codex-session.json" \
     --pane w9:p9 --workspace w9
 rm -f "$closed"
@@ -199,6 +230,10 @@ grep -qiF 'if /I "%~1"=="nightly" goto evening' "$root/hsh.cmd" ||
     fail "hsh.cmd nightly routing"
 grep -qiF 'if /I "%~1"=="morning" goto morning' "$root/hsh.cmd" ||
     fail "hsh.cmd morning routing"
+grep -qF 'if not "%~2"=="" goto usage' "$root/hsh.cmd" ||
+    fail "hsh.cmd accepts extra arguments"
+grep -qF 'if "%HERDR_ENV%"=="1" exit /b 0' "$root/hsh.cmd" ||
+    fail "hsh.cmd morning attaches Herdr inside a managed pane"
 grep -qF 'codex_headless.py' "$root/bin/codex-headless.cmd" ||
     fail "Windows headless launcher"
 grep -qF 'CODEX_SESSION_ID' "$root/launch.sh" ||

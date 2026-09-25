@@ -56,12 +56,17 @@ Run the authorized evening shutdown workflow now.
 3. After the audit and eligible closes, atomically write a compact Markdown
    handoff to this exact path: $handoff_native
    Its first line must be exactly: handoff-id: $handoff_id
-   Include UTC time, preserved active/unresolved workspace IDs and reasons,
-   completed temporary workspace IDs closed with evidence, failed gates,
-   durable result paths/commits, pending dependencies, and the next morning
-   actions. Never include credentials, tokens, auth/config contents, or copied
+   Also write one line for each of these labels. A line may say none.
+   utc:
+   active:
+   closed-temporary:
+   failed-gates:
+   durable-results:
+   dependencies:
+   next:
+   Never include credentials, tokens, auth/config contents, or copied
    secrets. Keep it concise.
-4. Read the file back, verify that exact handoff ID and the material fields,
+4. Read the file back, verify that exact handoff ID and those labels,
    then report completion. Do not exit or close your own pane; the outer
    evening action does that only after it independently verifies the handoff.
 EOF
@@ -73,6 +78,11 @@ EOF
 first_line=$(sed -n '1p' "$handoff")
 [ "$first_line" = "handoff-id: $handoff_id" ] ||
     die "handoff verification failed; home remains open"
+for handoff_label in utc: active: closed-temporary: failed-gates: \
+    durable-results: dependencies: next:; do
+    grep -q "^${handoff_label}" "$handoff" ||
+        die "handoff is missing ${handoff_label}; home remains open"
+done
 
 # Capture cleanup evidence while the exact pane is still live. Failure is not
 # permission to guess: the pane may exit, but its saved Codex session remains.

@@ -30,6 +30,21 @@ All notable changes to Lantern, by Elves are documented here.
   run, with read-only verification examples that explicitly prohibit edits and
   outbound messages.
 
+### Fixed
+
+- The Field Status watcher command is quoted for the pane shell. On Windows
+  that shell is PowerShell, so the watcher calls Python directly instead of
+  sending a POSIX `sh` command. Reopening a labelled pane checks that the
+  shell is idle before typing the watcher command.
+- Headless `codex exec` passes `--skip-git-repo-check`, so a non-git working
+  directory such as Daily-Tasks is not rejected before the job starts.
+  A Windows `.cmd` Codex shim is escaped for `cmd.exe` metacharacters.
+- `hsh.cmd morning` does not attach another Herdr client inside a Herdr pane,
+  and it rejects an extra argument the same way `hsh` does.
+- Evening shutdown keeps the Lantern home pane open unless the handoff
+  contains the required `utc:`, `active:`, `closed-temporary:`,
+  `failed-gates:`, `durable-results:`, `dependencies:`, and `next:` lines.
+
 ## [0.15.0] - 2026-09-24
 
 ### Added

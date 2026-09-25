@@ -1,5 +1,6 @@
 @echo off
 setlocal
+if not "%~2"=="" goto usage
 if /I "%~1"=="evening" goto evening
 if /I "%~1"=="nightly" goto evening
 if /I "%~1"=="morning" goto morning
@@ -14,6 +15,7 @@ exit /b %ERRORLEVEL%
 :morning
 herdr plugin action invoke aigora.lantern.open
 if errorlevel 1 exit /b %ERRORLEVEL%
+if "%HERDR_ENV%"=="1" exit /b 0
 herdr
 exit /b %ERRORLEVEL%
 

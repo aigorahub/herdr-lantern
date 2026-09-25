@@ -15,6 +15,10 @@ import tempfile
 import time
 from pathlib import Path
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from win_cmd import cmd_argv
+
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -183,7 +187,7 @@ def delete(args: argparse.Namespace) -> None:
     executable = shutil.which(args.codex) or args.codex
     command = [executable, "delete", session_id, "--force"]
     if os.name == "nt" and Path(executable).suffix.lower() in {".cmd", ".bat"}:
-        command = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", *command]
+        command = cmd_argv(command, os.environ.get("COMSPEC", "cmd.exe"))
     try:
         completed = subprocess.run(
             command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True

@@ -336,9 +336,9 @@ Use `hsh evening` (or `hsh nightly`) from a terminal outside the Lantern pane.
 The plugin action asks the live Lantern to audit dependencies and cleanup
 eligibility, close only completed workspaces explicitly marked temporary, and
 atomically write `$LANTERN_HERD_STATE_DIR/evening-handoff.md`. The handoff is
-compact and contains active/unresolved work, preservation reasons, durable
-results, pending dependencies, failed cleanup gates, and morning next steps;
-it contains no auth/config material. At light-up, a Codex Lantern first uses
+compact. After the `handoff-id:` line it has `utc:`, `active:`,
+`closed-temporary:`, `failed-gates:`, `durable-results:`, `dependencies:`,
+and `next:`. A line may say none. It contains no auth/config material. At light-up, a Codex Lantern first uses
 the injected capture helper to save its `CODEX_SESSION_ID` with the exact
 Lantern pane/workspace identity in private plugin state; no auth/config values
 are stored. The outer action independently verifies a new handoff ID, private
