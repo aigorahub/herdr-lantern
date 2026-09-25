@@ -120,12 +120,13 @@ On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 working toward?” for that readout. Ask “Field Status” or “what’s going on”
 to open a compact right-side pane beside Lantern Home. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
-date/time, explicit actions under Important / Needs You, review gates that
-need no user action in a separate section, and every open tab. Agent names
-are yellow; In Motion is yellow, Done green, Keep blue, Closed red. Idle is
-Keep, never proof of completion. Closed Done agents remain for 15 minutes,
-then disappear on the next refresh. Daily Tasks and Lantern Home stay visible
-and are never closed by this view. The watcher redraws when field state or
+date/time, separate red Important and purple Needs You sections, and every
+open tab. Human-readable workspace names are yellow; In Motion, Done, and
+Keep are yellow, green, and blue section headers. Keep shows Lantern Home and
+only other sessions explicitly pinned by the user; hiding a quiet tab does not
+close it. Done agents show a verified short outcome, and verified settled
+sessions disappear immediately after closure. Daily Tasks and Lantern Home
+are never closed by this view. The watcher redraws when field state or
 notes change and leaves command transcripts out of the chat.
 
 Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
@@ -133,8 +134,11 @@ the repo. The runtime prompt calls the detected Python 3 command with
 `$LANTERN_FIELD_STATUS pane` to open or reuse the view. For a plain snapshot,
 use `python bin/field_status.py --state-dir <private-state-dir> --plain refresh`.
 Monitor events can set or clear notes with `note needs-you set|clear <id>` and
-`note review-gate set|clear <id>`. A Needs You note must name the exact action
-for the user; review gates with no user action belong only in review-gate.
+`note important set|clear <id>`. A Needs You note must name the exact action
+for the user; noteworthy status or review gates with no user action belong
+under Important. Legacy review-gate notes display under Important until cleared.
+Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
+Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
 
 Lantern works great with Elves. Without Elves it is still the Herdr
 plugin: workspaces, panes, agents. If `.elves-session.json` files exist,

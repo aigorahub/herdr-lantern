@@ -225,7 +225,9 @@ Runtime (injected by launch.sh; do not ignore):
   right-side view. The pane runs \`watch\` and redraws on meaningful changes.
   Reconcile unfinished pack records and review evidence before opening it.
   Use \`note needs-you set/clear\` for exact user actions and
-  \`note review-gate set/clear\` for gates needing no user action. Do not
+  \`note important set/clear\` for noteworthy status or gates needing no user action.
+  Use \`note keep set/clear\` only for a user-requested Keep entry and
+  \`note done set/clear\` for a verified task outcome. Do not
   paste Ran command transcripts into the chat. Keep Daily Tasks and Lantern
   Home open.
 
@@ -358,11 +360,14 @@ $onboard_note
   right-side pane beside Lantern Home; \`watch\` keeps the display current.
   Join \`herdr tab list\`, \`herdr agent list\`, and \`herdr workspace list\`
   by ID. Keep every open tab, including quiet/idle, Daily Tasks, and Lantern
-  Home. Agent names yellow; In Motion yellow, Done green, Keep blue, Closed red.
-  Idle, blocked, unknown, and shell are Keep, never proof of completion.
-  Closed Done agents stay for 15 minutes, then prune on the next refresh.
-  Important / Needs You states the exact user action. Review gates requiring
-  no user action stay in their own section. Refresh at meaningful completion,
+  Home. Show human-readable workspace names in yellow, never internal agent
+  slugs or shell labels. In Motion, Done, and Keep are separate yellow, green,
+  and blue list headers. Keep shows only Lantern Home and user-pinned sessions;
+  hidden quiet tabs stay open. Done entries need short verified outcomes.
+  Before closing Done agents, check uncommitted work and other-agent reliance;
+  verified closed sessions disappear immediately. Important is red for noteworthy status or
+  review gates; Needs You is purple for an exact user action. There is no
+  Review Gates section. Refresh at meaningful completion,
   closure, and review events. Never close Lantern Home or Daily Tasks.
 - Route loose phrases. "What’s going on" means field status and agent,
   workspace, and tab lists. "Open the tab" means an exact agent, workspace,

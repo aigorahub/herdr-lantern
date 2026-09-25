@@ -17,9 +17,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-RETENTION = timedelta(minutes=15)
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m"}
+ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m", "purple": "\x1b[35m"}
 RESET = "\x1b[0m"
 ORDER = {"working": 0, "blocked": 1, "done": 2, "idle": 3, "unknown": 4}
 
@@ -283,35 +282,30 @@ def rows_for(tabs: list[dict], agents: list[dict], workspaces: list[dict]) -> li
                 "tab": clean(tab.get("label") or tab_id),
                 "agent": clean(agent_name),
                 "raw_status": raw_status,
+                "state_change_seq": agent.get("state_change_seq"),
                 "sort_index": index * 1000 + occupant_index,
             })
     return rows
 
 
 def reconcile(live: list[dict], previous: dict, now: datetime) -> list[dict]:
-    prior = [row for row in previous.get("rows", []) if isinstance(row, dict)]
-    seen = {(row["tab_id"], row.get("pane_id"), row.get("terminal_id"), row.get("agent")) for row in live}
-    result = list(live)
-    for row in prior:
-        identity = (row.get("tab_id"), row.get("pane_id"), row.get("terminal_id"), row.get("agent"))
-        if identity in seen or row.get("raw_status") != "done" or row.get("agent") == "shell":
-            continue
-        closed_at = row.get("closed_at") or now.isoformat()
-        try:
-            age = now - datetime.fromisoformat(closed_at)
-        except (ValueError, TypeError):
-            continue
-        if timedelta(0) <= age < RETENTION:
-            result.append({**row, "closed_at": closed_at})
-    return result
+    # Closing a verified completed session removes it from the field at once.
+    return list(live)
 
 
 def notes(state_dir: Path) -> dict:
-    data = read_json(state_dir / "field-status-notes.json", {"needs_you": {}, "review_gates": {}})
-    for key in ("needs_you", "review_gates"):
+    data = read_json(state_dir / "field-status-notes.json", {"important": {}, "needs_you": {}, "keep": {}, "done": {}})
+    for key in ("important", "needs_you", "review_gates", "keep", "done"):
+        if key not in data:
+            continue
         if not isinstance(data.get(key), dict):
             raise ValueError(f"invalid {key} notes")
-    return data
+    # Existing review-gate notes remain visible under Important. The legacy
+    # note command remains an alias while running Lantern sessions update.
+    # The next note write persists the migration.
+    return {"important": {**data.get("review_gates", {}), **data.get("important", {})},
+            "needs_you": data.get("needs_you", {}), "keep": data.get("keep", {}),
+            "done": data.get("done", {})}
 
 
 def color(text: str, shade: str, enabled: bool) -> str:
@@ -322,8 +316,72 @@ def fit(text: str, width: int) -> str:
     return text if len(text) <= width else text[: max(0, width - 1)] + "…"
 
 
+def display_name(row: dict) -> str:
+    workspace = clean(row.get("workspace"))
+    if workspace.casefold() == "🔥 lantern":
+        return "Lantern"
+    if workspace and workspace != "?" and not re.fullmatch(r"w\d+", workspace):
+        return workspace
+    tab = clean(row.get("tab"))
+    return tab or clean(row.get("agent")) or "Unnamed session"
+
+
+def useful_tab_detail(tab: str, name: str) -> bool:
+    normalized = tab.casefold()
+    return bool(tab and normalized != name.casefold()
+                and not tab.isdigit()
+                and not normalized.startswith("home · codex")
+                and not normalized.startswith(name.casefold() + " · codex"))
+
+
+def row_identity(row: dict) -> dict:
+    return {key: row.get(key) for key in ("tab_id", "pane_id", "terminal_id", "agent", "state_change_seq")}
+
+
+def is_lantern_home(row: dict, home_pane_id: str) -> bool:
+    if display_name(row) != "Lantern":
+        return False
+    if home_pane_id and row.get("pane_id") == home_pane_id:
+        return True
+    tab = str(row.get("tab", "")).casefold()
+    return tab.startswith("home") or "lantern home" in tab
+
+
+def section_for(row: dict, note_data: dict, home_pane_id: str) -> str | None:
+    if is_lantern_home(row, home_pane_id):
+        return "KEEP"
+    if display_name(row) == "Lantern":
+        return None
+    if row.get("raw_status") == "working":
+        return "IN MOTION"
+    if row.get("raw_status") == "done":
+        return "DONE"
+    keep = note_data.get("keep", {})
+    if row.get("pane_id") in keep or row.get("tab_id") in keep:
+        return "KEEP"
+    return None
+
+
+def done_summary(row: dict, note_data: dict) -> str:
+    item = note_data.get("done", {}).get(row.get("pane_id"))
+    if isinstance(item, dict) and item.get("identity") == row_identity(row):
+        return clean(item.get("summary"), 180)
+    return "Outcome not yet verified"
+
+
+def append_note_section(lines: list[str], title: str, actions: dict, shade: str,
+                        width: int, colors: bool) -> None:
+    lines.append(color(title, shade, colors))
+    if not actions:
+        lines.append("• None")
+    for action in actions.values():
+        lines.extend(textwrap.wrap("• " + clean(action, 180), width=width,
+                                   subsequent_indent="  ", break_long_words=False))
+    lines.append("")
+
+
 def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True,
-           width: int = 88) -> str:
+           width: int = 88, home_pane_id: str = "") -> str:
     width = max(38, width)
     local_time = eastern(now)
     stamp = local_time.strftime("%a %b %d, %Y · %I:%M %p ET")
@@ -331,40 +389,27 @@ def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True
     if len(heading) > width:
         heading = f"FIELD STATUS · {local_time.strftime('%b %d %I:%M %p ET')}"
     lines = [heading, ""]
-    needs = note_data.get("needs_you", {})
-    gates = note_data.get("review_gates", {})
-    lines.append("IMPORTANT / NEEDS YOU")
-    for action in needs.values():
-        lines.extend(textwrap.wrap("• " + clean(action, 180), width=width,
-                                   subsequent_indent="  ", break_long_words=False))
-    if not needs:
-        lines.append("• None")
-    lines.append("REVIEW GATES · no user action")
-    for gate in gates.values():
-        lines.extend(textwrap.wrap("• " + clean(gate, 180), width=width,
-                                   subsequent_indent="  ", break_long_words=False))
-    if not gates:
-        lines.append("• None")
-    lines.append("")
-    for row in sorted(rows, key=lambda item: (5 if item.get("closed_at") else ORDER.get(item["raw_status"], 4), item["sort_index"])):
-        raw = row["raw_status"]
-        status, shade = ("In Motion", "yellow") if raw == "working" else (("Done", "green") if raw == "done" else ("Keep", "blue"))
-        if row.get("closed_at"):
-            plain_status = "Done · Closed"
-            status = f"{color('Done', 'green', colors)} · {color('Closed', 'red', colors)}"
-        else:
-            plain_status = status
-            status = color(status, shade, colors)
-        agent_name = fit(row["agent"], min(28, width // 2))
-        agent = color(agent_name, "yellow", colors)
-        location = f"{row['workspace']} / {row['tab']}"
-        if len(agent_name) + len(plain_status) + len(location) + 4 <= width:
-            lines.append(f"{agent}  {status}  {location}")
-        else:
-            lines.append(f"{agent}  {status}")
-            lines.append("  " + fit(location, width - 2))
-    if not rows:
-        lines.append("No open tabs")
+    append_note_section(lines, "IMPORTANT", note_data.get("important", {}), "red", width, colors)
+    append_note_section(lines, "NEEDS YOU", note_data.get("needs_you", {}), "purple", width, colors)
+    ordered = sorted(rows, key=lambda item: (ORDER.get(item["raw_status"], 4), item["sort_index"]))
+    for title, shade, selected in (
+        ("IN MOTION", "yellow", [row for row in ordered if section_for(row, note_data, home_pane_id) == "IN MOTION"]),
+        ("DONE", "green", [row for row in ordered if section_for(row, note_data, home_pane_id) == "DONE"]),
+        ("KEEP", "blue", [row for row in ordered if section_for(row, note_data, home_pane_id) == "KEEP"]),
+    ):
+        lines.append(color(title, shade, colors))
+        if not selected:
+            lines.append("• None")
+        for row in selected:
+            name = display_name(row)
+            lines.append(f"• {color(fit(name, width - 2), 'yellow', colors)}")
+            tab = clean(row.get("tab"))
+            if useful_tab_detail(tab, name):
+                lines.append("  " + fit(tab, width - 2))
+            if title == "DONE":
+                lines.extend(textwrap.wrap("  " + done_summary(row, note_data), width=width,
+                                           subsequent_indent="  ", break_long_words=False))
+        lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -375,9 +420,11 @@ def refresh(state_dir: Path, binary: str, timeout: float, now: datetime, colors:
     live = rows_for(tabs, agents, workspaces)
     rows = reconcile(live, previous, now)
     note_data = notes(state_dir)
+    pane_record = read_json(state_dir / "field-status-pane.json", {})
+    home_pane_id = clean(pane_record.get("home_pane_id"))
     if previous.get("rows") != rows:
         write_json(path, {"schema": 1, "rows": rows})
-    return render(rows, note_data, now, colors, shutil.get_terminal_size((88, 24)).columns)
+    return render(rows, note_data, now, colors, shutil.get_terminal_size((88, 24)).columns, home_pane_id)
 
 
 def main() -> int:
@@ -391,11 +438,11 @@ def main() -> int:
     sub.add_parser("pane", help="open or reuse a right-side Field Status pane")
     watch = sub.add_parser("watch", help="redraw only when live field or notes change")
     watch.add_argument("--interval", type=float, default=5)
-    note = sub.add_parser("note", help="set or clear an explicit user action or review gate")
-    note.add_argument("kind", choices=("needs-you", "review-gate"))
+    note = sub.add_parser("note", help="set or clear an important item, user action, keep pin, or done summary")
+    note.add_argument("kind", choices=("important", "needs-you", "review-gate", "keep", "done"))
     note.add_argument("operation", choices=("set", "clear"))
     note.add_argument("id", help="stable monitor or task ID")
-    note.add_argument("text", nargs="?", help="exact user action or review gate; required for set")
+    note.add_argument("text", nargs="?", help="exact note or verified task summary; required for set")
     args = parser.parse_args()
     if not args.state_dir:
         parser.error("--state-dir or LANTERN_HERD_STATE_DIR is required")
@@ -405,11 +452,26 @@ def main() -> int:
             if args.operation == "set" and not clean(args.text):
                 parser.error("note set requires text")
             data = notes(state_dir)
-            group = "needs_you" if args.kind == "needs-you" else "review_gates"
+            group = "needs_you" if args.kind == "needs-you" else (
+                args.kind if args.kind in ("keep", "done") else "important")
+            key = clean(args.id)
             if args.operation == "set":
-                data[group][clean(args.id)] = clean(args.text, 180)
+                if group in ("keep", "done"):
+                    rows = read_json(state_dir / "field-status-rows.json", {"rows": []}).get("rows", [])
+                    matches = [row for row in rows if isinstance(row, dict) and
+                               (row.get("pane_id") == key or (group == "keep" and row.get("tab_id") == key))]
+                    if len(matches) != 1:
+                        raise ValueError(f"field status row {key!r} unavailable; refresh first")
+                    if group == "done":
+                        if matches[0].get("raw_status") != "done":
+                            raise ValueError("done summary requires a completed agent")
+                        data[group][key] = {"identity": row_identity(matches[0]), "summary": clean(args.text, 180)}
+                    else:
+                        data[group][key] = clean(args.text, 180)
+                else:
+                    data[group][key] = clean(args.text, 180)
             else:
-                data[group].pop(clean(args.id), None)
+                data[group].pop(key, None)
             write_json(state_dir / "field-status-notes.json", data)
             return 0
         if args.command == "pane":

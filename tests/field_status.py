@@ -30,12 +30,12 @@ def field(agent_status="working", include_done=True):
         {"tab_id": "daily", "workspace_id": "w2", "label": "daily-tasks · codex", "agent_status": "idle"},
     ]
     agents = [
-        {"tab_id": "home", "agent": "codex", "name": "lantern", "agent_status": "working"},
-        {"tab_id": "daily", "agent": "codex", "name": "daily-tasks", "agent_status": "idle"},
+        {"tab_id": "home", "pane_id": "w1:p1", "agent": "codex", "name": "lantern", "agent_status": "working"},
+        {"tab_id": "daily", "pane_id": "w2:p1", "agent": "codex", "name": "daily-tasks", "agent_status": "idle"},
     ]
     if include_done:
         tabs.append({"tab_id": "review", "workspace_id": "w3", "label": "Review", "agent_status": agent_status})
-        agents.append({"tab_id": "review", "agent": "codex", "name": "Sol Reviewer", "agent_status": agent_status})
+        agents.append({"tab_id": "review", "pane_id": "w3:p1", "agent": "codex", "name": "Sol Reviewer", "agent_status": agent_status})
     workspaces = [
         {"workspace_id": "w1", "label": "🔥 lantern"},
         {"workspace_id": "w2", "label": "Daily-Tasks"},
@@ -45,26 +45,22 @@ def field(agent_status="working", include_done=True):
 
 
 class FieldStatusTests(unittest.TestCase):
-    def test_live_rows_keep_idle_and_home_without_claiming_done(self):
+    def test_keep_shows_only_lantern_by_default(self):
         rows = status.rows_for(*field("idle"))
         self.assertEqual([row["agent"] for row in rows], ["lantern", "daily-tasks", "Sol Reviewer"])
-        output = status.render(rows, {"needs_you": {}, "review_gates": {}}, NOW, False)
-        self.assertIn("daily-tasks  Keep  Daily-Tasks / daily-tasks · codex", output)
-        self.assertIn("Sol Reviewer  Keep", output)
+        output = status.render(rows, {"important": {}, "needs_you": {}}, NOW, False)
+        self.assertIn("KEEP\n• Lantern", output)
+        self.assertNotIn("Daily-Tasks", output)
+        self.assertNotIn("Plugin Update", output)
+        self.assertNotIn("shell", output)
+        self.assertNotIn("codex  ", output)
         self.assertNotIn("Closed", output)
-        self.assertIn("Lantern Home", output)
 
-    def test_closed_done_kept_for_fifteen_minutes_then_pruned(self):
+    def test_closed_done_disappears_immediately(self):
         done = status.rows_for(*field("done"))
         closed = status.reconcile(status.rows_for(*field(include_done=False)), {"rows": done}, NOW)
-        ghost = next(row for row in closed if row["tab_id"] == "review")
-        self.assertEqual(ghost["closed_at"], NOW.isoformat())
-        self.assertIn("Sol Reviewer  Done · Closed", status.render(closed, {}, NOW, False))
-        self.assertIn("\x1b[31mClosed\x1b[0m", status.render(closed, {}, NOW, True))
-        before = status.reconcile(closed[:2], {"rows": closed}, NOW + timedelta(minutes=14, seconds=59))
-        self.assertEqual(len(before), 3)
-        after = status.reconcile(closed[:2], {"rows": closed}, NOW + timedelta(minutes=15))
-        self.assertEqual(len(after), 2)
+        self.assertEqual(len(closed), 2)
+        self.assertNotIn("Plugin Update", status.render(closed, {}, NOW, False))
 
     def test_idle_or_missing_working_agent_never_becomes_closed_done(self):
         idle = status.rows_for(*field("idle"))
@@ -73,15 +69,14 @@ class FieldStatusTests(unittest.TestCase):
         self.assertEqual(len(status.reconcile(live, {"rows": idle}, NOW)), 2)
         self.assertEqual(len(status.reconcile(live, {"rows": working}, NOW)), 2)
 
-    def test_done_agent_exiting_but_tab_remains_keeps_closed_row(self):
+    def test_done_agent_exiting_but_tab_remains_is_not_ghosted(self):
         tabs, agents, workspaces = field("done")
         previous = status.rows_for(tabs, agents, workspaces)
         current = status.rows_for(tabs, agents[:2], workspaces)
-        closed = status.reconcile(current, {"rows": previous}, NOW)
-        self.assertEqual(len(closed), 4)
-        self.assertEqual([row["raw_status"] for row in closed if row["tab_id"] == "review"], ["idle", "done"])
-        again = status.reconcile(current, {"rows": closed}, NOW + timedelta(minutes=1))
-        self.assertEqual(len(again), 4)
+        updated = status.reconcile(current, {"rows": previous}, NOW)
+        self.assertEqual(len(updated), 3)
+        self.assertEqual([row["raw_status"] for row in updated if row["tab_id"] == "review"], ["idle"])
+        self.assertNotIn("Plugin Update", status.render(updated, {}, NOW, False))
 
     def test_multiple_agents_in_one_tab_each_get_a_row(self):
         tabs, agents, workspaces = field("working")
@@ -91,34 +86,36 @@ class FieldStatusTests(unittest.TestCase):
         self.assertIn("claude · w3:p2", [row["agent"] for row in rows])
         self.assertEqual([row["raw_status"] for row in rows if row["tab_id"] == "review"], ["working", "done"])
 
-    def test_explicit_actions_and_review_gates_separate_with_colors_and_et(self):
+    def test_sections_names_and_colors_and_et(self):
         rows = status.rows_for(*field("done"))
-        note_data = {"needs_you": {"decision": "Choose whether to merge PR 42"},
-                     "review_gates": {"sol": "Independent Sol High review pending"}}
+        note_data = {"important": {"sol": "Independent Sol High review pending"},
+                     "needs_you": {"decision": "Choose whether to merge PR 42"}}
         output = status.render(rows, note_data, NOW, True)
         self.assertIn("12:00 PM ET", output)
-        self.assertIn("IMPORTANT / NEEDS YOU\n• Choose whether to merge PR 42", output)
-        self.assertIn("REVIEW GATES · no user action\n• Independent Sol High review pending", output)
-        self.assertIn("\x1b[33mSol Reviewer\x1b[0m", output)
-        self.assertIn("\x1b[32mDone\x1b[0m", output)
-        self.assertIn("\x1b[34mKeep\x1b[0m", output)
+        self.assertIn("\x1b[31mIMPORTANT\x1b[0m\n• Independent Sol High review pending", output)
+        self.assertIn("\x1b[35mNEEDS YOU\x1b[0m\n• Choose whether to merge PR 42", output)
+        self.assertIn("\x1b[33mLantern\x1b[0m", output)
+        self.assertIn("\x1b[32mDONE\x1b[0m", output)
+        self.assertIn("\x1b[34mKEEP\x1b[0m", output)
+        self.assertNotIn("REVIEW GATES", output)
+        self.assertNotIn("Sol Reviewer", output)
+        self.assertIn("Outcome not yet verified", output)
 
     def test_control_text_cannot_spoof_rows(self):
         tabs, agents, workspaces = field()
-        tabs[2]["label"] = "Review\x1b[2J\nIMPORTANT / NEEDS YOU"
+        tabs[2]["label"] = "Review\x1b[2J\nIMPORTANT"
         rows = status.rows_for(tabs, agents, workspaces)
         output = status.render(rows, {}, NOW, False)
         self.assertNotIn("\x1b", output)
-        self.assertIn("Review [2J IMPORTANT / NEEDS YOU", output)
+        self.assertIn("Review [2J IMPORTANT", output)
 
     def test_narrow_side_pane_keeps_name_status_and_action_legible(self):
         rows = status.rows_for(*field("done"))
         output = status.render(rows, {"needs_you": {"x": "Choose whether to merge the reviewed update"},
-                                      "review_gates": {}}, NOW, False, width=38)
+                                      "important": {}}, NOW, False, width=38)
         self.assertLessEqual(len(output.splitlines()[0]), 38)
         self.assertIn("ET", output.splitlines()[0])
-        self.assertIn("Sol Reviewer  Done\n", output)
-        self.assertIn("Plugin Update / Review", output)
+        self.assertIn("DONE\n• Plugin Update\n  Review\n  Outcome not yet verified", output)
         self.assertIn("• Choose whether to merge", output)
         self.assertIn("  update", output)
 
@@ -133,7 +130,7 @@ class FieldStatusTests(unittest.TestCase):
                     status.refresh(state_dir, "herdr", 1, NOW, False)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), data)
 
-    def test_refresh_keeps_notes_and_prunes_on_next_refresh(self):
+    def test_refresh_keeps_notes_and_removes_closed_agent(self):
         with tempfile.TemporaryDirectory() as root:
             state_dir = Path(root)
             status.write_json(state_dir / "field-status-notes.json", {
@@ -144,11 +141,13 @@ class FieldStatusTests(unittest.TestCase):
                 status.refresh(state_dir, "herdr", 1, NOW, False)
             with patch.object(status, "snapshot", return_value=field(include_done=False)):
                 output = status.refresh(state_dir, "herdr", 1, NOW + timedelta(minutes=1), False)
-                self.assertIn("Done · Closed", output)
+                self.assertNotIn("Plugin Update", output)
                 self.assertIn("Approve release window", output)
                 self.assertIn("Sol High review pending", output)
+                self.assertIn("IMPORTANT\n• Sol High review pending", output)
+                self.assertNotIn("REVIEW GATES", output)
                 output = status.refresh(state_dir, "herdr", 1, NOW + timedelta(minutes=16), False)
-                self.assertNotIn("Done · Closed", output)
+                self.assertNotIn("Plugin Update", output)
 
     def test_pane_opens_once_and_reuses_without_closing_home(self):
         with tempfile.TemporaryDirectory() as root:
@@ -262,7 +261,7 @@ class FieldStatusTests(unittest.TestCase):
                                        text=True, timeout=15, check=False)
             self.assertEqual(refreshed.returncode, 0, refreshed.stderr)
             self.assertIn("Fixture Lantern Home", refreshed.stdout)
-            self.assertIn("In Motion", refreshed.stdout)
+            self.assertIn("IN MOTION", refreshed.stdout)
             self.assertIn(" ET", refreshed.stdout)
             watcher = subprocess.Popen([*base, "watch", "--interval", "0.1"],
                                        env=env, stdout=subprocess.PIPE,
@@ -293,7 +292,7 @@ class FieldStatusTests(unittest.TestCase):
                     watcher.stderr.close()
             output = "".join(lines)
             self.assertIn("Fixture Lantern Home", output)
-            self.assertIn("In Motion", output)
+            self.assertIn("IN MOTION", output)
             self.assertNotIn("unavailable", output)
 
     def test_reused_pane_restarts_idle_watcher_but_not_other_process(self):
@@ -322,19 +321,94 @@ class FieldStatusTests(unittest.TestCase):
                     status.open_pane(state_dir, BIN.parent, "herdr", 1)
             self.assertEqual(sum(args[:2] == ["pane", "run"] for args in calls), 1)
 
-    def test_note_cli_persists_and_clears_action_separately_from_gate(self):
+    def test_note_cli_persists_and_clears_action_separately_from_important(self):
         with tempfile.TemporaryDirectory() as root:
             script = str(BIN / "field_status.py")
             for command in (
                 ["note", "needs-you", "set", "decision", "Choose the release date"],
-                ["note", "review-gate", "set", "review", "Sol High review pending"],
+                ["note", "important", "set", "review", "Sol High review pending"],
                 ["note", "needs-you", "clear", "decision"],
             ):
                 proc = subprocess.run([sys.executable, script, "--state-dir", root, *command],
                                       capture_output=True, text=True, check=False)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(status.notes(Path(root)), {
-                "needs_you": {}, "review_gates": {"review": "Sol High review pending"}})
+                "needs_you": {}, "important": {"review": "Sol High review pending"},
+                "keep": {}, "done": {}})
+
+    def test_legacy_review_gate_migrates_into_important_on_note_write(self):
+        with tempfile.TemporaryDirectory() as root:
+            state_dir = Path(root)
+            path = state_dir / "field-status-notes.json"
+            status.write_json(path, {"review_gates": {"old": "Review still pending"}, "needs_you": {}})
+            self.assertEqual(status.notes(state_dir)["important"], {"old": "Review still pending"})
+            proc = subprocess.run([sys.executable, str(BIN / "field_status.py"), "--state-dir", root,
+                                   "note", "important", "clear", "old"], capture_output=True, text=True, check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(status.notes(state_dir)["important"], {})
+            self.assertNotIn("review_gates", json.loads(path.read_text(encoding="utf-8")))
+
+    def test_legacy_review_gate_command_updates_important(self):
+        with tempfile.TemporaryDirectory() as root:
+            proc = subprocess.run([sys.executable, str(BIN / "field_status.py"), "--state-dir", root,
+                                   "note", "review-gate", "set", "review", "Review pending"],
+                                  capture_output=True, text=True, check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(status.notes(Path(root))["important"], {"review": "Review pending"})
+
+    def test_shell_tab_only_appears_when_explicitly_kept(self):
+        tabs, agents, workspaces = field(include_done=False)
+        tabs.append({"tab_id": "shell-tab", "workspace_id": "w4", "label": "Finance Audit (reviewed)"})
+        tabs.append({"tab_id": "numbered", "workspace_id": "w4", "label": "1"})
+        workspaces.append({"workspace_id": "w4", "label": "Finance-Tracker Astra Audit"})
+        rows = status.rows_for(tabs, agents, workspaces)
+        output = status.render(rows, {}, NOW, False)
+        self.assertNotIn("Finance-Tracker Astra Audit", output)
+        output = status.render(rows, {"keep": {"shell-tab": "Keep this audit"}}, NOW, False)
+        self.assertIn("• Finance-Tracker Astra Audit\n  Finance Audit (reviewed)", output)
+        self.assertNotIn("  1\n", output)
+        self.assertNotIn("shell", output)
+
+    def test_done_summary_requires_matching_agent_identity(self):
+        rows = status.rows_for(*field("done"))
+        done = next(row for row in rows if row["tab_id"] == "review")
+        notes = {"done": {"w3:p1": {"identity": status.row_identity(done),
+                                      "summary": "Reviewed the plugin update; tests passed."}}}
+        output = status.render(rows, notes, NOW, False)
+        self.assertIn("Reviewed the plugin update; tests passed.", output)
+        changed = [dict(row) for row in rows]
+        changed[-1]["state_change_seq"] = 99
+        self.assertIn("Outcome not yet verified", status.render(changed, notes, NOW, False))
+
+    def test_lantern_home_always_keep_even_when_done(self):
+        rows = status.rows_for(*field("done"))
+        rows[0]["raw_status"] = "done"
+        output = status.render(rows, {}, NOW, False, home_pane_id="w1:p1")
+        self.assertIn("KEEP\n• Lantern", output)
+        self.assertNotIn("DONE\n• Lantern", output)
+
+    def test_keep_and_done_note_commands_validate_live_rows(self):
+        with tempfile.TemporaryDirectory() as root:
+            state_dir = Path(root)
+            status.write_json(state_dir / "field-status-rows.json", {"schema": 1, "rows": status.rows_for(*field("done"))})
+            script = str(BIN / "field_status.py")
+            for command in (
+                ["note", "keep", "set", "w2:p1", "Keep Daily-Tasks"],
+                ["note", "done", "set", "w3:p1", "Reviewed plugin update; tests passed"],
+            ):
+                proc = subprocess.run([sys.executable, script, "--state-dir", root, *command],
+                                      capture_output=True, text=True, check=False)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = status.notes(state_dir)
+            self.assertEqual(data["keep"], {"w2:p1": "Keep Daily-Tasks"})
+            self.assertEqual(data["done"]["w3:p1"]["summary"], "Reviewed plugin update; tests passed")
+            output = status.render(status.rows_for(*field("done")), data, NOW, False)
+            self.assertIn("KEEP\n• Lantern\n  Lantern Home\n• Daily-Tasks", output)
+            self.assertIn("Reviewed plugin update; tests passed", output)
+            proc = subprocess.run([sys.executable, script, "--state-dir", root,
+                                   "note", "done", "set", "w2:p1", "Not done"],
+                                  capture_output=True, text=True, check=False)
+            self.assertNotEqual(proc.returncode, 0)
 
 
 if __name__ == "__main__":
