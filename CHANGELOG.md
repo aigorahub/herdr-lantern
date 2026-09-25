@@ -2,6 +2,49 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.16.0] - 2026-09-25
+
+### Added
+
+- Added a durable Field Status side pane with ET time, live Herdr rows,
+  explicit user actions separated from review gates, colored agent states,
+  and 15-minute retention for closed Done agents.
+- Added a bounded `codex-headless` route for explicitly temporary one-shot
+  updates and disposable research. It enforces `codex exec --ephemeral`, live
+  model preflight, safe read/write modes, private result capture outside the
+  product checkout, and no credential copying.
+- Added completed-session cleanup gates: durable committed/saved results,
+  passed task and dependency checks, no live dependents, an identity recheck,
+  and an unconditional exclusion for the Lantern home workspace.
+- Added `hsh evening`/`hsh nightly` and `hsh morning`, including a Windows
+  `hsh.cmd`. Evening verifies a compact private handoff before exiting Lantern
+  home and never stops the Herdr server; morning creates a fresh Lantern and
+  loads that handoff.
+- Codex Lantern light-up now records only its exact session, pane, and workspace
+  IDs in private plugin state. Evening proves the exact Codex PID has exited
+  before using supported `codex delete <UUID> --force`, removing the old chat
+  and child-agent records from normal history. Any identity/exit/delete failure
+  retains the saved session and is reported as incomplete cleanup.
+- Added a Daily-Tasks headless profile pinned to `C:\Claude\Daily-Tasks` and
+  model phrase `5.6 luna xhigh fast`. Each instruction is a fresh ephemeral
+  run, with read-only verification examples that explicitly prohibit edits and
+  outbound messages.
+
+### Fixed
+
+- The Field Status watcher command is quoted for the pane shell. On Windows
+  that shell is PowerShell, so the watcher calls Python directly instead of
+  sending a POSIX `sh` command. Reopening a labelled pane checks that the
+  shell is idle before typing the watcher command.
+- Headless `codex exec` passes `--skip-git-repo-check`, so a non-git working
+  directory such as Daily-Tasks is not rejected before the job starts.
+  A Windows `.cmd` Codex shim is escaped for `cmd.exe` metacharacters.
+- `hsh.cmd morning` does not attach another Herdr client inside a Herdr pane,
+  and it rejects an extra argument the same way `hsh` does.
+- Evening shutdown keeps the Lantern home pane open unless the handoff
+  contains the required `utc:`, `active:`, `closed-temporary:`,
+  `failed-gates:`, `durable-results:`, `dependencies:`, and `next:` lines.
+
 ## [0.15.0] - 2026-09-24
 
 ### Added

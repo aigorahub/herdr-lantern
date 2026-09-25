@@ -9,9 +9,20 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh lib.sh bin/herdr bin/model-route bin/model-preflight bin/onboard hsh install.sh tests/smoke.sh; do
+for f in launch.sh open.sh evening.sh lib.sh bin/herdr bin/model-route bin/model-preflight bin/codex-headless bin/onboard hsh install.sh tests/day-boundary.sh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
+
+# Bash 3.2 on macOS pairs ASCII apostrophes while scanning a command
+# substitution, even inside the appendix heredoc. Keep prose there quote-free.
+awk '
+    /^appendix=\$\($/ { in_appendix = 1; next }
+    in_appendix && /^EOF$/ { found_end = 1; exit }
+    in_appendix && index($0, sprintf("%c", 39)) { exit 1 }
+    END { if (!found_end) exit 1 }
+' "$root/launch.sh" || fail "ASCII apostrophe in launch appendix heredoc"
+
+sh "$root/tests/day-boundary.sh" || fail "day-boundary workflow tests"
 
 # shellcheck disable=SC1091
 . "$root/lib.sh"
@@ -371,6 +382,42 @@ grep -qF '"Clean up" / "I' "$root/prompt.md" ||
     fail "prompt.md no longer refuses an unnamed clean up"
 grep -qF 'Never close Lantern home' "$root/prompt.md" ||
     fail "prompt.md must still protect the lantern home tab"
+# Disposable Codex work has a distinct route. The durable seat remains the
+# default, and cleanup cannot race ahead of saved work or its consumers.
+for policy_file in prompt.md launch.sh herd-workflows.md; do
+    grep -qF 'codex-headless' "$root/$policy_file" ||
+        fail "$policy_file does not carry the headless Codex route"
+    grep -qF 'codex exec --ephemeral' "$root/$policy_file" ||
+        fail "$policy_file does not require ephemeral Codex execution"
+    grep -qiF 'steering' "$root/$policy_file" ||
+        fail "$policy_file does not preserve interactive agents for steering"
+    grep -qiE 'committed|saved durably|saved at a durable' "$root/$policy_file" ||
+        fail "$policy_file cleanup does not require durable results"
+    grep -qiF 'depend' "$root/$policy_file" ||
+        fail "$policy_file cleanup does not check live dependencies"
+done
+for day_file in prompt.md launch.sh herd-workflows.md README.md; do
+    grep -qF 'hsh morning' "$root/$day_file" ||
+        fail "$day_file does not document morning startup"
+    grep -qF 'hsh evening' "$root/$day_file" ||
+        fail "$day_file does not document evening shutdown"
+    grep -qF '5.6 luna xhigh fast' "$root/$day_file" ||
+        fail "$day_file does not pin the Daily-Tasks Luna profile"
+done
+grep -qF 'evening-handoff.md' "$root/launch.sh" ||
+    fail "launch does not load the durable evening handoff"
+if grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$root/bin/codex_headless.py"; then
+    # One occurrence is the explicit forbidden-argv guard, never constructed
+    # argv. Pin the safe permissions directly as well.
+    grep -qF 'forbidden = {"resume", "fork", "--dangerously-bypass-approvals-and-sandbox"}' \
+        "$root/bin/codex_headless.py" || fail "headless Codex accepts dangerous bypass"
+fi
+grep -qF '["-s", "read-only"]' "$root/bin/codex_headless.py" ||
+    fail "headless research is not read-only"
+grep -qF '["--approve-for-me"]' "$root/bin/codex_headless.py" ||
+    fail "headless updates do not use reviewed workspace write"
+grep -qF 'Never close the Lantern home workspace' "$root/launch.sh" ||
+    fail "runtime cleanup rule does not protect the Lantern home workspace"
 # The walkthroughs describe the same posture to the user. Nothing kept
 # them honest before.
 for doc_file in README.md howto.html docs/index.html; do
@@ -854,7 +901,8 @@ missing=$(printf '%s' '{"result":{}}' | helper_json_value pane_id)
 # The chat is found by pane title, so open.sh and the manifest must agree.
 grep -q 'pane_title=Lantern' "$root/open.sh" || fail "open.sh pane title"
 grep -q '^title = "Lantern"$' "$root/herdr-plugin.toml" || fail "manifest pane title"
-grep -q "workspace_label='🔥 lantern'" "$root/open.sh" || fail "open.sh lantern label"
+label_bytes=$(sed -n 's/^workspace_label=//p' "$root/open.sh" | od -An -tx1 | tr -d ' \n')
+[ "$label_bytes" = 27f09f94a5206c616e7465726e270a ] || fail "open.sh lantern label"
 
 fake_ws=$(mktemp -d)
 cat >"$fake_ws/herdr" <<'EOF'
@@ -967,7 +1015,12 @@ run_open() {
         HERDR_PLUGIN_ROOT="$root" \
         sh "$root/open.sh" >/dev/null 2>&1
 }
-logged() { grep -qF -e "$1" "$STUB_LOG"; }
+logged() {
+    while IFS= read -r logged_line; do
+        case $logged_line in *"$1"*) return 0 ;; esac
+    done <"$STUB_LOG"
+    return 1
+}
 
 # First open: create the lantern workspace, seat the chat, drop the shell.
 reset_open
@@ -2509,7 +2562,7 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
     for monitor_rule in '### Recurring monitor and task list' \
         'CronCreate' 'CronDelete' 'active_loop' 'paused_needs_user' \
         'all registered tasks' 'outcome: no_change' 'Do not edit Elves task' \
-        'LANTERN_HERD_STATE_DIR' "$argv_dir/state/herd"; do
+        'LANTERN_HERD_STATE_DIR' "$(helper_native_path "$argv_dir/state/herd")"; do
         grep -qF "$monitor_rule" "$argv_dir/state/workdir/$rendered_file" ||
             fail "$rendered_file lacks monitor rule $monitor_rule with a custom prompt"
     done
@@ -2517,6 +2570,8 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
         fail "$rendered_file lacks the native callback executable in runtime instructions"
     grep -qF "$(helper_native_path "$argv_dir/state/herd") (environment: LANTERN_TEAM_STATE_DIR)" "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lacks the native callback state path in runtime instructions"
+    grep -qF "$(helper_native_path "$argv_dir/state/herd/lantern-codex-session.json")" "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file lacks the native Codex receipt path in runtime instructions"
     grep -qF 'Saved custom prompt' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lost the custom prompt"
 done
@@ -2532,6 +2587,9 @@ argv_is "claude" 'HELPER_AGENT="claude"
 HELPER_MODEL="opus"
 HELPER_EFFORT="high"
 HELPER_CWD="~"' ' [--model] [opus] [--effort] [high]'
+if grep -qF 'capture --path' "$argv_dir/state/workdir/CLAUDE.md"; then
+    fail "non-Codex launch asks for a Codex session receipt"
+fi
 
 argv_is "codex" 'HELPER_AGENT="codex"
 HELPER_MODEL="gpt-x"
@@ -2879,53 +2937,22 @@ for brief_file in prompt.md launch.sh; do
 done
 printf 'ok: the chat and its seats say what they run\n'
 
-# Field status is the whole field. Light-up and "what's going on" used to
-# name only the panes that needed the user or were moving, so a quiet tab
-# was invisible in a chat that claims to light the field. Every instruction
-# surface must now name every open tab, and both prompt.md and the rendered
-# appendix carry the same rule, because a lantern seated on Cursor or Codex
-# reads the appendix copy and never the file in this repo.
-grep -qF 'Field status: name every tab' "$root/prompt.md" ||
-    fail "prompt.md has no field status section"
+# The shipped prompt can be customized at install time, so the launch appendix
+# must also carry the Field Status route for every supported helper.
 for field_file in prompt.md launch.sh; do
-    for field_word in 'herdr tab list' 'herdr agent list' \
-        'herdr workspace list' 'workspace label' 'tab label'; do
+    for field_word in 'Field Status' 'herdr tab list' 'herdr agent list' \
+        'herdr workspace list' 'Daily Tasks' 'Lantern Home' \
+        'Important' 'Needs You' 'purple' 'In Motion' \
+        'Done' 'Keep' 'closing'; do
         grep -qF -- "$field_word" "$root/$field_file" ||
-            fail "$field_file field status does not name $field_word"
+            fail "$field_file omits Field Status rule $field_word"
     done
-    # The sidebar name is the point: elves-run, chrome, and a second lantern
-    # tab in the same workspace are what the user reads in Herdr, and a
-    # per-workspace roll-up would drop the second one.
-    for field_example in 'elves-run' 'chrome' 'lantern · 2'; do
-        grep -qF -- "$field_example" "$root/$field_file" ||
-            fail "$field_file field status does not keep the sidebar name $field_example"
-    done
-    grep -qF 'Two tabs in one' "$root/$field_file" ||
-        fail "$field_file does not name both tabs in one workspace"
-    grep -qiE 'quiet and idle tabs stay|a quiet tab still gets its line' \
-        "$root/$field_file" ||
-        fail "$field_file drops quiet tabs from the field status"
+    grep -qF 'LANTERN_FIELD_STATUS' "$root/$field_file" ||
+        fail "$field_file does not route through the repo-backed command"
 done
-# Who needs the user still comes first, and the answer stays a lamp.
-grep -qF 'lead with who needs the user' "$root/launch.sh" ||
-    fail "the launch.sh appendix should still lead with who needs the user"
-grep -qF 'Then name every open tab' "$root/prompt.md" ||
-    fail "the prompt.md light-up should name every open tab after who needs you"
-grep -qF 'Keep answers short' "$root/prompt.md" ||
-    fail "prompt.md should still keep answers short"
-for field_file in prompt.md launch.sh; do
-    grep -qF 'Sort the tab list by state' "$root/$field_file" ||
-        fail "$field_file field status does not sort working tabs above idle"
-    grep -qF 'working, then blocked, then done, then idle' "$root/$field_file" ||
-        fail "$field_file field status does not name the working-to-idle order"
-    grep -qF 'sorts with idle' "$root/$field_file" ||
-        fail "$field_file field status does not sort shell tabs with idle"
-    grep -qF 'keep the order from' "$root/$field_file" ||
-        fail "$field_file field status does not keep herdr tab list order within a state"
-    grep -qF 'Do not add group headings' "$root/$field_file" ||
-        fail "$field_file field status adds group headings"
-done
-printf 'ok: field status names every open tab\n'
+grep -qF 'Never close Lantern Home' "$root/prompt.md" ||
+    fail "Field Status must preserve Lantern Home"
+printf 'ok: Field Status command and runtime routes\n'
 
 printf 'ok\n'
 
@@ -2933,3 +2960,6 @@ printf 'ok\n'
 model_test_python=$(helper_detect_python) || fail "model tests need Python 3"
 # shellcheck disable=SC2086
 $model_test_python "$root/tests/models.py" || fail "model regression tests"
+$model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests"
+$model_test_python "$root/tests/field_status.py" || fail "Field Status tests"
+$model_test_python "$root/tests/session_cleanup.py" || fail "Lantern session cleanup tests"

@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.15.0 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.16.0 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -424,6 +424,13 @@ No Elves install required. If there are no
     </div>
 
     <div class="wrap">
+      <h2>Temporary Codex jobs and cleanup</h2>
+      <p>Full interactive Herdr agents remain the default for work that needs repeated steering, resume, team coordination, or a durable live session. When you explicitly call a bounded Codex task temporary, disposable, low-importance, one-shot, or Daily-Tasks-style, Lantern can run it with <code>codex exec --ephemeral</code>. Disposable research is read-only; bounded updates use workspace-write automatic review. These jobs create no normal Codex desktop history entry and no Herdr agent workspace or tab.</p>
+      <p>The launcher resolves and preflights the live Codex model, passes the task on stdin, and saves only the final response in private Lantern state outside the product checkout. It inherits the existing Codex login without copying, printing, or serializing authentication/config material. Ephemeral jobs cannot resume; work that needs steering moves to a fresh interactive agent. Update results still require diff inspection and the repository's required tests.</p>
+      <p>Daily-Tasks has a pinned Windows profile: <code>bin\codex-headless.cmd research --profile daily-tasks --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send external messages."</code>. Git Bash uses <code>bin/codex-headless</code>. It reads <code>C:\Claude\Daily-Tasks</code> with model phrase <code>5.6 luna xhigh fast</code>. Every instruction uses a unique job name and starts a fresh ephemeral run; it cannot resume and creates no normal Codex desktop/web session.</p>
+      <p>Ask <code>clean completed sessions in &lt;repo or workspace&gt;</code> to clean a named scope. Lantern closes only settled tabs with committed clean edits or durably saved findings, passed task/dependency/integration checks, and no active dependents. It rechecks identity and repo state before close. Ineligible tabs stay open with the failed gate reported. Workspace cleanup requires every child tab to pass. Worktree removal is separate. The Lantern home tab, pane, and workspace are never cleanup targets.</p>
+      <p>Run <code>hsh evening</code> (or <code>hsh nightly</code>) from an outside terminal. Lantern dependency-audits the field, preserves active/unresolved work, closes only completed explicitly temporary workspaces that pass every gate, and atomically writes a compact private handoff. For a Codex Lantern, light-up privately records only <code>CODEX_SESSION_ID</code> and exact pane/workspace identity. Evening verifies the handoff, identity, and foreground PID; closes the exact home pane; proves the pane and Codex process exited; then runs supported <code>codex delete &lt;UUID&gt; --force</code> to remove the old chat and child-agent records from normal desktop history. It never deletes a running session or edits history files directly. Missing identity, uncertain exit, unsupported deletion, or command failure leaves the saved session in place and returns an explicit warning/nonzero result. Handoff failure leaves home open, and the Herdr server is never stopped. Close the Herdr window normally afterward. Run <code>hsh morning</code> to open a fresh Lantern, load and reconcile the handoff, and attach Herdr. Windows can use the included <code>hsh.cmd</code>.</p>
+
       <h2>Ship work across repos</h2>
       <p>Name the repos and the result you want. Lantern states the targets and starts. Ship means the full job through clean merge.</p>
       <ul class="says">

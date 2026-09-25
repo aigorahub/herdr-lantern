@@ -349,14 +349,16 @@ def fugu_result(model: dict[str, object], effort: str) -> dict[str, object]:
 
 
 def fugu_route(phrase: str) -> dict[str, object]:
-    models = read_fugu_catalog()
+    # The installed catalog can still list this retired slug. Do not route it.
+    models = [model for model in read_fugu_catalog()
+              if model.get("slug") != "fugu-ultra-v1.0"]
     by_slug = {str(model.get("slug")): model for model in models}
     normalized = phrase.strip().lower()
     if normalized == "default":
         if "fugu" not in by_slug:
             fail("Fugu catalog has no regular fugu model")
         return fugu_result(by_slug["fugu"], fugu_effort(by_slug["fugu"], None))
-    tokens = words(phrase)
+    tokens = ["xhigh" if token == "deep" else token for token in words(phrase)]
     if "fast" in tokens:
         fail("Fugu does not publish a Fast route")
     name_max = "max" in tokens and "ultra" not in tokens and not any(

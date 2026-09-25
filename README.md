@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.15.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.16.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -117,8 +117,28 @@ Code gets `CLAUDE.md`.
 
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
-working toward?” for that readout. “What’s going on” names every open tab
-after who needs you, with working and blocked first, then done and idle.
+working toward?” for that readout. Ask “Field Status” or “what’s going on”
+to open a compact right-side pane beside Lantern Home. The repo-backed
+`bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
+date/time, separate red Important and purple Needs You sections, and every
+open tab. Human-readable workspace names are yellow; In Motion, Done, and
+Keep are yellow, green, and blue section headers. Keep shows Lantern Home and
+only other sessions explicitly pinned by the user; hiding a quiet tab does not
+close it. Done agents show a verified short outcome, and verified settled
+sessions disappear immediately after closure. Daily Tasks and Lantern Home
+are never closed by this view. The watcher redraws when field state or
+notes change and leaves command transcripts out of the chat.
+
+Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
+the repo. The runtime prompt calls the detected Python 3 command with
+`$LANTERN_FIELD_STATUS pane` to open or reuse the view. For a plain snapshot,
+use `python bin/field_status.py --state-dir <private-state-dir> --plain refresh`.
+Monitor events can set or clear notes with `note needs-you set|clear <id>` and
+`note important set|clear <id>`. A Needs You note must name the exact action
+for the user; noteworthy status or review gates with no user action belong
+under Important. Legacy review-gate notes display under Important until cleared.
+Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
+Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
 
 Lantern works great with Elves. Without Elves it is still the Herdr
 plugin: workspaces, panes, agents. If `.elves-session.json` files exist,
@@ -181,6 +201,89 @@ the herdr skill, how to prompt the other agents in that workspace, and to put
 more work in a new tab instead of splitting its own tab. The herdr skill
 defaults to a sibling pane. This prompt overrides that default. A resume does
 not send the prompt again.
+
+## Temporary Codex jobs and cleanup
+
+Lantern keeps full interactive Herdr agents as the default. They are the right
+route when work needs repeated steering, resume, team coordination, or a
+durable live session.
+
+When you explicitly call a bounded Codex task temporary, disposable,
+low-importance, one-shot, or Daily-Tasks-style, Lantern can use
+`bin/codex-headless` instead. Read-only research runs in `research` mode;
+bounded edits run in `update` mode. Both use `codex exec --ephemeral`, so the
+job does not persist a normal Codex desktop session. The launcher performs the
+live Codex model route and preflight, passes the task on stdin, and saves the
+final response privately under Lantern state outside the product checkout.
+It does not create a Herdr workspace, tab, or agent for the job.
+
+The headless route deliberately has no resume, fork, arbitrary native-flag,
+or dangerous-bypass surface. Research is read-only. Updates use Codex's
+workspace-write automatic review mode. Codex login is inherited in place;
+Lantern does not copy, serialize, or print authentication/config material. A
+successful update still requires inspection of the real diff and the repo's
+required tests. If a one-shot job needs steering, move the work to a fresh
+interactive agent—an ephemeral job cannot be resumed.
+
+For Daily-Tasks, use the pinned profile:
+
+```powershell
+bin\codex-headless.cmd research --profile daily-tasks --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send external messages."
+```
+
+It always reads durable context from `C:\Claude\Daily-Tasks` and resolves the
+model phrase `5.6 luna xhigh fast`. `research` cannot edit. Use `update` only
+for an explicitly authorized bounded edit. Every instruction needs a unique
+job slug and starts a fresh `codex exec --ephemeral` run; there is no session
+to resume and no normal Codex desktop/web history entry.
+
+Ask `clean completed sessions in <repo or workspace>` to clean a named scope.
+Lantern closes only settled tabs whose edit results are committed with a clean
+checkout, or whose non-edit findings are durably saved; whose required task,
+repository, dependency, and integration checks pass; and which have no active
+task, handoff, child, monitor, or downstream consumer depending on the live
+session. It rechecks identity and repository state immediately before close
+and reports failed gates without closing those tabs. Workspace cleanup requires
+every child tab to pass. Worktree removal remains separate. The Lantern home
+tab, pane, and workspace are never cleanup targets. `close bar` remains the
+stricter merged-main-and-deploy workflow.
+
+At the end of the day, run this from a terminal outside the Lantern pane:
+
+```powershell
+hsh evening
+```
+
+`hsh nightly` is an alias. Lantern dependency-audits the field, preserves all
+active, unresolved, ambiguous, or depended-on workspaces, and closes only
+completed workspaces explicitly marked temporary that pass every cleanup
+gate. It then atomically writes a compact private handoff with durable results,
+pending dependencies, failed gates, and morning actions. The outer action
+verifies a new handoff ID before it closes the Lantern home pane. For a Codex
+Lantern, launch also stores only `CODEX_SESSION_ID` and the exact pane/workspace
+IDs in private plugin state. Evening captures the exact Codex PID, closes that
+pane, proves both pane and process exited, and only then calls the supported
+`codex delete <UUID> --force`. That removes the old Lantern chat and its
+associated child-agent records from normal Codex desktop history. It never
+deletes the running session and never edits Codex history files directly.
+
+If the identity receipt is missing/mismatched, process exit cannot be proved,
+the installed Codex lacks exact deletion, or deletion fails, evening exits
+nonzero, plainly reports that history cleanup is incomplete, and leaves the
+saved session in place. Handoff failure still leaves Lantern home open. Herdr's
+server and preserved work are never stopped, so you can close the Herdr window
+normally after successful cleanup.
+
+In the morning, run:
+
+```powershell
+hsh morning
+```
+
+That opens a fresh Lantern session, loads the handoff, reconciles it against
+the live field, and attaches Herdr when run outside it. Windows users can put
+the included `hsh.cmd` on `PATH` and use `bin\codex-headless.cmd`; Git Bash
+users can use `hsh` and `bin/codex-headless` directly.
 
 How to use it (GitHub Pages, after this lands on `main`):
 [aigorahub.github.io/herdr-lantern](https://aigorahub.github.io/herdr-lantern/).

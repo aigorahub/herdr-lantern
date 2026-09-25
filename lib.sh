@@ -1163,22 +1163,42 @@ helper_relay_agent_start() {
 helper_json_value() {
     # Print the first string value for a JSON key read from stdin.
     # Splits on JSON punctuation first so the match cannot run past the
-    # field it belongs to. Only for flat string fields.
+    # field it belongs to. Only for flat string fields. Shell extraction keeps
+    # four-byte UTF-8 labels intact in Git Bash's Windows locale.
     _helper_json_key=$1
+    _helper_json_prefix="\"$_helper_json_key\":\""
     tr '{},' '\n\n\n' |
-        sed -n "s/.*\"$_helper_json_key\":\"\([^\"]*\)\".*/\1/p" |
-        sed -n '1p'
+        while IFS= read -r _helper_json_part; do
+            case $_helper_json_part in
+            *"$_helper_json_prefix"*)
+                _helper_json_result=${_helper_json_part#*"$_helper_json_prefix"}
+                printf '%s\n' "${_helper_json_result%%'"'*}"
+                break
+                ;;
+            esac
+        done
 }
 
 helper_workspace_id_by_label() {
     # $1 real herdr, $2 label. Prints the first workspace id with that label.
     # Objects in `workspace list` are flat, so one '{' fragment is one
-    # workspace and key order does not matter.
+    # workspace and key order does not matter. Compare the label in the shell:
+    # Git Bash grep can recode a Unicode argv pattern on Windows.
     "$1" workspace list 2>/dev/null |
         tr '{' '\n' |
-        grep -F "\"label\":\"$2\"," |
-        sed -n 's/.*"workspace_id":"\([^"]*\)".*/\1/p' |
-        sed -n '1p'
+        while IFS= read -r _helper_ws_part; do
+            case $_helper_ws_part in
+            *"\"label\":\"$2\""*)
+                case $_helper_ws_part in
+                *'"workspace_id":"'*)
+                    _helper_ws_id=${_helper_ws_part#*'"workspace_id":"'}
+                    printf '%s\n' "${_helper_ws_id%%'"'*}"
+                    ;;
+                esac
+                break
+                ;;
+            esac
+        done
 }
 
 helper_workspace_label() {

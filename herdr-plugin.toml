@@ -1,6 +1,6 @@
 id = "aigora.lantern"
 name = "Lantern, by Elves"
-version = "0.15.0"
+version = "0.16.0"
 min_herdr_version = "0.7.5"
 description = "From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field."
 platforms = ["linux", "macos", "windows"]
@@ -16,3 +16,9 @@ id = "open"
 title = "Open lantern"
 description = "Open the lantern chat in its own workspace"
 command = ["sh", "open.sh"]
+
+[[actions]]
+id = "evening"
+title = "Lantern evening shutdown"
+description = "Audit completed temporary work, save a handoff, then exit Lantern safely"
+command = ["sh", "evening.sh"]

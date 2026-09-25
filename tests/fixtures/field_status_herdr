@@ -1,0 +1,16 @@
+#!/bin/sh
+case "$1 $2" in
+"tab list")
+    printf '%s\n' '{"result":{"tabs":[{"tab_id":"home","workspace_id":"w1","label":"Fixture Lantern Home","agent_status":"working"}]}}'
+    ;;
+"agent list")
+    printf '%s\n' '{"result":{"agents":[{"tab_id":"home","agent":"codex","name":"lantern","agent_status":"working"}]}}'
+    ;;
+"workspace list")
+    printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"w1","label":"Lantern"}]}}'
+    ;;
+*)
+    printf 'unexpected Herdr fixture command: %s\n' "$*" >&2
+    exit 64
+    ;;
+esac
