@@ -191,7 +191,7 @@ fi
 # an extended-length path. The shell reads \\?\C:\path, but appending a child
 # gives a form Windows rejects, and the Python snapshot then fails silently.
 if command -v cygpath >/dev/null 2>&1; then
-    posix_root=$(helper_posix_path '\\?\C:\Claude\herdr-lantern')
+    posix_root=$(helper_posix_path '\\?\C:\src\herdr-lantern')
     case $posix_root in
     /*) ;;
     *) fail "helper_posix_path should return a POSIX path (got $posix_root)" ;;
@@ -401,9 +401,22 @@ for day_file in prompt.md launch.sh herd-workflows.md README.md; do
         fail "$day_file does not document morning startup"
     grep -qF 'hsh evening' "$root/$day_file" ||
         fail "$day_file does not document evening shutdown"
-    grep -qF '5.6 luna xhigh fast' "$root/$day_file" ||
-        fail "$day_file does not pin the Daily-Tasks Luna profile"
 done
+# One person's folders, tabs, and model picks belong in their private
+# prompt.md and helper.conf, not in what every install ships. Scan every
+# file except the changelog history and this test. find, not git ls-files:
+# the suite also runs from a plain copy with no .git. A worktree has a .git
+# file that holds its own path, so that file is skipped too. find exits
+# nonzero whenever one grep batch finds nothing, so keep the output and
+# ignore only the status.
+personal_hits=$(find "$root" -type f \
+    ! -path '*/.git/*' ! -path "$root/.git" ! -path '*/__pycache__/*' \
+    ! -path '*/.pytest_cache/*' ! -path '*/assets/*' \
+    ! -path "$root/state/*" ! -path "$root/output/*" \
+    ! -path "$root/CHANGELOG.md" ! -path "$root/tests/smoke.sh" \
+    -exec grep -liE 'daily[- ]tasks' {} + 2>/dev/null) || :
+[ -z "$personal_hits" ] ||
+    fail "shipped files carry a personal Daily-Tasks setting: $personal_hits"
 grep -qF 'evening-handoff.md' "$root/launch.sh" ||
     fail "launch does not load the durable evening handoff"
 if grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$root/bin/codex_headless.py"; then
@@ -2941,7 +2954,7 @@ printf 'ok: the chat and its seats say what they run\n'
 # must also carry the Field Status route for every supported helper.
 for field_file in prompt.md launch.sh; do
     for field_word in 'Field Status' 'herdr tab list' 'herdr agent list' \
-        'herdr workspace list' 'Daily Tasks' 'Lantern Home' \
+        'herdr workspace list' 'Lantern Home' \
         'Important' 'Needs You' 'purple' 'In Motion' \
         'Done' 'Keep' 'closing'; do
         grep -qF -- "$field_word" "$root/$field_file" ||

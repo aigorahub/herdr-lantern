@@ -125,8 +125,8 @@ open tab. Human-readable workspace names are yellow; In Motion, Done, and
 Keep are yellow, green, and blue section headers. Keep shows Lantern Home and
 only other sessions explicitly pinned by the user; hiding a quiet tab does not
 close it. Done agents show a verified short outcome, and verified settled
-sessions disappear immediately after closure. Daily Tasks and Lantern Home
-are never closed by this view. The watcher redraws when field state or
+sessions disappear immediately after closure. Lantern Home is never closed
+by this view. The watcher redraws when field state or
 notes change and leaves command transcripts out of the chat.
 
 Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
@@ -209,7 +209,7 @@ route when work needs repeated steering, resume, team coordination, or a
 durable live session.
 
 When you explicitly call a bounded Codex task temporary, disposable,
-low-importance, one-shot, or Daily-Tasks-style, Lantern can use
+low-importance, or one-shot, Lantern can use
 `bin/codex-headless` instead. Read-only research runs in `research` mode;
 bounded edits run in `update` mode. Both use `codex exec --ephemeral`, so the
 job does not persist a normal Codex desktop session. The launcher performs the
@@ -225,17 +225,18 @@ successful update still requires inspection of the real diff and the repo's
 required tests. If a one-shot job needs steering, move the work to a fresh
 interactive agent—an ephemeral job cannot be resumed.
 
-For Daily-Tasks, use the pinned profile:
+For example, on Windows:
 
 ```powershell
-bin\codex-headless.cmd research --profile daily-tasks --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send external messages."
+bin\codex-headless.cmd research --cwd C:\work\notes --job state-2026-09-15 "Read the durable context and report today's state. Do not edit or send external messages."
 ```
 
-It always reads durable context from `C:\Claude\Daily-Tasks` and resolves the
-model phrase `5.6 luna xhigh fast`. `research` cannot edit. Use `update` only
-for an explicitly authorized bounded edit. Every instruction needs a unique
-job slug and starts a fresh `codex exec --ephemeral` run; there is no session
-to resume and no normal Codex desktop/web history entry.
+`--cwd` is required. `--model` takes a spoken Codex model phrase and is
+optional; without it the job uses the live Codex default. `research` cannot
+edit. Use `update` only for an explicitly authorized bounded edit. Every
+instruction needs a unique job slug and starts a fresh `codex exec
+--ephemeral` run; there is no session to resume and no normal Codex
+desktop/web history entry.
 
 Ask `clean completed sessions in <repo or workspace>` to clean a named scope.
 Lantern closes only settled tabs whose edit results are committed with a clean

@@ -27,18 +27,18 @@ NOW = datetime(2026, 9, 24, 16, 0, tzinfo=timezone.utc)
 def field(agent_status="working", include_done=True):
     tabs = [
         {"tab_id": "home", "workspace_id": "w1", "label": "Lantern Home", "agent_status": "working"},
-        {"tab_id": "daily", "workspace_id": "w2", "label": "daily-tasks · codex", "agent_status": "idle"},
+        {"tab_id": "notes", "workspace_id": "w2", "label": "notes · codex", "agent_status": "idle"},
     ]
     agents = [
         {"tab_id": "home", "pane_id": "w1:p1", "agent": "codex", "name": "lantern", "agent_status": "working"},
-        {"tab_id": "daily", "pane_id": "w2:p1", "agent": "codex", "name": "daily-tasks", "agent_status": "idle"},
+        {"tab_id": "notes", "pane_id": "w2:p1", "agent": "codex", "name": "notes", "agent_status": "idle"},
     ]
     if include_done:
         tabs.append({"tab_id": "review", "workspace_id": "w3", "label": "Review", "agent_status": agent_status})
         agents.append({"tab_id": "review", "pane_id": "w3:p1", "agent": "codex", "name": "Sol Reviewer", "agent_status": agent_status})
     workspaces = [
         {"workspace_id": "w1", "label": "🔥 lantern"},
-        {"workspace_id": "w2", "label": "Daily-Tasks"},
+        {"workspace_id": "w2", "label": "Notes"},
         {"workspace_id": "w3", "label": "Plugin Update"},
     ]
     return tabs, agents, workspaces
@@ -47,10 +47,10 @@ def field(agent_status="working", include_done=True):
 class FieldStatusTests(unittest.TestCase):
     def test_keep_shows_only_lantern_by_default(self):
         rows = status.rows_for(*field("idle"))
-        self.assertEqual([row["agent"] for row in rows], ["lantern", "daily-tasks", "Sol Reviewer"])
+        self.assertEqual([row["agent"] for row in rows], ["lantern", "notes", "Sol Reviewer"])
         output = status.render(rows, {"important": {}, "needs_you": {}}, NOW, False)
         self.assertIn("KEEP\n• Lantern", output)
-        self.assertNotIn("Daily-Tasks", output)
+        self.assertNotIn("Notes", output)
         self.assertNotIn("Plugin Update", output)
         self.assertNotIn("shell", output)
         self.assertNotIn("codex  ", output)
@@ -358,14 +358,14 @@ class FieldStatusTests(unittest.TestCase):
 
     def test_shell_tab_only_appears_when_explicitly_kept(self):
         tabs, agents, workspaces = field(include_done=False)
-        tabs.append({"tab_id": "shell-tab", "workspace_id": "w4", "label": "Finance Audit (reviewed)"})
+        tabs.append({"tab_id": "shell-tab", "workspace_id": "w4", "label": "Billing Audit (reviewed)"})
         tabs.append({"tab_id": "numbered", "workspace_id": "w4", "label": "1"})
-        workspaces.append({"workspace_id": "w4", "label": "Finance-Tracker Astra Audit"})
+        workspaces.append({"workspace_id": "w4", "label": "Billing API Audit"})
         rows = status.rows_for(tabs, agents, workspaces)
         output = status.render(rows, {}, NOW, False)
-        self.assertNotIn("Finance-Tracker Astra Audit", output)
+        self.assertNotIn("Billing API Audit", output)
         output = status.render(rows, {"keep": {"shell-tab": "Keep this audit"}}, NOW, False)
-        self.assertIn("• Finance-Tracker Astra Audit\n  Finance Audit (reviewed)", output)
+        self.assertIn("• Billing API Audit\n  Billing Audit (reviewed)", output)
         self.assertNotIn("  1\n", output)
         self.assertNotIn("shell", output)
 
@@ -393,17 +393,17 @@ class FieldStatusTests(unittest.TestCase):
             status.write_json(state_dir / "field-status-rows.json", {"schema": 1, "rows": status.rows_for(*field("done"))})
             script = str(BIN / "field_status.py")
             for command in (
-                ["note", "keep", "set", "w2:p1", "Keep Daily-Tasks"],
+                ["note", "keep", "set", "w2:p1", "Keep Notes"],
                 ["note", "done", "set", "w3:p1", "Reviewed plugin update; tests passed"],
             ):
                 proc = subprocess.run([sys.executable, script, "--state-dir", root, *command],
                                       capture_output=True, text=True, check=False)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
             data = status.notes(state_dir)
-            self.assertEqual(data["keep"], {"w2:p1": "Keep Daily-Tasks"})
+            self.assertEqual(data["keep"], {"w2:p1": "Keep Notes"})
             self.assertEqual(data["done"]["w3:p1"]["summary"], "Reviewed plugin update; tests passed")
             output = status.render(status.rows_for(*field("done")), data, NOW, False)
-            self.assertIn("KEEP\n• Lantern\n  Lantern Home\n• Daily-Tasks", output)
+            self.assertIn("KEEP\n• Lantern\n  Lantern Home\n• Notes", output)
             self.assertIn("Reviewed plugin update; tests passed", output)
             proc = subprocess.run([sys.executable, script, "--state-dir", root,
                                    "note", "done", "set", "w2:p1", "Not done"],

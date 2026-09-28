@@ -619,8 +619,8 @@ be named and eligible. Never close Lantern home, its pane, or its workspace.
 
 ### Temporary Codex jobs and completed-session cleanup
 
-An explicitly temporary, disposable, low-importance, one-shot, or
-Daily-Tasks-style Codex job may use the plugin's `bin/codex-headless` route.
+An explicitly temporary, disposable, low-importance, or one-shot Codex job
+may use the plugin's `bin/codex-headless` route.
 The work must fit one bounded turn and require no repeated steering, resume,
 team coordination, or durable live context. Unclear and durable work stays in
 a full interactive Herdr agent. Never infer ephemeral routing from size alone.
@@ -663,13 +663,6 @@ leaves the saved session in place and produces a warning/nonzero result. A
 handoff failure leaves home open. It never stops the Herdr server or kills
 preserved work. `hsh morning` opens a fresh Lantern, loads the durable handoff,
 and reconciles it against the live field before acting.
-
-The Daily-Tasks profile is a fresh one-shot route per instruction:
-`bin/codex-headless research --profile daily-tasks --job <unique-slug>
-<instruction>`. It pins `C:\Claude\Daily-Tasks` as durable context and model
-phrase `5.6 luna xhigh fast`. It is always `codex exec --ephemeral`, never a
-normal Codex desktop/web session and never resumable. Research mode may read
-and report only; it must not edit files or send external messages.
 
 ### Review transport checks
 

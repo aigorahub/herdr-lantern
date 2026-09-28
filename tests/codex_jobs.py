@@ -143,7 +143,7 @@ class CodexJobs(unittest.TestCase):
             cwd.mkdir()
             report = jobs.run_job(
                 mode="research", cwd=cwd, state_dir=Path(root) / "state",
-                job="daily-route", model_phrase="5.6 luna xhigh fast",
+                job="luna-route", model_phrase="5.6 luna xhigh fast",
                 prompt="Read only.", route_module=actual_route,
                 checker_module=checker_module(), runner=runner,
                 resolver=lambda command: command,
@@ -219,7 +219,7 @@ class CodexJobs(unittest.TestCase):
                 )
         self.assertEqual(runner.calls, [])
 
-    def test_daily_tasks_profile_pins_luna_cwd_and_fresh_ephemeral_run(self):
+    def test_cli_passes_cwd_and_model_phrase_to_a_fresh_ephemeral_run(self):
         report = {"status": "complete", "session_persisted": False}
         with patch.object(jobs, "run_job", return_value=report) as run:
             stdout = io.StringIO()
@@ -228,27 +228,33 @@ class CodexJobs(unittest.TestCase):
             ):
                 status = jobs.main([
                     "research",
-                    "--profile", "daily-tasks",
+                    "--cwd", r"C:\work\notes",
+                    "--model", "astra high",
                     "--job", "state-2026-09-15",
                     "Read durable context and report current state.",
                 ])
         self.assertEqual(status, 0)
-        self.assertEqual(run.call_args.kwargs["cwd"], Path(r"C:\Claude\Daily-Tasks"))
-        self.assertEqual(run.call_args.kwargs["model_phrase"], "5.6 luna xhigh fast")
+        self.assertEqual(run.call_args.kwargs["cwd"], Path(r"C:\work\notes"))
+        self.assertEqual(run.call_args.kwargs["model_phrase"], "astra high")
         self.assertEqual(run.call_args.kwargs["mode"], "research")
         self.assertFalse(json_from(stdout.getvalue())["session_persisted"])
 
-    def test_daily_tasks_profile_rejects_model_or_cwd_override(self):
-        for extra in (("--model", "astra"), ("--cwd", r"C:\Claude\Other")):
-            with self.subTest(extra=extra):
-                with patch.object(sys, "stderr", io.StringIO()), patch.dict(
+    def test_cli_requires_cwd_and_names_the_removed_profile(self):
+        cases = (
+            (["research", "--job", "once", "Read only."], "--cwd is required"),
+            (["research", "--profile", "old", "--job", "once", "Read only."],
+             "--profile was removed; pass --cwd"),
+        )
+        for argv, message in cases:
+            with self.subTest(argv=argv), patch.object(jobs, "run_job") as run:
+                stderr = io.StringIO()
+                with patch.object(sys, "stderr", stderr), patch.dict(
                     jobs.os.environ, {"LANTERN_HERD_STATE_DIR": r"C:\private\lantern"}
                 ):
-                    status = jobs.main([
-                        "research", "--profile", "daily-tasks", "--job", "once",
-                        *extra, "Read only.",
-                    ])
+                    status = jobs.main(argv)
                 self.assertEqual(status, 2)
+                self.assertIn(message, stderr.getvalue())
+                run.assert_not_called()
 
 
 def json_from(value):

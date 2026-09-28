@@ -2,6 +2,22 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Removed
+
+- Removed one person's settings from what every install ships. The first is
+  the Daily-Tasks headless profile, `codex-headless --profile daily-tasks`,
+  which had a fixed `C:\Claude\Daily-Tasks` folder and a fixed
+  `5.6 luna xhigh fast` model. Use `--cwd <folder>`, and add
+  `--model <phrase>` if you need a model. Put a personal default like that in
+  your private `prompt.md` in the Lantern config directory. A leftover
+  `--profile` now stops with a message that names `--cwd` and `--model`.
+- The Field Status rule that always kept a Daily Tasks tab open is gone.
+  Lantern Home is still never closed.
+- Examples and tests no longer use personal workspace names. The Windows
+  plan no longer contains a personal user path.
+
 ## [0.16.0] - 2026-09-25
 
 ### Added

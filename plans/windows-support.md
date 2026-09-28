@@ -40,7 +40,7 @@ These were measured, not assumed. Do not re-derive them.
 - `python3` on PATH is a zero-byte Microsoft Store alias. `command -v python3`
   succeeds and running it opens the Store.
 - The only helper CLI present is `claude` at
-  `C:\Users\Megan\.local\bin\claude.exe`.
+  `C:\Users\<you>\.local\bin\claude.exe`.
 - `tests/smoke.sh:245` fails on Windows because `chmod 500` cannot make a
   directory unwritable there.
 
@@ -107,8 +107,8 @@ the Store alias on Windows.
 
 ### Batch 4: Path form handed to herdr
 
-`open.sh:100` sends `--cwd "$HOME"`. Under Git Bash that is `/c/Users/Megan`
-and native `herdr.exe` wants `C:\Users\Megan`.
+`open.sh:100` sends `--cwd "$HOME"`. Under Git Bash that is `/c/Users/<you>`
+and native `herdr.exe` wants `C:\Users\<you>`.
 
 **Acceptance criteria**
 
@@ -157,7 +157,7 @@ The user approved unlinking the GitHub install and linking the local checkout.
 
 **Acceptance criteria**
 
-- [x] B9-A1: The linked plugin creates a workspace labelled `🔥 lantern` with cwd `C:\Users\Megan` and a tab named `home`.
+- [x] B9-A1: The linked plugin creates a workspace labelled `🔥 lantern` with cwd `C:\Users\<you>` and a tab named `home`.
 - [x] B9-A2: `claude.exe` starts in the plugin state workdir and the prompt files are written.
 - [x] B9-A3: A second open focuses the existing chat instead of seating a second one.
 - [x] B9-A4: The mutation gate blocks a mutating herdr command from Git Bash and from cmd.
