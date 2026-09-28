@@ -22,8 +22,6 @@ if str(BIN) not in sys.path:
     sys.path.insert(0, str(BIN))
 from win_cmd import cmd_argv
 JOB_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-DAILY_TASKS_CWD = Path(r"C:\Claude\Daily-Tasks")
-DAILY_TASKS_MODEL = "5.6 luna xhigh fast"
 PROMPT_PREFIX = """This is a bounded, one-shot Codex job.
 Do not expose, copy, or persist authentication material.
 If the work needs repeated steering or a durable live session, stop and say so instead of expanding scope.
@@ -213,8 +211,7 @@ def parser() -> argparse.ArgumentParser:
         description="Run a bounded Codex job via exec --ephemeral and save its final response privately."
     )
     result.add_argument("mode", choices=("research", "update"))
-    result.add_argument("--profile", choices=("daily-tasks",))
-    result.add_argument("--cwd", type=Path)
+    result.add_argument("--cwd", type=Path, required=True)
     result.add_argument("--job", required=True)
     result.add_argument("--model", help="spoken Codex model phrase (default: live Codex default)")
     result.add_argument(
@@ -232,18 +229,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_intermixed_args(argv)
     cwd = args.cwd
     model_phrase = args.model or "default"
-    if args.profile == "daily-tasks":
-        if cwd is not None and cwd.expanduser().resolve() != DAILY_TASKS_CWD.resolve():
-            print(f"codex-headless: daily-tasks cwd is fixed at {DAILY_TASKS_CWD}", file=sys.stderr)
-            return 2
-        if args.model is not None and args.model.strip().lower() != DAILY_TASKS_MODEL:
-            print(f"codex-headless: daily-tasks model is fixed at {DAILY_TASKS_MODEL}", file=sys.stderr)
-            return 2
-        cwd = DAILY_TASKS_CWD
-        model_phrase = DAILY_TASKS_MODEL
-    if cwd is None:
-        print("codex-headless: --cwd is required without --profile daily-tasks", file=sys.stderr)
-        return 2
     state_dir = args.state_dir
     if state_dir is None:
         value = os.environ.get("LANTERN_HERD_STATE_DIR", "")

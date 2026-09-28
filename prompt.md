@@ -60,7 +60,7 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "parallel pack <runs and repos> with <model>, merge when clean" | The same loop per selected run | Start independent runs across repos. One live driver per Elves run. Interrupt only for NEEDS YOU. |
 | "cutoff resume <run>" | `herdr agent get/read`, `herdr pane process-info --pane <id>`, exact CLI resume via `agent start` | Same session, kind, model, effort, worktree, and phase. No substitute. Restart login pickers without keys. Competing drivers stay dead. |
 | "close bar" | `herdr tab list`, `gh pr view`, remote main and deploy evidence | List only merged tabs on current main with a passed deploy check or a stated deployment block. The user names what to close. |
-| "run this as a temporary Codex job", "one-shot Daily Tasks update", "disposable research" | `$HERDR_PLUGIN_ROOT/bin/codex-headless <research|update> --cwd <repo> --job <slug> [--model <phrase>] <task>` | Use only when the user explicitly marks a bounded, low-importance job as temporary or disposable. It runs `codex exec --ephemeral`, saves the final response in private Lantern state, and creates no Codex desktop history entry. |
+| "run this as a temporary Codex job", "one-shot notes update", "disposable research" | `$HERDR_PLUGIN_ROOT/bin/codex-headless <research|update> --cwd <repo> --job <slug> [--model <phrase>] <task>` | Use only when the user explicitly marks a bounded, low-importance job as temporary or disposable. It runs `codex exec --ephemeral`, saves the final response in private Lantern state, and creates no Codex desktop history entry. |
 | "clean completed sessions in <repo/workspace>" | Inspect the named scope, verify durable results and dependency gates, then `herdr tab close <tab_id>` for eligible tabs | Close only settled sessions whose edits are committed or whose findings are saved, whose required checks pass, and which no active task depends on. Recheck identity immediately before close. Never close Lantern home. |
 | "evening shutdown", "nightly" | The external `hsh evening` / `hsh nightly` action prompts this audit, verifies `$LANTERN_HERD_STATE_DIR/evening-handoff.md`, then closes only this Lantern pane | Dependency-audit the full field. Preserve active, unresolved, ambiguous, or depended-on work. Close only completed explicitly temporary workspaces that pass every cleanup gate. Atomically write the compact handoff before the outer action may close Lantern home. Never stop the Herdr server. |
 | morning startup | Run `hsh morning` outside Herdr | Start/attach Herdr, create a fresh Lantern session, load `evening-handoff.md`, reconcile it with the live field, and report stale facts rather than trusting them. |
@@ -264,7 +264,7 @@ When the user does not name a model:
 ### Headless ephemeral Codex jobs
 
 Use the headless route only when the user explicitly calls a Codex task
-temporary, disposable, low-importance, one-shot, or Daily-Tasks-style. The
+temporary, disposable, low-importance, or one-shot. The
 task must be bounded enough to finish in one turn and must not need repeated
 steering, a resumable conversation, team coordination, or a durable live
 session. When those conditions are absent or unclear, keep the normal full
@@ -292,17 +292,6 @@ response alone does not prove that edits or checks succeeded. If the job asks
 for steering, exceeds its bounded scope, or fails, report the saved partial
 result when present and start a fresh interactive Herdr agent only when the
 user's request authorizes continued work. An ephemeral job cannot be resumed.
-
-The built-in Daily-Tasks profile fixes the durable context root and model:
-
-`$HERDR_PLUGIN_ROOT/bin/codex-headless research --profile daily-tasks --job
-<unique-slug> <instruction>`
-
-It always resolves model phrase `5.6 luna xhigh fast` and runs with `-C
-C:\Claude\Daily-Tasks`. Use `update` only for an explicitly authorized bounded
-one-shot edit. Each instruction is a fresh run with a unique job slug. It does
-not create or resume a normal Codex desktop/web session, and it must never send
-external messages or edit files when invoked in `research` mode.
 
 ### Completed-session cleanup
 
@@ -581,8 +570,7 @@ or "show the field", run `$LANTERN_FIELD_STATUS pane` with the detected
 Python 3 command. The repo-backed command joins
 `herdr tab list`, `herdr agent list`, and `herdr workspace list` by IDs and
 prints a compact view with ET date/time. Keep every open tab visible, including
-quiet tabs, Daily Tasks, and Lantern Home. Never close Daily Tasks or Lantern
-Home as part of Field Status.
+quiet tabs and Lantern Home. Never close Lantern Home as part of Field Status.
 
 - Show an explicitly requested view in the Field Status side pane with `pane`, which opens or
   reuses a right-side pane beside the Lantern Home pane and starts `watch`.
@@ -592,7 +580,7 @@ Home as part of Field Status.
 - Show separate Important (red) and Needs You (purple) sections. The In Motion
   (yellow), Done (green), and Keep (blue) labels are section headers, not
   per-agent status suffixes. Show human-readable workspace names in yellow,
-  such as Lantern, Daily-Tasks, or Finance-Tracker Sol6 Fixes; never print a
+  such as Lantern, Notes, or Billing API Fixes; never print a
   generic shell label or an internal agent slug as the display name. Include
   the tab name beneath when it distinguishes sessions. Keep shows only Lantern
   Home by default. An idle, blocked, unknown, or shell tab appears there only

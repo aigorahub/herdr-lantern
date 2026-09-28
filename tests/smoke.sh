@@ -191,7 +191,7 @@ fi
 # an extended-length path. The shell reads \\?\C:\path, but appending a child
 # gives a form Windows rejects, and the Python snapshot then fails silently.
 if command -v cygpath >/dev/null 2>&1; then
-    posix_root=$(helper_posix_path '\\?\C:\Claude\herdr-lantern')
+    posix_root=$(helper_posix_path '\\?\C:\src\herdr-lantern')
     case $posix_root in
     /*) ;;
     *) fail "helper_posix_path should return a POSIX path (got $posix_root)" ;;
@@ -401,8 +401,14 @@ for day_file in prompt.md launch.sh herd-workflows.md README.md; do
         fail "$day_file does not document morning startup"
     grep -qF 'hsh evening' "$root/$day_file" ||
         fail "$day_file does not document evening shutdown"
-    grep -qF '5.6 luna xhigh fast' "$root/$day_file" ||
-        fail "$day_file does not pin the Daily-Tasks Luna profile"
+done
+# One person's folders, tabs, and model picks belong in their private
+# prompt.md and helper.conf, not in what every install ships.
+for shipped_file in prompt.md launch.sh herd-workflows.md README.md howto.html \
+    docs/index.html bin/codex_headless.py; do
+    if grep -qiE 'daily[- ]tasks|C:\\+Claude\\+Daily' "$root/$shipped_file"; then
+        fail "$shipped_file ships a personal Daily-Tasks setting"
+    fi
 done
 grep -qF 'evening-handoff.md' "$root/launch.sh" ||
     fail "launch does not load the durable evening handoff"
@@ -2941,7 +2947,7 @@ printf 'ok: the chat and its seats say what they run\n'
 # must also carry the Field Status route for every supported helper.
 for field_file in prompt.md launch.sh; do
     for field_word in 'Field Status' 'herdr tab list' 'herdr agent list' \
-        'herdr workspace list' 'Daily Tasks' 'Lantern Home' \
+        'herdr workspace list' 'Lantern Home' \
         'Important' 'Needs You' 'purple' 'In Motion' \
         'Done' 'Keep' 'closing'; do
         grep -qF -- "$field_word" "$root/$field_file" ||
