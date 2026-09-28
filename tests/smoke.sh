@@ -405,12 +405,16 @@ done
 # One person's folders, tabs, and model picks belong in their private
 # prompt.md and helper.conf, not in what every install ships. Scan every
 # file except the changelog history and this test. find, not git ls-files:
-# the suite also runs from a plain copy with no .git.
+# the suite also runs from a plain copy with no .git. A worktree has a .git
+# file that holds its own path, so that file is skipped too. find exits
+# nonzero whenever one grep batch finds nothing, so keep the output and
+# ignore only the status.
 personal_hits=$(find "$root" -type f \
-    ! -path '*/.git/*' ! -path '*/__pycache__/*' ! -path '*/.pytest_cache/*' \
-    ! -path '*/assets/*' ! -path "$root/state/*" ! -path "$root/output/*" \
+    ! -path '*/.git/*' ! -path "$root/.git" ! -path '*/__pycache__/*' \
+    ! -path '*/.pytest_cache/*' ! -path '*/assets/*' \
+    ! -path "$root/state/*" ! -path "$root/output/*" \
     ! -path "$root/CHANGELOG.md" ! -path "$root/tests/smoke.sh" \
-    -exec grep -liE 'daily[- ]tasks' {} + 2>/dev/null) || personal_hits=
+    -exec grep -liE 'daily[- ]tasks' {} + 2>/dev/null) || :
 [ -z "$personal_hits" ] ||
     fail "shipped files carry a personal Daily-Tasks setting: $personal_hits"
 grep -qF 'evening-handoff.md' "$root/launch.sh" ||
