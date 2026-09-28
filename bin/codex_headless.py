@@ -211,7 +211,11 @@ def parser() -> argparse.ArgumentParser:
         description="Run a bounded Codex job via exec --ephemeral and save its final response privately."
     )
     result.add_argument("mode", choices=("research", "update"))
-    result.add_argument("--cwd", type=Path, required=True)
+    result.add_argument("--cwd", type=Path)
+    # Pinned profiles were removed. A private prompt.md seeded before that can
+    # still pass --profile, so main() names the replacement flags instead of
+    # letting argparse print a bare usage error.
+    result.add_argument("--profile", help=argparse.SUPPRESS)
     result.add_argument("--job", required=True)
     result.add_argument("--model", help="spoken Codex model phrase (default: live Codex default)")
     result.add_argument(
@@ -229,6 +233,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_intermixed_args(argv)
     cwd = args.cwd
     model_phrase = args.model or "default"
+    if args.profile is not None:
+        print("codex-headless: --profile was removed; pass --cwd <folder> and, "
+              "if needed, --model <phrase>", file=sys.stderr)
+        return 2
+    if cwd is None:
+        print("codex-headless: --cwd is required", file=sys.stderr)
+        return 2
     state_dir = args.state_dir
     if state_dir is None:
         value = os.environ.get("LANTERN_HERD_STATE_DIR", "")

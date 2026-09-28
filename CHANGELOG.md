@@ -11,7 +11,8 @@ All notable changes to Lantern, by Elves are documented here.
   which had a fixed `C:\Claude\Daily-Tasks` folder and a fixed
   `5.6 luna xhigh fast` model. Use `--cwd <folder>`, and add
   `--model <phrase>` if you need a model. Put a personal default like that in
-  your private `prompt.md` in the Lantern config directory.
+  your private `prompt.md` in the Lantern config directory. A leftover
+  `--profile` now stops with a message that names `--cwd` and `--model`.
 - The Field Status rule that always kept a Daily Tasks tab open is gone.
   Lantern Home is still never closed.
 - Examples and tests no longer use personal workspace names. The Windows

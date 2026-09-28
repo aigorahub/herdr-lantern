@@ -239,12 +239,22 @@ class CodexJobs(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["mode"], "research")
         self.assertFalse(json_from(stdout.getvalue())["session_persisted"])
 
-    def test_cli_requires_cwd(self):
-        with patch.object(sys, "stderr", io.StringIO()), patch.dict(
-            jobs.os.environ, {"LANTERN_HERD_STATE_DIR": r"C:\private\lantern"}
-        ), self.assertRaises(SystemExit) as stopped:
-            jobs.main(["research", "--job", "once", "Read only."])
-        self.assertEqual(stopped.exception.code, 2)
+    def test_cli_requires_cwd_and_names_the_removed_profile(self):
+        cases = (
+            (["research", "--job", "once", "Read only."], "--cwd is required"),
+            (["research", "--profile", "old", "--job", "once", "Read only."],
+             "--profile was removed; pass --cwd"),
+        )
+        for argv, message in cases:
+            with self.subTest(argv=argv), patch.object(jobs, "run_job") as run:
+                stderr = io.StringIO()
+                with patch.object(sys, "stderr", stderr), patch.dict(
+                    jobs.os.environ, {"LANTERN_HERD_STATE_DIR": r"C:\private\lantern"}
+                ):
+                    status = jobs.main(argv)
+                self.assertEqual(status, 2)
+                self.assertIn(message, stderr.getvalue())
+                run.assert_not_called()
 
 
 def json_from(value):

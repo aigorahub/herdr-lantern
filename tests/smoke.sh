@@ -403,13 +403,16 @@ for day_file in prompt.md launch.sh herd-workflows.md README.md; do
         fail "$day_file does not document evening shutdown"
 done
 # One person's folders, tabs, and model picks belong in their private
-# prompt.md and helper.conf, not in what every install ships.
-for shipped_file in prompt.md launch.sh herd-workflows.md README.md howto.html \
-    docs/index.html bin/codex_headless.py; do
-    if grep -qiE 'daily[- ]tasks|C:\\+Claude\\+Daily' "$root/$shipped_file"; then
-        fail "$shipped_file ships a personal Daily-Tasks setting"
-    fi
-done
+# prompt.md and helper.conf, not in what every install ships. Scan every
+# file except the changelog history and this test. find, not git ls-files:
+# the suite also runs from a plain copy with no .git.
+personal_hits=$(find "$root" -type f \
+    ! -path '*/.git/*' ! -path '*/__pycache__/*' ! -path '*/.pytest_cache/*' \
+    ! -path '*/assets/*' ! -path "$root/state/*" ! -path "$root/output/*" \
+    ! -path "$root/CHANGELOG.md" ! -path "$root/tests/smoke.sh" \
+    -exec grep -liE 'daily[- ]tasks' {} + 2>/dev/null) || personal_hits=
+[ -z "$personal_hits" ] ||
+    fail "shipped files carry a personal Daily-Tasks setting: $personal_hits"
 grep -qF 'evening-handoff.md' "$root/launch.sh" ||
     fail "launch does not load the durable evening handoff"
 if grep -qF -- '--dangerously-bypass-approvals-and-sandbox' "$root/bin/codex_headless.py"; then
