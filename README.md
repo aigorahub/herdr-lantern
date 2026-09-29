@@ -121,11 +121,13 @@ working toward?” for that readout. Ask “Field Status” or “what’s going
 to open a compact right-side pane beside Lantern Home. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
 date/time, separate red Important and purple Needs You sections, and every
-open tab. Human-readable workspace names are yellow; In Motion, Done, and
-Keep are yellow, green, and blue section headers. Keep shows Lantern Home and
-only other sessions explicitly pinned by the user; hiding a quiet tab does not
-close it. Done agents show a verified short outcome, and verified settled
-sessions disappear immediately after closure. Daily Tasks and Lantern Home
+open tab. Human-readable workspace names are yellow; In Motion, Checking
+Outcome, Done, and Keep are yellow, orange, green, and blue section headers.
+Keep shows Lantern Home and only other sessions explicitly pinned by the user;
+hiding a quiet tab does not close it. A completed agent sits under Checking
+Outcome until Lantern verifies its outcome; it then moves to Done with that
+short verified outcome, and verified settled sessions disappear immediately
+after closure. Daily Tasks and Lantern Home
 are never closed by this view. The watcher redraws when field state or
 notes change and leaves command transcripts out of the chat.
 
@@ -138,7 +140,9 @@ Monitor events can set or clear notes with `note needs-you set|clear <id>` and
 for the user; noteworthy status or review gates with no user action belong
 under Important. Legacy review-gate notes display under Important until cleared.
 Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
-Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
+Keep entry, and `note done set|clear <pane-id>` for a verified short outcome,
+which moves the agent from Checking Outcome to Done. `--plain` prints the same
+sections without colors.
 
 Lantern works great with Elves. Without Elves it is still the Herdr
 plugin: workspaces, panes, agents. If `.elves-session.json` files exist,

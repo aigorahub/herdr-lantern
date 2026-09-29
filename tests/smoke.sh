@@ -2943,7 +2943,7 @@ for field_file in prompt.md launch.sh; do
     for field_word in 'Field Status' 'herdr tab list' 'herdr agent list' \
         'herdr workspace list' 'Daily Tasks' 'Lantern Home' \
         'Important' 'Needs You' 'purple' 'In Motion' \
-        'Done' 'Keep' 'closing'; do
+        'Checking Outcome' 'orange' 'Done' 'Keep' 'closing'; do
         grep -qF -- "$field_word" "$root/$field_file" ||
             fail "$field_file omits Field Status rule $field_word"
     done

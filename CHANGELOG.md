@@ -2,6 +2,16 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Field Status has an orange Checking Outcome section between In Motion and
+  Done. A completed agent waits there until Lantern records a verified outcome
+  note, then moves to Done, which now holds only verified outcomes. The
+  "Outcome not yet verified" placeholder is gone, `--plain` prints the new
+  section without color, and closed sessions still leave either section at once.
+
 ## [0.16.0] - 2026-09-25
 
 ### Added

@@ -590,8 +590,8 @@ Home as part of Field Status.
   the chat. If the side pane cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
 - Show separate Important (red) and Needs You (purple) sections. The In Motion
-  (yellow), Done (green), and Keep (blue) labels are section headers, not
-  per-agent status suffixes. Show human-readable workspace names in yellow,
+  (yellow), Checking Outcome (orange), Done (green), and Keep (blue) labels are
+  section headers, not per-agent status suffixes. Show human-readable workspace names in yellow,
   such as Lantern, Daily-Tasks, or Finance-Tracker Sol6 Fixes; never print a
   generic shell label or an internal agent slug as the display name. Include
   the tab name beneath when it distinguishes sessions. Keep shows only Lantern
@@ -599,12 +599,15 @@ Home as part of Field Status.
   when the user specifically asks to keep it, recorded with
   `$LANTERN_FIELD_STATUS note keep set <pane-or-tab-id> "<reason>"`.
   Do not close a quiet tab merely because it is hidden from Keep.
-  For each Done agent retained in the field, inspect its final output and set
-  `$LANTERN_FIELD_STATUS note done set <pane-id> "<short verified outcome>"`.
+  A completed agent appears under Checking Outcome until its outcome is
+  verified. For each Checking Outcome agent, inspect its final output and set
+  `$LANTERN_FIELD_STATUS note done set <pane-id> "<short verified outcome>"`;
+  that moves it to Done. Done holds only agents with a verified outcome note.
   Never present a task title alone as an accomplished outcome.
-  Before closing a Done session, verify its repo/worktree has no uncommitted
-  work, its output is durable, and no other agent relies on it. Close only
-  verified settled sessions; they disappear from Field Status immediately.
+  Never close a Checking Outcome session. Before closing a Done session, verify
+  its repo/worktree has no uncommitted work, its output is durable, and no
+  other agent relies on it. Close only verified settled sessions; they
+  disappear from Field Status immediately.
 - Needs You contains only a concrete action the user must take. A blocked
   Herdr state by itself does not qualify. Important contains noteworthy status
   or review gates that require no user action; there is no Review Gates section.

@@ -18,7 +18,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m", "purple": "\x1b[35m"}
+ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m", "purple": "\x1b[35m",
+        "orange": "\x1b[38;5;208m"}
 RESET = "\x1b[0m"
 ORDER = {"working": 0, "blocked": 1, "done": 2, "idle": 3, "unknown": 4}
 
@@ -355,18 +356,19 @@ def section_for(row: dict, note_data: dict, home_pane_id: str) -> str | None:
     if row.get("raw_status") == "working":
         return "IN MOTION"
     if row.get("raw_status") == "done":
-        return "DONE"
+        # A completed agent is Done only once its outcome has been verified.
+        return "DONE" if verified_summary(row, note_data) else "CHECKING OUTCOME"
     keep = note_data.get("keep", {})
     if row.get("pane_id") in keep or row.get("tab_id") in keep:
         return "KEEP"
     return None
 
 
-def done_summary(row: dict, note_data: dict) -> str:
+def verified_summary(row: dict, note_data: dict) -> str:
     item = note_data.get("done", {}).get(row.get("pane_id"))
     if isinstance(item, dict) and item.get("identity") == row_identity(row):
         return clean(item.get("summary"), 180)
-    return "Outcome not yet verified"
+    return ""
 
 
 def append_note_section(lines: list[str], title: str, actions: dict, shade: str,
@@ -392,11 +394,10 @@ def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True
     append_note_section(lines, "IMPORTANT", note_data.get("important", {}), "red", width, colors)
     append_note_section(lines, "NEEDS YOU", note_data.get("needs_you", {}), "purple", width, colors)
     ordered = sorted(rows, key=lambda item: (ORDER.get(item["raw_status"], 4), item["sort_index"]))
-    for title, shade, selected in (
-        ("IN MOTION", "yellow", [row for row in ordered if section_for(row, note_data, home_pane_id) == "IN MOTION"]),
-        ("DONE", "green", [row for row in ordered if section_for(row, note_data, home_pane_id) == "DONE"]),
-        ("KEEP", "blue", [row for row in ordered if section_for(row, note_data, home_pane_id) == "KEEP"]),
+    for title, shade in (
+        ("IN MOTION", "yellow"), ("CHECKING OUTCOME", "orange"), ("DONE", "green"), ("KEEP", "blue"),
     ):
+        selected = [row for row in ordered if section_for(row, note_data, home_pane_id) == title]
         lines.append(color(title, shade, colors))
         if not selected:
             lines.append("• None")
@@ -407,7 +408,7 @@ def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True
             if useful_tab_detail(tab, name):
                 lines.append("  " + fit(tab, width - 2))
             if title == "DONE":
-                lines.extend(textwrap.wrap("  " + done_summary(row, note_data), width=width,
+                lines.extend(textwrap.wrap("  " + verified_summary(row, note_data), width=width,
                                            subsequent_indent="  ", break_long_words=False))
         lines.append("")
     return "\n".join(lines) + "\n"

@@ -95,11 +95,20 @@ class FieldStatusTests(unittest.TestCase):
         self.assertIn("\x1b[31mIMPORTANT\x1b[0m\n• Independent Sol High review pending", output)
         self.assertIn("\x1b[35mNEEDS YOU\x1b[0m\n• Choose whether to merge PR 42", output)
         self.assertIn("\x1b[33mLantern\x1b[0m", output)
-        self.assertIn("\x1b[32mDONE\x1b[0m", output)
+        self.assertIn("\x1b[38;5;208mCHECKING OUTCOME\x1b[0m\n• \x1b[33mPlugin Update\x1b[0m", output)
+        self.assertIn("\x1b[32mDONE\x1b[0m\n• None", output)
         self.assertIn("\x1b[34mKEEP\x1b[0m", output)
         self.assertNotIn("REVIEW GATES", output)
         self.assertNotIn("Sol Reviewer", output)
-        self.assertIn("Outcome not yet verified", output)
+        self.assertNotIn("Outcome not yet verified", output)
+        headers = [output.index(title) for title in ("IN MOTION", "CHECKING OUTCOME", "DONE", "KEEP")]
+        self.assertEqual(headers, sorted(headers))
+
+    def test_plain_output_has_no_color_codes(self):
+        rows = status.rows_for(*field("done"))
+        output = status.render(rows, {}, NOW, False)
+        self.assertNotIn("\x1b", output)
+        self.assertIn("IN MOTION\n• None\n\nCHECKING OUTCOME\n• Plugin Update\n  Review\n\nDONE\n• None", output)
 
     def test_control_text_cannot_spoof_rows(self):
         tabs, agents, workspaces = field()
@@ -115,7 +124,7 @@ class FieldStatusTests(unittest.TestCase):
                                       "important": {}}, NOW, False, width=38)
         self.assertLessEqual(len(output.splitlines()[0]), 38)
         self.assertIn("ET", output.splitlines()[0])
-        self.assertIn("DONE\n• Plugin Update\n  Review\n  Outcome not yet verified", output)
+        self.assertIn("CHECKING OUTCOME\n• Plugin Update\n  Review\n\nDONE\n• None", output)
         self.assertIn("• Choose whether to merge", output)
         self.assertIn("  update", output)
 
@@ -375,10 +384,22 @@ class FieldStatusTests(unittest.TestCase):
         notes = {"done": {"w3:p1": {"identity": status.row_identity(done),
                                       "summary": "Reviewed the plugin update; tests passed."}}}
         output = status.render(rows, notes, NOW, False)
-        self.assertIn("Reviewed the plugin update; tests passed.", output)
+        self.assertIn("CHECKING OUTCOME\n• None", output)
+        self.assertIn("DONE\n• Plugin Update\n  Review\n  Reviewed the plugin update; tests passed.", output)
         changed = [dict(row) for row in rows]
         changed[-1]["state_change_seq"] = 99
-        self.assertIn("Outcome not yet verified", status.render(changed, notes, NOW, False))
+        output = status.render(changed, notes, NOW, False)
+        self.assertIn("CHECKING OUTCOME\n• Plugin Update\n  Review\n\nDONE\n• None", output)
+        self.assertNotIn("Reviewed the plugin update", output)
+
+    def test_closed_verified_done_disappears_immediately(self):
+        done = status.rows_for(*field("done"))
+        notes = {"done": {"w3:p1": {"identity": status.row_identity(done[-1]), "summary": "Shipped."}}}
+        self.assertIn("DONE\n• Plugin Update", status.render(done, notes, NOW, False))
+        closed = status.reconcile(status.rows_for(*field(include_done=False)), {"rows": done}, NOW)
+        output = status.render(closed, notes, NOW, False)
+        self.assertNotIn("Plugin Update", output)
+        self.assertIn("CHECKING OUTCOME\n• None\n\nDONE\n• None", output)
 
     def test_lantern_home_always_keep_even_when_done(self):
         rows = status.rows_for(*field("done"))
@@ -386,6 +407,7 @@ class FieldStatusTests(unittest.TestCase):
         output = status.render(rows, {}, NOW, False, home_pane_id="w1:p1")
         self.assertIn("KEEP\n• Lantern", output)
         self.assertNotIn("DONE\n• Lantern", output)
+        self.assertNotIn("CHECKING OUTCOME\n• Lantern", output)
 
     def test_keep_and_done_note_commands_validate_live_rows(self):
         with tempfile.TemporaryDirectory() as root:
@@ -404,7 +426,8 @@ class FieldStatusTests(unittest.TestCase):
             self.assertEqual(data["done"]["w3:p1"]["summary"], "Reviewed plugin update; tests passed")
             output = status.render(status.rows_for(*field("done")), data, NOW, False)
             self.assertIn("KEEP\n• Lantern\n  Lantern Home\n• Daily-Tasks", output)
-            self.assertIn("Reviewed plugin update; tests passed", output)
+            self.assertIn("CHECKING OUTCOME\n• None", output)
+            self.assertIn("DONE\n• Plugin Update\n  Review\n  Reviewed plugin update; tests passed", output)
             proc = subprocess.run([sys.executable, script, "--state-dir", root,
                                    "note", "done", "set", "w2:p1", "Not done"],
                                   capture_output=True, text=True, check=False)

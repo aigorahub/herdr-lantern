@@ -361,10 +361,12 @@ $onboard_note
   Join \`herdr tab list\`, \`herdr agent list\`, and \`herdr workspace list\`
   by ID. Keep every open tab, including quiet/idle, Daily Tasks, and Lantern
   Home. Show human-readable workspace names in yellow, never internal agent
-  slugs or shell labels. In Motion, Done, and Keep are separate yellow, green,
-  and blue list headers. Keep shows only Lantern Home and user-pinned sessions;
-  hidden quiet tabs stay open. Done entries need short verified outcomes.
-  Before closing Done agents, check uncommitted work and other-agent reliance;
+  slugs or shell labels. In Motion, Checking Outcome, Done, and Keep are
+  separate yellow, orange, green, and blue list headers. Keep shows only
+  Lantern Home and user-pinned sessions; hidden quiet tabs stay open. A
+  completed agent stays in Checking Outcome until you verify its outcome with
+  \`note done set\`; Done holds only verified outcomes. Never close a Checking
+  Outcome session. Before closing Done agents, check uncommitted work and other-agent reliance;
   verified closed sessions disappear immediately. Important is red for noteworthy status or
   review gates; Needs You is purple for an exact user action. There is no
   Review Gates section. Refresh at meaningful completion,
