@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.16.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.16.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -399,10 +399,10 @@ from its home tab and raises only decisions that need you.
 | `sweep battle-paddle, image-maker with astra high` | One audit agent per repo. High ROI issues only. Stop before Elves. |
 | `issue harvest battle-paddle, image-maker` | Read open issues. Bring a menu of 1-3 landable runs per repo. You pick. |
 | `stage relay recovery on battle-paddle with astra high` | Plan PR if needed, implementation draft PR, worktree, and exact phase routes. Stop before execution. |
-| `landable loop relay recovery on battle-paddle with astra high, merge when clean` | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, GitHub version, deploy check, pull main, report closable. |
+| `landable loop relay recovery on battle-paddle with astra high, merge when clean` | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, post-merge steps for its landing path, report closable. |
 | `parallel pack relay recovery on battle-paddle and export fixes on image-maker with astra high, merge when clean` | Start the selected independent runs. Continue healthy runs when another blocks. |
 | `cutoff resume relay recovery` | Exact session, same kind and model, same worktree and phase. No silent substitute. |
-| `close bar` | List merged tabs on current main with a passed deploy check or a stated deployment block. You name what to close. |
+| `close bar` | List merged tabs whose merged branch is current, with a passed deploy check or a stated deployment block. You name what to close. |
 
 For `landable loop` and `parallel pack`, omit `merge when clean` to stop at a
 landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage never grants merge authority.

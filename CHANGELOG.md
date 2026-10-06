@@ -2,6 +2,23 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.16.1] - 2026-10-06
+
+### Changed
+
+- Green is two answers on the exact head: the PR can merge (required checks
+  passed or were skipped, not `BLOCKED`), and it was tested (a
+  `Local tests passed on <head SHA>` record, or passed release checks).
+  Socket, Vercel, and skipped checks never prove that tests ran.
+- Post-merge steps follow the landing path. A merge into `main` keeps the
+  tag/release, deploy check, and main pull. A merge into `dev` checks the
+  staging deploy and pulls `dev`. A release or hotfix into `main` gets a
+  same-day back-merge PR into `dev`. The close bar checks the merged branch.
+- Session cleanup blocks on a missing required check, not on a repository
+  with no checks. `gh pr checks` reporting no checks is not a failure.
+- Bot reviews that ran inside PR CI (Gemini auto-comments, Claude review
+  workflows) are no longer expected once a repo stops PR tests.
+
 ## [0.16.0] - 2026-09-25
 
 ### Added

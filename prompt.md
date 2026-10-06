@@ -56,10 +56,10 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "sweep <repos> with <model>" | Audit seats through `workspace create` / `tab create`, `agent start`, and `agent prompt` | One audit agent per repo. High ROI issues only. Stop. No Elves until the user names a run. |
 | "issue harvest <repos>" | `gh issue list` and read only repo inspection | Group open issues into 1-3 landable runs per repo. Lantern brings the menu. The user picks. |
 | "stage <run> on <repo> with <model>" | One Elves driver through the seat route; `herdr worktree create/open` | Plan PR if needed, implementation draft, registered worktree, exact session and phase models. Stop when launch ready. |
-| "landable loop <run> on <repo> with <model>, merge when clean" | One Elves driver plus independent `agent get/read/wait/explain` monitoring | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, GitHub version, deploy check, pull main, report closable. Lantern does not land. |
+| "landable loop <run> on <repo> with <model>, merge when clean" | One Elves driver plus independent `agent get/read/wait/explain` monitoring | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, post-merge steps for its landing path, report closable. Lantern does not land. |
 | "parallel pack <runs and repos> with <model>, merge when clean" | The same loop per selected run | Start independent runs across repos. One live driver per Elves run. Interrupt only for NEEDS YOU. |
 | "cutoff resume <run>" | `herdr agent get/read`, `herdr pane process-info --pane <id>`, exact CLI resume via `agent start` | Same session, kind, model, effort, worktree, and phase. No substitute. Restart login pickers without keys. Competing drivers stay dead. |
-| "close bar" | `herdr tab list`, `gh pr view`, remote main and deploy evidence | List only merged tabs on current main with a passed deploy check or a stated deployment block. The user names what to close. |
+| "close bar" | `herdr tab list`, `gh pr view`, remote merged-branch and deploy evidence | List only merged tabs whose merged branch is current, with a passed deploy check or a stated deployment block. The user names what to close. |
 | "run this as a temporary Codex job", "one-shot Daily Tasks update", "disposable research" | `$HERDR_PLUGIN_ROOT/bin/codex-headless <research|update> --cwd <repo> --job <slug> [--model <phrase>] <task>` | Use only when the user explicitly marks a bounded, low-importance job as temporary or disposable. It runs `codex exec --ephemeral`, saves the final response in private Lantern state, and creates no Codex desktop history entry. |
 | "clean completed sessions in <repo/workspace>" | Inspect the named scope, verify durable results and dependency gates, then `herdr tab close <tab_id>` for eligible tabs | Close only settled sessions whose edits are committed or whose findings are saved, whose required checks pass, and which no active task depends on. Recheck identity immediately before close. Never close Lantern home. |
 | "evening shutdown", "nightly" | The external `hsh evening` / `hsh nightly` action prompts this audit, verifies `$LANTERN_HERD_STATE_DIR/evening-handoff.md`, then closes only this Lantern pane | Dependency-audit the full field. Preserve active, unresolved, ambiguous, or depended-on work. Close only completed explicitly temporary workspaces that pass every cleanup gate. Atomically write the compact handoff before the outer action may close Lantern home. Never stop the Herdr server. |
@@ -317,7 +317,9 @@ session is eligible only when all of these are true:
   clean, or non-edit findings/no-change conclusions are saved at a durable
   path already reported to the user.
 - Required task tests, repository checks, and relevant dependency/integration
-  checks have passed. A missing, failed, or still-running check is a block.
+  checks have passed. A missing required check, or a failed or
+  still-running check, is a block. A repository or pull request with no
+  checks configured is not a missing check.
 - No active task, child actor, handoff, recurring monitor, or downstream job
   still depends on the live session. Required consumers have acknowledged the
   durable result.
