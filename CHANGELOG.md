@@ -2,6 +2,29 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.16.1] - 2026-10-06
+
+### Changed
+
+- Green is two answers on the exact head: the PR can merge (required checks
+  passed or were skipped, `MERGEABLE`, not `BLOCKED` or `BEHIND`), and it
+  was tested (a `Local tests passed on <head SHA>` record from a repo
+  member listing every gate as passed, passed full-suite jobs on a
+  Dependabot PR, or passed release checks).
+  Socket, Vercel, and skipped checks never prove that tests ran.
+- Post-merge steps follow the landing path. A merge into `main` keeps the
+  tag/release, deploy check, and main pull. A merge into `dev` checks the
+  staging deploy and pulls `dev`. A release or hotfix into `main` gets a
+  same-day back-merge PR into `dev`. Publishing the GitHub version after an
+  everyday merge stays part of the kickoff's merge authority where `main`
+  is the default branch; a release into `main` while `dev` is the default
+  needs explicit release authority. The close bar reads the merged branch
+  from the PR base.
+- Session cleanup blocks on a missing required check, not on a repository
+  with no checks. `gh pr checks` reporting no checks is not a failure.
+- Bot reviews that ran inside PR CI (Gemini auto-comments, Claude review
+  workflows) are no longer expected once a repo stops PR tests.
+
 ## [0.16.0] - 2026-09-25
 
 ### Added
