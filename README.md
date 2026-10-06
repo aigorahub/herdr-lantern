@@ -246,7 +246,7 @@ session. It rechecks identity and repository state immediately before close
 and reports failed gates without closing those tabs. Workspace cleanup requires
 every child tab to pass. Worktree removal remains separate. The Lantern home
 tab, pane, and workspace are never cleanup targets. `close bar` remains the
-stricter merged-main-and-deploy workflow.
+stricter merged-branch-and-deploy workflow.
 
 At the end of the day, run this from a terminal outside the Lantern pane:
 

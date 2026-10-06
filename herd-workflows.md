@@ -63,7 +63,7 @@ Report each repo's PR, merge, version, and deploy result, including blocks.
 | `sweep <repos> with <model>` | Seat one audit agent per named repo. Find high ROI issues with file and line evidence. Check for duplicates before filing issues. Stop after the issue report. No Elves until the user names a run. |
 | `issue harvest <repos>` | Read open issues with `gh -R <owner/repo> issue list --state open --json number,title,body,labels,url`. Page through all open issues. Group them into 1-3 landable Elves runs per repo. Give scope, issue URLs, dependencies, and acceptance for each run. Lantern brings the menu. The user picks. No writes, staging, or execution. |
 | `stage <run> on <repo> with <model>` | Route staging to one supported Elves driver. Have it create a plan PR if needed, an implementation draft PR, a dedicated worktree, and the run records. Bind prewalk, execute, and independent review to the named routes. Stop when launch ready. |
-| `landable loop <run> on <repo> with <model>, merge when clean` | One kickoff authorizes the named driver to audit, stage Elves, execute, review, fix, re-review, update docs + changelog + version, merge when clean, run the post-merge steps for its landing path, and report closable. Lantern monitors the whole loop. |
+| `landable loop <run> on <repo> with <model>, merge when clean` | One kickoff authorizes the named driver to audit, stage Elves, execute, review, fix, re-review, update docs + changelog + version, merge when clean, publish the GitHub version where the repo releases from its default branch `main`, run the post-merge steps for its landing path, and report closable. Lantern monitors the whole loop. |
 | `parallel pack <runs and repos> with <model>, merge when clean` | Run the same loop for each selected run across repos. Start all independent runs. Sequence dependencies. Keep one live driver per Elves run. Interrupt the user only for NEEDS YOU. |
 | `cutoff resume <run>` | Recover the exact session, kind, model, effort, worktree, and phase. Restart a login picker without a keypress. Keep competing drivers dead. Continue the existing run. |
 | `close bar` | List only tabs with merged work, the merged branch current in its checkout, and a passed deploy check or a stated deployment block. Show tab names and evidence. The user names what to close. |
@@ -351,11 +351,14 @@ and the repo's existing version scheme must be current before final checks.
 Versioned repos get a version bump. Unversioned repos do not get a new scheme.
 
 The driver reads PR comments and required checks. Green is two answers on
-the exact head. The PR can merge: every required check passed or was
-skipped, and GitHub does not report it `BLOCKED`. It was tested: a
-`Local tests passed on <head SHA>` PR comment from local runs, or on a
-release into `main`, `release-gate` and `full-tests` passed. Socket,
-Vercel, and skipped checks never prove that tests ran. It removes draft
+the exact head, as the shared landing skill defines them. The PR can
+merge: every required check passed or was skipped, GitHub reports it
+`MERGEABLE`, and its merge state is not `BLOCKED` or `BEHIND`. It was
+tested: a `Local tests passed on <head SHA>` PR comment from the repo
+owner, a member, or a collaborator that lists every documented gate as
+passed; on a Dependabot PR, its full-suite test jobs passed; on a release
+into `main`, `release-gate` and `full-tests` passed. Socket, Vercel, and
+skipped checks never prove that tests ran. It removes draft
 state only when ready. It merges only with explicit authority for this run and
 clean evidence at the same head. Elves uses a regular merge commit. Lantern
 never runs `gh pr merge` or `land-pr` and never edits product repositories.
@@ -363,12 +366,15 @@ Early bot reviews are input to the loop. They do not replace the final
 independent review at the exact head or any required check.
 
 After merge, the driver follows the landing path. When the merge went into
-`main` (a release or hotfix, or everyday work where `main` is the default
-branch), it publishes the matching GitHub tag/release when the repo uses
-that release process. Reuse release automation and existing tags. Do not
-duplicate a release or add an unreviewed version commit on main. It checks
-the deployment for the merged commit and pulls current main with a fast
-forward in the intended checkout. When the merge went into `dev` (everyday
+`main` as the default branch, the kickoff's merge authority covers
+publishing the matching GitHub tag/release when the repo uses that release
+process, as before. A release or hotfix into `main` while `dev` is the
+default branch needs the user's explicit release authority before it
+merges; the tag/release follows it. Reuse release automation and existing
+tags. Do not duplicate a release or add an unreviewed version commit on
+main. After a merge into `main`, the driver checks the deployment for the
+merged commit and pulls current main with a fast forward in the intended
+checkout. When the merge went into `dev` (everyday
 work where `dev` is the default branch), there is no tag or release. It
 checks the staging deployment for the merged commit and pulls `dev`. After
 a release or hotfix into `main` while `dev` is the default branch, it opens
@@ -380,7 +386,8 @@ Lantern monitors independently with `herdr agent get/read/explain`,
 `herdr agent wait <target> --until idle --until done --until blocked
 --timeout 60000`, the run records, `gh pr view`, `gh pr checks`, and the
 repo's read only deployment status command. `gh pr checks` exits 1 with
-"no checks reported" when a PR has no checks; that is not a failure. Use bounded waits. Read the
+"no checks reported" when a PR has no checks; that is not a failure.
+Use bounded waits. Read the
 existing Elves follow evidence. Do not run a competing worker supervisor.
 After a quiet timeout, inspect process and progress evidence. Do not prompt
 the chat for status. Silence, idle, and done are not proof of completion.
@@ -491,7 +498,8 @@ Each pass must do useful work when a gate can advance:
 4. Record `done` only after evidence meets the accepted stop point. For a
    Ship run this includes independent review, fixed findings, current docs
    and version, clean merge, the existing release process, deploy evidence,
-   and the current merged branch. A PR only run needs a landable PR, not a merge. A stage
+   and the current merged branch. A PR only run needs a landable PR, not
+   a merge. A stage
    run needs verified launch readiness. An idle or exited agent, a green CI
    check, a parent SUCCESS, or all visible panes being done is insufficient.
    A deployment block stays a named unresolved gate, not a successful run.
@@ -620,15 +628,18 @@ A changed or unavailable route stops recovery. No silent substitute.
 
 Exclude Lantern home and any tab with working or unmerged work. For each
 candidate, verify the PR is MERGED with `gh -R <owner/repo> pr view <number>
---json state,mergeCommit,url`. Check current remote main with
-`git -C <repo> ls-remote origin refs/heads/main`. Check the intended local
-checkout with `git -C <repo> branch --show-current`,
+--json state,mergeCommit,baseRefName,url`. The merged branch is the PR's
+`baseRefName`: `dev` for everyday work in a repo that releases from `main`,
+`main` for a release or for a repo whose default branch is `main`. Check
+its remote tip with `git -C <repo> ls-remote origin refs/heads/<branch>`.
+Check the intended local checkout with `git -C <repo> branch --show-current`,
 `git -C <repo> rev-parse HEAD`, and `git -C <repo> status --porcelain`.
-Use the repo's actual default branch if it is not main. Require a clean
-checkout on that branch at the remote tip. Require deploy evidence for the
-merged commit or an explicit deployment block with its reason.
+Require a clean checkout on that branch at the remote tip. Require deploy
+evidence for the merged commit (staging after a merge into `dev`) or an
+explicit deployment block with its reason.
 
-List the exact tab label, PR, main commit, and deploy result or BLOCKED reason.
+List the exact tab label, PR, merged branch and commit, and deploy result or
+BLOCKED reason.
 Do not include an open PR as a blocked close candidate. The user names which
 tabs to close. Recheck their evidence and identities before
 `herdr tab close <tab_id>`. A workspace close also requires all child tabs to
@@ -663,7 +674,7 @@ Recheck identity and repository state immediately before closing the exact
 tab. Report failed gates and keep those tabs open. Close a named workspace only
 when all its child tabs pass. Worktree removal remains a separate named action.
 These cleanup rules never permit closing Lantern home. `close bar` retains its
-stricter merge, current-main, and deploy requirements.
+stricter merge, current-merged-branch, and deploy requirements.
 
 The sole home-exit exception is the external `hsh evening` / `hsh nightly`
 action. Lantern first performs the same dependency audit, preserves active and

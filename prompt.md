@@ -330,7 +330,7 @@ gated close. Close exact eligible tabs, not arbitrary panes. Close a workspace
 only when the user named that workspace and every child tab independently
 passes the same gates. Worktree removal is separate and still requires a
 named worktree. Never close the Lantern home workspace under any condition.
-`close bar` keeps its stricter merged-main-and-deploy evidence rules.
+`close bar` keeps its stricter merged-branch-and-deploy evidence rules.
 
 ### Evening and morning
 
