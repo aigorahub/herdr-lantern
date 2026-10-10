@@ -8,7 +8,11 @@ height split. Later opens preserve existing sizes and chat focus.
 
 Setup moves only exact readout watchers or recorded idle readout shells.
 It preserves each watcher during a move. Unrelated panes and agents receive
-no input. Saved ownership, server identity, and shell checks still apply.
+no input. Saved ownership, server identity, and shell checks still apply. Setup waits for shells before layout repair.
+It uses pane move with --no-focus through a temporary owned tab.
+The second move closes that empty tab. Native same tab moves do not reorder
+panes. The native swap command changes focus. Pending move records support
+recovery after a lost response.
 A lost split response must not cause another split on retry. A lost move
 response can recover the exact running watcher. A failed setup does not stop
 chat startup.

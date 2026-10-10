@@ -640,6 +640,9 @@ class ViewTests(unittest.TestCase):
         self.assertGreater(usage["height"], activity["height"])
         self.assertEqual(chat["height"], usage["height"] + activity["height"])
         self.assertTrue(all(entry["tab_id"] == "w9:t1" for entry in record["views"].values()))
+        self.assertEqual(data.get("focused_pane", "w9:p1"), "w9:p1")
+        self.assertFalse(any(c[:2] == ["pane", "swap"] for c in data["calls"]))
+        self.assertTrue(all("--no-focus" in c for c in data["calls"] if c[:2] == ["pane", "move"]))
 
     def test_closed_readout_restores_in_right_column(self):
         for kind in ("usage", "field"):
@@ -673,6 +676,49 @@ class ViewTests(unittest.TestCase):
         self.save(data)
         self.assertEqual(self.setup_views()["errors"], [])
         self.assertEqual(self.data()["rects"], data["rects"])
+
+    def test_new_and_saved_shells_wait_before_layout_repair_and_start(self):
+        data = self.data()
+        data["starting_reads"] = 2
+        self.save(data)
+        self.assertEqual(self.setup_views("field")["errors"], [])
+        self.assertEqual(self.setup_views()["errors"], [])
+        self.assert_layout()
+        data = self.data()
+        pane = field.read_json(self.state / "views.json", {})["views"]["field"]["pane_id"]
+        data["processes"][pane] = []
+        data["starting"][pane] = 2
+        self.save(data)
+        self.assertEqual(self.setup_views("field")["errors"], [])
+        self.assertEqual(self.data()["starting"][pane], 0)
+
+    def test_lost_layout_move_response_recovers_without_new_panes(self):
+        for lost_stage in (True, False):
+            self.assertEqual(self.setup_views("field")["errors"], [])
+            entry = field.read_json(self.state / "views.json", {})["views"]["field"]
+            data = self.data()
+            data["processes"][entry["pane_id"]] = []
+            self.save(data)
+            original = field.control
+            lost = []
+            def uncertain(binary, args, timeout):
+                result = original(binary, args, timeout)
+                if args[:2] == ["pane", "move"] and ("--new-tab" in args) == lost_stage and not lost:
+                    lost.append(True)
+                    raise RuntimeError("response lost")
+                return result
+            # Recreate usage so repair must move field through a temporary tab.
+            old_usage = field.read_json(self.state / "views.json", {}).get("views", {}).get("usage")
+            if old_usage:
+                with patch.dict(os.environ, {"HERDR_HELPER_OK": "1"}):
+                    field.control(str(ROOT / "bin/herdr"), ["pane", "close", old_usage["pane_id"]], 2)
+            with patch.object(field, "control", side_effect=uncertain):
+                self.assertTrue(self.setup_views()["errors"])
+            self.assertTrue(lost)
+            self.assertEqual(self.setup_views()["errors"], [])
+            self.assert_layout()
+            self.assertEqual(len(self.data()["panes"]), 3)
+            self.assertEqual(len(self.data()["tabs"]), 1)
 
     def test_field_first_then_usage_uses_upper_right(self):
         self.assertEqual(self.setup_views("field")["errors"], [])

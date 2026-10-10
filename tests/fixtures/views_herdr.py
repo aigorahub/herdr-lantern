@@ -37,6 +37,20 @@ def split(anchor, pane, direction):
     data["rects"][pane] = new
 
 
+def detach(pane):
+    old = data["panes"][pane]
+    area = rect(pane)
+    for candidate, item in data["panes"].items():
+        if candidate == pane or item["tab_id"] != old["tab_id"]:
+            continue
+        other = rect(candidate)
+        if other["x"] == area["x"] and other["width"] == area["width"]:
+            if other["y"] + other["height"] == area["y"] or area["y"] + area["height"] == other["y"]:
+                other["y"] = min(other["y"], area["y"])
+                other["height"] += area["height"]
+                break
+
+
 def counts():
     for tab in list(data["tabs"]):
         number = sum(p["tab_id"] == tab for p in data["panes"].values())
@@ -73,7 +87,10 @@ elif args[:2] == ["pane", "get"]:
 elif args[:2] == ["pane", "process-info"]:
     pane = flag("--pane")
     processes = data.get("processes", {}).get(pane, [])
-    result = {"process_info": {"shell_pid": 100, "foreground_processes": processes, "interactive_ready": True}}
+    starting = data.get("starting", {}).get(pane, 0)
+    if starting:
+        data["starting"][pane] -= 1
+    result = {"process_info": {"shell_pid": 100, "foreground_processes": processes, "interactive_ready": not bool(starting)}}
 elif args[:2] == ["tab", "create"]:
     number = len(data["tabs"]) + 1
     tab, pane = f"w9:t{number}", f"w9:p{number}"
@@ -86,24 +103,41 @@ elif args[:2] == ["pane", "split"]:
     data["panes"][pane] = dict(data["panes"][anchor], pane_id=pane)
     data["panes"][pane].pop("label", None)
     data["panes"][pane].pop("agent", None)
+    data.setdefault("starting", {})[pane] = data.get("starting_reads", 0)
     split(anchor, pane, flag("--direction"))
     counts()
     result = {"pane": data["panes"][pane]}
 elif args[:2] == ["pane", "move"]:
     pane = args[2]
-    data["panes"][pane]["tab_id"] = flag("--tab")
-    split(flag("--target-pane"), pane, flag("--split"))
+    old_tab = data["panes"][pane]["tab_id"]
+    if "--new-tab" in args:
+        number = max(data.get("next_tab", 1), *(int(t.split(":t")[1]) for t in data["tabs"]), 1) + 1
+        data["next_tab"] = number
+        tab = f"w9:t{number}"
+        detach(pane)
+        data["tabs"][tab] = {"tab_id": tab, "workspace_id": "w9", "label": flag("--label"), "pane_count": 1}
+        data["panes"][pane]["tab_id"] = tab
+        data.setdefault("rects", {})[pane] = {"x": 0, "y": 0, "width": 120, "height": 40}
+        changed = True
+    elif old_tab == flag("--tab"):
+        changed = False  # Native Herdr does not reorder a same-tab move.
+    else:
+        detach(pane)
+        data["panes"][pane]["tab_id"] = flag("--tab")
+        split(flag("--target-pane"), pane, flag("--split"))
+        changed = True
     counts()
-    result = {"move_result": {"pane": data["panes"][pane]}}
+    result = {"move_result": {"pane": data["panes"][pane], "changed": changed}}
 elif args[:2] == ["pane", "rename"]:
     data["panes"][args[2]]["label"] = args[3]
 elif args[:2] == ["pane", "swap"]:
     source, target = flag("--source-pane"), flag("--target-pane")
     a, b = dict(rect(source)), dict(rect(target))
     data["rects"][source], data["rects"][target] = b, a
+    data["focused_pane"] = source
 elif args[:2] == ["pane", "layout"]:
     tab = data["panes"][flag("--pane")]["tab_id"]
-    result = {"layout": {"panes": [{"pane_id": p, "rect": rect(p)} for p, item in data["panes"].items() if item["tab_id"] == tab]}}
+    result = {"layout": {"focused_pane_id": data.get("focused_pane", "w9:p1"), "panes": [{"pane_id": p, "rect": rect(p)} for p, item in data["panes"].items() if item["tab_id"] == tab]}}
 elif args[:2] == ["pane", "run"]:
     pane, command = args[2:4]
     view = "field_status.py" if "field_status.py" in command else "plan_usage.py"
