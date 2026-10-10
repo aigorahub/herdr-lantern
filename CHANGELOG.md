@@ -2,13 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## Unreleased
+## [0.17.0] - 2026-10-10
 
 ### Added
 
 - Plan Usage groups verified accounts with open agent tabs across workspaces.
   It shows allowance windows, reset times, source, and age. Codex, Claude,
-  and Grok have measured sources. Antigravity shows Account unknown.
+  and Grok have measured sources on macOS and Linux. Antigravity shows
+  Account unknown. Grok also shows Account unknown when its process has an
+  API key, OAuth token, or base URL override, including an inherited value.
+  These rows show tab counts without usage percentages. Windows shows
+  Account unknown for Codex and Dependency unavailable for Claude and Grok.
 - A private installer checks the pinned CodexBar CLI 0.74.0 release digest.
 
 ### Changed

@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.16.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -150,13 +150,21 @@ Each allowance shows its remaining percentage and reset time. Credits have
 a separate value. A past reset time does not mean that usage has reset.
 
 The watcher scans tabs every five seconds and reads usage every 60 seconds.
-All Plan Usage tabs on the server share one collector. Failed reads keep the
-last measured value and its age. Values become stale after 120 seconds.
+All Plan Usage tabs on the server share one collector. Ordinary read failures
+keep the last measured value and its age. An unknown account or a lost login
+hides the prior usage value. Values become stale after 120 seconds.
 Unknown usage has no percentage. Antigravity shows Account unknown because
 the checked source has no verified account identity. Unsupported agent
 kinds show Limits unavailable. Native Codex on Windows shows Account unknown
 when no verified process environment is available. Claude and Grok on Windows
 show Dependency unavailable because CodexBar has no Windows release asset.
+
+Grok uses the verified OAuth account source with cookies off. A process with
+`XAI_API_KEY`, `GROK_API_KEY`, `GROK_OAUTH_TOKEN`, or `XAI_BASE_URL` set shows
+Account unknown. Inherited values also cause this state. A key's presence
+does not prove which billing mode the tab uses. These rows show tab counts
+without subscription percentages. API credentials and custom provider
+settings can also prevent verified Codex or Claude account readings.
 
 Codex uses its native app server. Claude and Grok require CodexBar CLI
 0.74.0. Install the pinned CLI into private Lantern state with

@@ -632,6 +632,11 @@ Field Status Keep visibility does not select usage plans. Group by verified
 provider and account, not by model or agent. Separate accounts keep separate
 rows. Antigravity shows Account unknown until a source can prove its account.
 Unknown usage has no percentage. Do not assign another account's usage to it.
+Grok uses the verified OAuth source with cookies off. If its process has an
+API key, OAuth token, or base URL override, show Account unknown. Inherited
+values also count. Key presence does not prove the tab's billing mode.
+Unknown rows show tab counts without subscription percentages. Windows shows
+Account unknown for Codex and Dependency unavailable for Claude and Grok.
 
 Each allowance has its own remaining percentage, reset time, source, and age.
 Values become stale after 120 seconds. A past reset does not prove a full
