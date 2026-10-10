@@ -228,8 +228,8 @@ class UsageTests(unittest.TestCase):
         row["windows"] += [{"id": "other-week", "label": "Model identifier", "minutes": 10080,
                             "remaining": 2, "reset_at": 1800003600}]
         output = usage.render({"rows": [row]}, now=1800000030, width=61)
-        self.assertIn("Session", output)
-        self.assertIn("Week", output)
+        self.assertIn("Session left", output)
+        self.assertIn("Week left", output)
         self.assertIn("79%", output)
         self.assertIn("2%", output)
         self.assertNotIn("10%", output)

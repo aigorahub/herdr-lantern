@@ -270,18 +270,23 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
     stacked = width < 35
     service_width = 7
     if wide:
-        reset_width = min(16, (width - 28) // 2)
-        widths = [service_width, 7, reset_width, 6, reset_width]
-        heading = ["Service", "Session", "Reset (ET)", "Week", "Reset (ET)"]
+        full_labels = width >= 60
+        session_width, week_width = (12, 9) if full_labels else (7, 6)
+        reset_width = min(16, (width - service_width - session_width - week_width - 8) // 2)
+        widths = [service_width, session_width, reset_width, week_width, reset_width]
+        heading = ["Service", "Session left" if full_labels else "Session", "Reset (ET)",
+                   "Week left" if full_labels else "Week", "Reset (ET)"]
+        if not full_labels:
+            lines.append("Percent left. Reset times in ET.")
     elif not stacked:
         period_width = (width - service_width - 4) // 2
         widths = [service_width, period_width, period_width]
         heading = ["Service", "Session", "Week"]
-        lines.append("Reset times in ET")
+        lines.append("Percent left. Reset times in ET.")
     else:
         widths = [service_width, width - service_width - 2]
         heading = ["Service", "Left/reset"]
-        lines.append("Reset times in ET")
+        lines.extend(textwrap.wrap("Percent left. Reset times in ET.", width))
     lines.append(style("  ".join(t.ljust(w) for t, w in zip(heading, widths)).rstrip(), "1"))
     lines.append(style("  ".join("-" * w for w in widths), "2"))
     notes = []
