@@ -1,0 +1,13 @@
+#!/bin/sh
+set -u
+plan_usage_root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+# shellcheck disable=SC1091
+. "$plan_usage_root/lib.sh"
+plan_usage_python=$(helper_detect_python) || {
+    printf '%s\n' 'plan-usage: Python 3 command not found' >&2
+    exit 127
+}
+if [ "$plan_usage_python" = 'py -3' ]; then
+    exec py -3 "$plan_usage_root/bin/plan_usage.py" "$@"
+fi
+exec "$plan_usage_python" "$plan_usage_root/bin/plan_usage.py" "$@"

@@ -162,6 +162,8 @@ LANTERN_TEAM_STATE_DIR=$LANTERN_HERD_STATE_DIR
 export LANTERN_TEAM_STATE_DIR
 LANTERN_FIELD_STATUS=$(helper_native_path "$plugin_root/bin/field_status.py")
 export LANTERN_FIELD_STATUS
+LANTERN_PLAN_USAGE=$(helper_native_path "$plugin_root/bin/plan_usage.py")
+export LANTERN_PLAN_USAGE
 LANTERN_HOME_PANE_ID=${HERDR_PANE_ID:-}
 export LANTERN_HOME_PANE_ID
 (umask 077; mkdir -p "$herd_state_dir") ||
@@ -222,7 +224,7 @@ Runtime (injected by launch.sh; do not ignore):
 - Field Status executable: $LANTERN_FIELD_STATUS
   (environment: LANTERN_FIELD_STATUS). Run with the detected Python 3 command.
   For a Field Status request, invoke \`pane\` to open or reuse the compact
-  right-side view. The pane runs \`watch\` and redraws on meaningful changes.
+  Field Status tab. It runs \`watch\` and redraws on meaningful changes.
   Reconcile unfinished pack records and review evidence before opening it.
   Use \`note needs-you set/clear\` for exact user actions and
   \`note important set/clear\` for noteworthy status or gates needing no user action.
@@ -230,6 +232,14 @@ Runtime (injected by launch.sh; do not ignore):
   \`note done set/clear\` for a verified task outcome. Do not
   paste Ran command transcripts into the chat. Keep Daily Tasks and Lantern
   Home open.
+
+- Plan Usage executable: $LANTERN_PLAN_USAGE
+  (environment: LANTERN_PLAN_USAGE). Chat, Field Status, and Plan Usage open
+  in separate tabs at startup. For a usage request, invoke \`pane\` with
+  the detected Python 3 command to restore its tab. Use \`refresh\` to read
+  the cache. The view groups accounts with open agent tabs across workspaces.
+  Idle and Done tabs count. Account unknown has no measured allowance.
+  Do not prompt an agent or answer its approval to collect usage.
 
 $session_capture_note
 
@@ -357,7 +367,7 @@ $onboard_note
 - Field Status uses $LANTERN_FIELD_STATUS. On light-up, use \`--plain refresh\`
   for the initial readout. For "Field Status", "what’s going on", or any field
   question, use the detected Python 3 command with \`pane\` to open or reuse one
-  right-side pane beside Lantern Home; \`watch\` keeps the display current.
+  separate Field Status tab; \`watch\` keeps the display current.
   Join \`herdr tab list\`, \`herdr agent list\`, and \`herdr workspace list\`
   by ID. Keep every open tab, including quiet/idle, Daily Tasks, and Lantern
   Home. Show human-readable workspace names in yellow, never internal agent
@@ -540,6 +550,8 @@ else
         "the real herdr binary was not found from this pane"
 fi
 helper_python=$(helper_detect_python) || helper_python=
+helper_setup_views "$plugin_root" "$state_dir" "${HERDR_WORKSPACE_ID:-}" \
+    "$LANTERN_HOME_PANE_ID" "$workdir" "$real_herdr" || true
 if [ -n "$helper_python" ]; then
     # $helper_python is split on purpose: the Windows launcher is `py -3`.
     if [ -n "$real_herdr" ]; then

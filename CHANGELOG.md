@@ -2,6 +2,21 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## Unreleased
+
+### Added
+
+- Plan Usage groups verified accounts with open agent tabs across workspaces.
+  It shows allowance windows, reset times, source, and age. Codex, Claude,
+  and Grok have measured sources. Antigravity shows Account unknown.
+- A private installer checks the pinned CodexBar CLI 0.74.0 release digest.
+
+### Changed
+
+- Lantern opens chat, Field Status, and Plan Usage in separate tabs at startup.
+  Each tab has one pane. Reopening the chat restores missing readouts.
+  Readouts share safe tab setup and keep focus on the chat.
+
 ## [0.16.1] - 2026-10-06
 
 ### Changed

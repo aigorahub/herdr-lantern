@@ -1282,3 +1282,28 @@ helper_resolve_real_herdr() {
     [ -n "$_helper_found" ] || return 1
     printf '%s' "$_helper_found"
 }
+
+helper_setup_views() (
+    # Explicit resolved chat context. This helper does not use caller IDs.
+    _views_root=$1
+    _views_state=$2
+    _views_workspace=$3
+    _views_home=$4
+    _views_cwd=$5
+    _views_real=$6
+    [ "${HERDR_ENV:-}" = 1 ] || return 0
+    [ -n "$_views_workspace" ] && [ -n "$_views_home" ] || return 0
+    _views_python=$(helper_detect_python) || {
+        printf '%s\n' 'lantern: readouts require Python 3' >&2
+        return 1
+    }
+    HERDR_REAL=$_views_real
+    export HERDR_REAL
+    # Split only the known Python launcher, including Windows py -3.
+    # shellcheck disable=SC2086
+    $_views_python "$(helper_native_path "$_views_root/bin/lantern_views.py")" \
+        --state-dir "$(helper_native_path "$_views_state/herd")" \
+        --workspace "$_views_workspace" --home-pane "$_views_home" \
+        --cwd "$(helper_native_path "$_views_cwd")" \
+        --herdr "$(helper_native_path "$_views_root/bin/herdr")" setup
+)

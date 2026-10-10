@@ -9,7 +9,7 @@ fail() {
     exit 1
 }
 
-for f in launch.sh open.sh evening.sh lib.sh bin/herdr bin/model-route bin/model-preflight bin/codex-headless bin/onboard hsh install.sh tests/day-boundary.sh tests/smoke.sh; do
+for f in launch.sh open.sh evening.sh lib.sh bin/herdr bin/model-route bin/model-preflight bin/codex-headless bin/onboard bin/plan-usage hsh install.sh tests/day-boundary.sh tests/smoke.sh; do
     sh -n "$f" || fail "sh -n $f"
 done
 
@@ -2962,4 +2962,5 @@ model_test_python=$(helper_detect_python) || fail "model tests need Python 3"
 $model_test_python "$root/tests/models.py" || fail "model regression tests"
 $model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests"
 $model_test_python "$root/tests/field_status.py" || fail "Field Status tests"
+$model_test_python "$root/tests/plan_usage.py" || fail "Plan Usage tests"
 $model_test_python "$root/tests/session_cleanup.py" || fail "Lantern session cleanup tests"

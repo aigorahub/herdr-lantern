@@ -124,7 +124,7 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
     """Use Lantern's gated Herdr wrapper for layout changes."""
     command = herdr_command(binary, args)
     env = herdr_environment(binary)
-    if args[:2] in (["pane", "split"], ["pane", "rename"], ["pane", "run"]):
+    if args[:2] in (["pane", "run"], ["tab", "create"]):
         env["HERDR_HELPER_OK"] = "1"
     try:
         proc = subprocess.run(command, capture_output=True, text=True,
@@ -134,6 +134,10 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} unavailable: {exc}") from exc
     if proc.returncode:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} failed ({proc.returncode}): {clean(proc.stderr, 180)}")
+    if args[:2] == ["pane", "run"] and not proc.stdout.strip():
+        # The installed CLI returns no body after a successful submission.
+        # Callers still confirm the exact watcher before claiming success.
+        return {}
     try:
         result = json.loads(proc.stdout)["result"]
     except (ValueError, KeyError, TypeError) as exc:
@@ -202,54 +206,9 @@ def watcher_occupancy(info: object) -> str:
 
 
 def open_pane(state_dir: Path, plugin_root: Path, binary: str, timeout: float) -> tuple[str, bool]:
-    """Open one Field Status pane beside the caller, preserving Lantern Home."""
-    if os.environ.get("HERDR_ENV") != "1":
-        raise RuntimeError("Field Status pane requires a Herdr managed Lantern pane")
-    home = os.environ.get("HERDR_PANE_ID", "")
-    tab = os.environ.get("HERDR_TAB_ID", "")
-    workspace = os.environ.get("HERDR_WORKSPACE_ID", "")
-    if not home or not tab or not workspace:
-        raise RuntimeError("Lantern home pane identity unavailable")
-    if os.environ.get("LANTERN_HOME_PANE_ID") != home:
-        raise RuntimeError("Field Status must be opened from Lantern Home")
-    path = state_dir / "field-status-pane.json"
-    panes = control(binary, ["pane", "list", "--workspace", workspace], timeout).get("panes")
-    if not isinstance(panes, list):
-        raise RuntimeError("Herdr pane list returned invalid rows")
-    current = next((pane for pane in panes if pane.get("pane_id") == home), None)
-    if not current or current.get("tab_id") != tab:
-        raise RuntimeError("Lantern home pane identity changed")
-    if current.get("agent") is None:
-        raise RuntimeError("Field Status must be opened from Lantern Home")
-    record = read_json(path, {})
-    saved = record.get("pane_id") if record.get("home_pane_id") == home else None
-    if saved and any(pane.get("pane_id") == saved and pane.get("tab_id") == tab
-                     and not pane.get("agent") for pane in panes):
-        info = control(binary, ["pane", "process-info", "--pane", saved], timeout).get("process_info", {})
-        if watcher_occupancy(info) == "idle":
-            start_watcher(binary, saved, plugin_root, state_dir, timeout)
-        return saved, False
-    # Recovery after state loss: the pane label is visible in pane list on
-    # supported Herdr versions. It is never an agent pane.
-    existing = next((pane for pane in panes if pane.get("tab_id") == tab
-                     and pane.get("label") == "Field Status" and not pane.get("agent")), None)
-    if existing:
-        pane_id = existing["pane_id"]
-        info = control(binary, ["pane", "process-info", "--pane", pane_id], timeout).get("process_info", {})
-        state = watcher_occupancy(info)
-        write_json(path, {"schema": 1, "home_pane_id": home, "pane_id": pane_id, "tab_id": tab})
-        if state == "idle":
-            start_watcher(binary, pane_id, plugin_root, state_dir, timeout)
-        return pane_id, False
-    split = control(binary, ["pane", "split", "--pane", home, "--direction", "right",
-                             "--ratio", "0.30", "--cwd", str(Path.cwd()), "--no-focus"], timeout)
-    pane_id = (split.get("pane") or {}).get("pane_id")
-    if not pane_id or pane_id == home:
-        raise RuntimeError("Herdr split returned no new Field Status pane")
-    write_json(path, {"schema": 1, "home_pane_id": home, "pane_id": pane_id, "tab_id": tab})
-    control(binary, ["pane", "rename", pane_id, "Field Status"], timeout)
-    start_watcher(binary, pane_id, plugin_root, state_dir, timeout)
-    return pane_id, True
+    """Open or reuse the dedicated Field Status tab."""
+    from lantern_views import open_view
+    return open_view(state_dir, plugin_root, binary, timeout, "field")
 
 
 def rows_for(tabs: list[dict], agents: list[dict], workspaces: list[dict]) -> list[dict]:
@@ -420,7 +379,7 @@ def refresh(state_dir: Path, binary: str, timeout: float, now: datetime, colors:
     live = rows_for(tabs, agents, workspaces)
     rows = reconcile(live, previous, now)
     note_data = notes(state_dir)
-    pane_record = read_json(state_dir / "field-status-pane.json", {})
+    pane_record = read_json(state_dir / "views.json", {})
     home_pane_id = clean(pane_record.get("home_pane_id"))
     if previous.get("rows") != rows:
         write_json(path, {"schema": 1, "rows": rows})
@@ -435,7 +394,8 @@ def main() -> int:
     parser.add_argument("--plain", action="store_true", help="omit ANSI colors")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("refresh", help="refresh and print compact field view")
-    sub.add_parser("pane", help="open or reuse a right-side Field Status pane")
+    pane = sub.add_parser("pane", help="open or reuse the Field Status tab")
+    pane.add_argument("--setup-timeout", type=float, default=15)
     watch = sub.add_parser("watch", help="redraw only when live field or notes change")
     watch.add_argument("--interval", type=float, default=5)
     note = sub.add_parser("note", help="set or clear an important item, user action, keep pin, or done summary")
@@ -479,7 +439,7 @@ def main() -> int:
             binary = args.herdr or str(wrapper)
             if not Path(binary).is_file():
                 raise RuntimeError("Lantern's gated Herdr command unavailable")
-            pane_id, created = open_pane(state_dir, Path(__file__).resolve().parent.parent, binary, args.timeout)
+            pane_id, created = open_pane(state_dir, Path(__file__).resolve().parent.parent, binary, args.setup_timeout)
             print(f"Field Status pane {pane_id} {'opened' if created else 'reused'}")
             return 0
         binary = resolve_herdr(args.herdr)

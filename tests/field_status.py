@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 BIN = Path(__file__).resolve().parents[1] / "bin"
+sys.path.insert(0, str(BIN))
 spec = importlib.util.spec_from_file_location("field_status", BIN / "field_status.py")
 status = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = status
@@ -149,33 +150,6 @@ class FieldStatusTests(unittest.TestCase):
                 output = status.refresh(state_dir, "herdr", 1, NOW + timedelta(minutes=16), False)
                 self.assertNotIn("Plugin Update", output)
 
-    def test_pane_opens_once_and_reuses_without_closing_home(self):
-        with tempfile.TemporaryDirectory() as root:
-            state_dir = Path(root)
-            calls = []
-            panes = [{"pane_id": "w1:p1", "tab_id": "w1:t1", "agent": "codex"}]
-
-            def fake_control(_binary, args, _timeout):
-                calls.append(args)
-                if args[:2] == ["pane", "list"]:
-                    return {"panes": panes}
-                if args[:2] == ["pane", "split"]:
-                    panes.append({"pane_id": "w1:p2", "tab_id": "w1:t1"})
-                    return {"pane": {"pane_id": "w1:p2"}}
-                if args[:2] == ["pane", "process-info"]:
-                    return {"process_info": {"foreground_processes": [
-                        {"cmdline": "python field_status.py watch", "pid": 77}], "shell_pid": 1}}
-                return {}
-
-            env = {"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1", "HERDR_TAB_ID": "w1:t1", "HERDR_WORKSPACE_ID": "w1", "LANTERN_HOME_PANE_ID": "w1:p1"}
-            with patch.dict(status.os.environ, env), patch.object(status, "control", side_effect=fake_control):
-                self.assertEqual(status.open_pane(state_dir, BIN.parent, "herdr", 1), ("w1:p2", True))
-                self.assertEqual(status.open_pane(state_dir, BIN.parent, "herdr", 1), ("w1:p2", False))
-            self.assertEqual(sum(args[:2] == ["pane", "split"] for args in calls), 1)
-            self.assertEqual(sum(args[:2] == ["pane", "run"] for args in calls), 1)
-            self.assertFalse(any("close" in args for args in calls))
-            self.assertIn("watch", next(args[-1] for args in calls if args[:2] == ["pane", "run"]))
-
     def test_pane_mutations_use_existing_herdr_gate(self):
         seen = []
 
@@ -187,7 +161,7 @@ class FieldStatusTests(unittest.TestCase):
         with patch.dict(status.os.environ, {"HERDR_HELPER_OK": ""}), \
                 patch.object(status.subprocess, "run", side_effect=fake_run):
             status.control("herdr", ["pane", "list", "--workspace", "w1"], 1)
-            status.control("herdr", ["pane", "split", "--pane", "w1:p1"], 1)
+            status.control("herdr", ["tab", "create", "--workspace", "w1"], 1)
         self.assertNotEqual(seen[0][1], "1")
         self.assertEqual(seen[1][1], "1")
 
@@ -208,34 +182,6 @@ class FieldStatusTests(unittest.TestCase):
         self.assertIn("'C:\\Users\\O''Brien\\state'", command)
         self.assertNotIn("'\"'\"'", command)
         self.assertNotIn(" sh ", command)
-
-    def test_recovered_label_checks_occupancy_before_watcher(self):
-        with tempfile.TemporaryDirectory() as root:
-            state_dir = Path(root)
-            calls = []
-            occupied = True
-
-            def fake_control(_binary, args, _timeout):
-                calls.append(args)
-                if args[:2] == ["pane", "list"]:
-                    return {"panes": [
-                        {"pane_id": "w1:p1", "tab_id": "w1:t1", "agent": "codex"},
-                        {"pane_id": "w1:p2", "tab_id": "w1:t1", "label": "Field Status"},
-                    ]}
-                if args[:2] == ["pane", "process-info"]:
-                    processes = [{"pid": 2, "cmdline": "other job"}] if occupied else []
-                    return {"process_info": {"shell_pid": 1, "foreground_processes": processes}}
-                return {}
-
-            env = {"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1", "HERDR_TAB_ID": "w1:t1",
-                   "HERDR_WORKSPACE_ID": "w1", "LANTERN_HOME_PANE_ID": "w1:p1"}
-            with patch.dict(status.os.environ, env), patch.object(status, "control", side_effect=fake_control):
-                with self.assertRaisesRegex(RuntimeError, "occupied"):
-                    status.open_pane(state_dir, BIN.parent, "herdr", 1)
-                occupied = False
-                self.assertEqual(status.open_pane(state_dir, BIN.parent, "herdr", 1), ("w1:p2", False))
-            self.assertEqual(sum(args[:2] == ["pane", "run"] for args in calls), 1)
-            self.assertFalse(any(args[:2] == ["pane", "split"] for args in calls))
 
     @unittest.skipUnless(os.name == "nt", "requires native Windows Python")
     def test_native_windows_refresh_and_watch_use_launcher_wrapper(self):
@@ -294,32 +240,6 @@ class FieldStatusTests(unittest.TestCase):
             self.assertIn("Fixture Lantern Home", output)
             self.assertIn("IN MOTION", output)
             self.assertNotIn("unavailable", output)
-
-    def test_reused_pane_restarts_idle_watcher_but_not_other_process(self):
-        with tempfile.TemporaryDirectory() as root:
-            state_dir = Path(root)
-            status.write_json(state_dir / "field-status-pane.json", {
-                "home_pane_id": "w1:p1", "pane_id": "w1:p2", "tab_id": "w1:t1"})
-            calls = []
-            occupied = False
-
-            def fake_control(_binary, args, _timeout):
-                calls.append(args)
-                if args[:2] == ["pane", "list"]:
-                    return {"panes": [{"pane_id": "w1:p1", "tab_id": "w1:t1", "agent": "codex"},
-                                      {"pane_id": "w1:p2", "tab_id": "w1:t1"}]}
-                if args[:2] == ["pane", "process-info"]:
-                    return {"process_info": {"shell_pid": 1, "foreground_processes":
-                                             [{"pid": 2, "cmdline": "other job"}] if occupied else []}}
-                return {}
-
-            env = {"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1", "HERDR_TAB_ID": "w1:t1", "HERDR_WORKSPACE_ID": "w1", "LANTERN_HOME_PANE_ID": "w1:p1"}
-            with patch.dict(status.os.environ, env), patch.object(status, "control", side_effect=fake_control):
-                self.assertEqual(status.open_pane(state_dir, BIN.parent, "herdr", 1), ("w1:p2", False))
-                occupied = True
-                with self.assertRaisesRegex(RuntimeError, "occupied"):
-                    status.open_pane(state_dir, BIN.parent, "herdr", 1)
-            self.assertEqual(sum(args[:2] == ["pane", "run"] for args in calls), 1)
 
     def test_note_cli_persists_and_clears_action_separately_from_important(self):
         with tempfile.TemporaryDirectory() as root:
