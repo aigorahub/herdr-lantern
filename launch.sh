@@ -371,8 +371,8 @@ $onboard_note
   plan. Run it only after the user confirms that exact plan.
 - Field Status uses $LANTERN_FIELD_STATUS. On light-up, use \`--plain refresh\`
   for the initial readout. For "Field Status", "what’s going on", or any field
-  question, use the detected Python 3 command with \`pane\` to open or reuse one
-  separate Field Status tab; \`watch\` keeps the display current.
+  question, use the detected Python 3 command with \`pane\` to restore or reuse
+  the top right pane in the chat tab; \`watch\` keeps the display current.
   Join \`herdr tab list\`, \`herdr agent list\`, and \`herdr workspace list\`
   by ID. Keep every open tab, including quiet/idle, Daily Tasks, and Lantern
   Home. Show human-readable workspace names in yellow, never internal agent
