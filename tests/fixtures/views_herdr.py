@@ -16,6 +16,36 @@ def flag(name, default=None):
     return args[args.index(name) + 1] if name in args else default
 
 
+def fresh_pane():
+    number = max(data.get("next_pane", 1), *(int(p.split(":p")[1]) for p in data["panes"]), 1) + 1
+    data["next_pane"] = number
+    return f"w9:p{number}"
+
+
+def rect(pane):
+    return data.setdefault("rects", {}).setdefault(pane, {"x": 0, "y": 0, "width": 120, "height": 40})
+
+
+def split(anchor, pane, direction):
+    area = rect(anchor)
+    new = dict(area)
+    axis, size = ("x", "width") if direction == "right" else ("y", "height")
+    share = int(area[size] * float(flag("--ratio", "0.5")))
+    new[axis] += share
+    new[size] -= share
+    area[size] = share
+    data["rects"][pane] = new
+
+
+def counts():
+    for tab in list(data["tabs"]):
+        number = sum(p["tab_id"] == tab for p in data["panes"].values())
+        if number:
+            data["tabs"][tab]["pane_count"] = number
+        else:
+            del data["tabs"][tab]
+
+
 if args[0] == "status":
     path.write_text(json.dumps(data))
     print(json.dumps({"server": {"running": True, "socket": str(path.parent / "socket"), "pid": 123, "started_at": "fixture"}}))
@@ -50,6 +80,30 @@ elif args[:2] == ["tab", "create"]:
     data["tabs"][tab] = {"tab_id": tab, "workspace_id": flag("--workspace"), "label": flag("--label"), "pane_count": 1}
     data["panes"][pane] = {"pane_id": pane, "tab_id": tab, "workspace_id": flag("--workspace")}
     result = {"tab": data["tabs"][tab], "root_pane": data["panes"][pane]}
+elif args[:2] == ["pane", "split"]:
+    anchor = args[2]
+    pane = fresh_pane()
+    data["panes"][pane] = dict(data["panes"][anchor], pane_id=pane)
+    data["panes"][pane].pop("label", None)
+    data["panes"][pane].pop("agent", None)
+    split(anchor, pane, flag("--direction"))
+    counts()
+    result = {"pane": data["panes"][pane]}
+elif args[:2] == ["pane", "move"]:
+    pane = args[2]
+    data["panes"][pane]["tab_id"] = flag("--tab")
+    split(flag("--target-pane"), pane, flag("--split"))
+    counts()
+    result = {"move_result": {"pane": data["panes"][pane]}}
+elif args[:2] == ["pane", "rename"]:
+    data["panes"][args[2]]["label"] = args[3]
+elif args[:2] == ["pane", "swap"]:
+    source, target = flag("--source-pane"), flag("--target-pane")
+    a, b = dict(rect(source)), dict(rect(target))
+    data["rects"][source], data["rects"][target] = b, a
+elif args[:2] == ["pane", "layout"]:
+    tab = data["panes"][flag("--pane")]["tab_id"]
+    result = {"layout": {"panes": [{"pane_id": p, "rect": rect(p)} for p, item in data["panes"].items() if item["tab_id"] == tab]}}
 elif args[:2] == ["pane", "run"]:
     pane, command = args[2:4]
     view = "field_status.py" if "field_status.py" in command else "plan_usage.py"
@@ -59,7 +113,21 @@ elif args[:2] == ["pane", "run"]:
 elif args[:2] == ["tab", "rename"]:
     data["tabs"][args[2]]["label"] = args[3]
 elif args[:2] == ["pane", "close"]:
-    data["panes"].pop(args[2], None)
+    pane = args[2]
+    old = data["panes"].pop(pane, {})
+    area = rect(pane)
+    for candidate, item in data["panes"].items():
+        if item["tab_id"] != old.get("tab_id"):
+            continue
+        other = rect(candidate)
+        if other["x"] == area["x"] and other["width"] == area["width"]:
+            if other["y"] + other["height"] == area["y"] or area["y"] + area["height"] == other["y"]:
+                other["y"] = min(other["y"], area["y"])
+                other["height"] += area["height"]
+                break
+    data.get("processes", {}).pop(pane, None)
+    data.get("rects", {}).pop(pane, None)
+    counts()
 elif args[:2] not in (["workspace", "focus"], ["plugin", "pane"]):
     sys.exit(1)
 path.write_text(json.dumps(data))

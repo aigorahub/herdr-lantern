@@ -224,7 +224,7 @@ Runtime (injected by launch.sh; do not ignore):
 - Field Status executable: $LANTERN_FIELD_STATUS
   (environment: LANTERN_FIELD_STATUS). Run with the detected Python 3 command.
   For a Field Status request, invoke \`pane\` to open or reuse the compact
-  Field Status tab. It runs \`watch\` and redraws on meaningful changes.
+  Field Status pane. It runs \`watch\` and redraws on meaningful changes.
   Reconcile unfinished pack records and review evidence before opening it.
   Use \`note needs-you set/clear\` for exact user actions and
   \`note important set/clear\` for noteworthy status or gates needing no user action.
@@ -235,9 +235,11 @@ Runtime (injected by launch.sh; do not ignore):
 
 - Plan Usage executable: $LANTERN_PLAN_USAGE
   (environment: LANTERN_PLAN_USAGE). Chat, Field Status, and Plan Usage open
-  in separate tabs at startup. For a usage request, invoke \`pane\` with
-  the detected Python 3 command to restore its tab. Use \`refresh\` to read
-  the cache. The view groups accounts with open agent tabs across workspaces.
+  beside chat in one tab at startup. Chat is on the left. Usage is on the
+  top right. Field Status is on the bottom right. For a usage request, invoke \`pane\` with
+  the detected Python 3 command to restore its pane. Use \`refresh\` to read
+  the cache. The view shows one table row per service with open agent tabs across workspaces.
+  Do not display agents or tab counts. Keep separate account allowances distinct.
   Idle and Done tabs count. Account unknown has no measured allowance.
   Do not prompt an agent or answer its approval to collect usage.
 

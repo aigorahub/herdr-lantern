@@ -204,6 +204,38 @@ class UsageTests(unittest.TestCase):
         with patch.object(field, "ZoneInfo", side_effect=field.ZoneInfoNotFoundError()):
             self.assertIn(" ET", usage.render({"rows": [row]}, now=1800000300))
 
+    def test_table_groups_services_and_keeps_accounts_and_unknowns(self):
+        first = dict(measured("one"), state="Measured", tabs=18)
+        second = dict(measured("two"), state="Measured", tabs=3)
+        snapshot = {"rows": [first, second, {"provider": "codex", "tabs": 7, "state": "Account unknown"},
+                             {"provider": "agy", "tabs": 2, "state": "Account unknown"}]}
+        output = usage.render(snapshot, now=1800000030, width=88)
+        self.assertEqual(output.count("OpenAI"), 1)
+        self.assertEqual(output.count("Google"), 1)
+        self.assertIn(first["account"][:6], output)
+        self.assertIn(second["account"][:6], output)
+        self.assertEqual(output.count("79% left"), 2)
+        self.assertEqual(output.count("Account unknown"), 2)
+        self.assertNotIn("agent", output)
+        self.assertNotIn("tabs", output)
+        for width in (20, 28, 43, 44, 61, 88):
+            plain = usage.render(snapshot, now=1800000030, width=width)
+            self.assertTrue(all(len(line) <= width for line in plain.splitlines()), (width, plain))
+
+    def test_table_color_preserves_plain_text_and_no_color(self):
+        import re
+        snapshot = {"rows": [dict(measured(), state="Measured", tabs=4)]}
+        plain = usage.render(snapshot, now=1800000030, width=61)
+        with patch.dict(os.environ, {"TERM": "xterm"}):
+            env = dict(os.environ)
+            env.pop("NO_COLOR", None)
+            with patch.dict(os.environ, env, clear=True):
+                styled = usage.render(snapshot, now=1800000030, width=61, color=True)
+                self.assertIn("\033[1;31m", styled)
+                self.assertEqual(re.sub(r"\x1b\[[0-9;]*m", "", styled), plain)
+            with patch.dict(os.environ, {"NO_COLOR": ""}):
+                self.assertEqual(usage.render(snapshot, now=1800000030, width=61, color=True), plain)
+
     def test_kernel_lock_survives_file_age_and_releases_on_exit(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "lock"
@@ -522,15 +554,72 @@ class ViewTests(unittest.TestCase):
     def save(self, data):
         self.fixture.write_text(json.dumps(data))
 
-    def test_setup_opens_two_tabs_once_and_real_wrapper_stays_gated(self):
+    def assert_layout(self):
+        data = self.data()
+        record = field.read_json(self.state / "views.json", {})
+        usage = data["rects"][record["views"]["usage"]["pane_id"]]
+        activity = data["rects"][record["views"]["field"]["pane_id"]]
+        chat = data["rects"]["w9:p1"]
+        self.assertEqual(usage["x"], activity["x"])
+        self.assertEqual(usage["x"], chat["x"] + chat["width"])
+        self.assertLess(usage["y"], activity["y"])
+        self.assertEqual(chat["height"], usage["height"] + activity["height"])
+        self.assertTrue(all(entry["tab_id"] == "w9:t1" for entry in record["views"].values()))
+
+    def test_closed_readout_restores_in_right_column(self):
+        for kind in ("usage", "field"):
+            self.assertEqual(self.setup_views()["errors"], [])
+            entry = field.read_json(self.state / "views.json", {})["views"][kind]
+            field.control(str(ROOT / "bin/herdr"), ["pane", "close", entry["pane_id"]], 2)
+            self.assertEqual(self.setup_views()["errors"], [])
+            self.assert_layout()
+
+    def test_unowned_home_shell_prevents_duplicate_split_after_lost_response(self):
+        original = field.control
+        def uncertain(binary, args, timeout):
+            result = original(binary, args, timeout)
+            if args[:2] == ["pane", "split"]:
+                raise RuntimeError("response lost")
+            return result
+        with patch.object(field, "control", side_effect=uncertain):
+            self.assertTrue(self.setup_views("usage")["errors"])
+        self.assertIn("unowned", self.setup_views()["errors"][0])
+        self.assertEqual(sum(c[:2] == ["pane", "split"] for c in self.data()["calls"]), 1)
+        self.assertFalse(any(c[:2] == ["pane", "run"] for c in self.data()["calls"]))
+
+    def test_field_first_then_usage_uses_upper_right(self):
+        self.assertEqual(self.setup_views("field")["errors"], [])
+        self.assertEqual(self.setup_views()["errors"], [])
+        self.assert_layout()
+        self.assertEqual(sum(c[:2] == ["pane", "split"] for c in self.data()["calls"]), 2)
+
+    def test_exact_watchers_in_old_tabs_move_without_restart(self):
+        data = self.data()
+        for number, kind in enumerate(("field", "usage"), 2):
+            tab, pane = f"w9:t{number}", f"w9:p{number}"
+            data["tabs"][tab] = {"tab_id": tab, "workspace_id": "w9", "label": views.VIEWS[kind][0], "pane_count": 1}
+            data["panes"][pane] = {"pane_id": pane, "tab_id": tab, "workspace_id": "w9"}
+            data.setdefault("processes", {})[pane] = [{"pid": 200 + number, "argv": [sys.executable,
+                str(ROOT / "bin" / views.VIEWS[kind][1]), "--state-dir", str(self.state), "watch"]}]
+        self.save(data)
+        self.assertEqual(self.setup_views()["errors"], [])
+        self.assert_layout()
+        data = self.data()
+        self.assertEqual(len(data["tabs"]), 1)
+        self.assertEqual(sum(c[:2] == ["pane", "move"] for c in data["calls"]), 2)
+        self.assertFalse(any(c[:2] in (["pane", "run"], ["pane", "close"], ["pane", "split"]) for c in data["calls"]))
+
+    def test_setup_splits_home_once_and_real_wrapper_stays_gated(self):
         result = self.setup_views()
         self.assertEqual(result["errors"], [])
         self.assertEqual(self.setup_views()["errors"], [])
         calls = self.data()["calls"]
-        self.assertEqual(sum(c[:2] == ["tab", "create"] for c in calls), 2)
+        self.assertEqual(sum(c[:2] == ["pane", "split"] for c in calls), 2)
+        self.assertEqual(len(self.data()["tabs"]), 1)
+        self.assert_layout()
         self.assertEqual(sum(c[:2] == ["pane", "run"] for c in calls), 2)
-        self.assertTrue(all("--no-focus" in c and "w9" in c for c in calls if c[:2] == ["tab", "create"]))
-        self.assertFalse(any("split" in c or "close" in c for c in calls))
+        self.assertTrue(all("--no-focus" in c for c in calls if c[:2] == ["pane", "split"]))
+        self.assertFalse(any(c[:2] in (["tab", "create"], ["pane", "close"]) for c in calls))
         env = dict(os.environ, HERDR_HELPER_OK="")
         denied = subprocess.run(field.herdr_command(str(ROOT / "bin/herdr"), ["tab", "create"]), env=env, capture_output=True, text=True)
         self.assertEqual(denied.returncode, 2)
@@ -538,11 +627,12 @@ class ViewTests(unittest.TestCase):
     def test_owned_stopped_view_restarts_but_occupied_view_gets_no_input(self):
         self.setup_views()
         data = self.data()
-        data["processes"]["w9:p2"] = []
+        pid = field.read_json(self.state / "views.json", {})["views"]["field"]["pane_id"]
+        data["processes"][pid] = []
         self.save(data)
         self.assertEqual(self.setup_views("field")["errors"], [])
         data = self.data()
-        data["processes"]["w9:p2"] = [{"pid": 3, "argv": ["editor"]}]
+        data["processes"][pid] = [{"pid": 3, "argv": ["editor"]}]
         runs = sum(c[:2] == ["pane", "run"] for c in data["calls"])
         self.save(data)
         self.assertIn("occupied", self.setup_views("field")["errors"][0])
@@ -561,7 +651,8 @@ class ViewTests(unittest.TestCase):
         self.setup_views()
         (self.state / "views.json").unlink()
         self.assertEqual(self.setup_views()["errors"], [])
-        self.assertEqual(sum(c[:2] == ["tab", "create"] for c in self.data()["calls"]), 2)
+        self.assertEqual(sum(c[:2] == ["pane", "split"] for c in self.data()["calls"]), 2)
+        self.assert_layout()
 
     def test_uncertain_submission_rechecks_running_process_before_retry(self):
         original = field.control
@@ -617,6 +708,8 @@ class ViewTests(unittest.TestCase):
                 data["tabs"] = {k: v for k, v in data["tabs"].items() if k == "w9:t1"}
                 data["panes"] = {k: v for k, v in data["panes"].items() if k == "w9:p1"}
                 data["processes"] = {}
+                data["rects"] = {}
+                data["tabs"]["w9:t1"]["pane_count"] = 1
                 self.save(data)
             if mode == "lost-record":
                 (self.state.parent / "pane.id").unlink()
@@ -625,7 +718,8 @@ class ViewTests(unittest.TestCase):
             record = field.read_json(self.state / "views.json", {})
             self.assertEqual(record.get("errors"), [], (mode, completed.stderr))
             self.assertEqual(set(record["views"]), {"field", "usage"})
-            self.assertEqual(len(self.data()["tabs"]), 3)
+            self.assertEqual(len(self.data()["tabs"]), 1)
+            self.assert_layout()
 
     def test_direct_launch_opens_readouts_before_chat(self):
         fake_bin = self.root / "bin"
@@ -645,7 +739,8 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("fixture chat started", completed.stdout)
         self.assertEqual(field.read_json(self.state / "views.json", {}).get("errors"), [], completed.stderr)
-        self.assertEqual(len(self.data()["tabs"]), 3)
+        self.assertEqual(len(self.data()["tabs"]), 1)
+        self.assert_layout()
 
 
 if __name__ == "__main__":

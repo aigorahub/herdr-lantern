@@ -124,7 +124,8 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
     """Use Lantern's gated Herdr wrapper for layout changes."""
     command = herdr_command(binary, args)
     env = herdr_environment(binary)
-    if args[:2] in (["pane", "run"], ["tab", "create"]):
+    if args[:2] in (["pane", "run"], ["pane", "split"], ["pane", "move"],
+                    ["pane", "swap"], ["pane", "rename"], ["tab", "create"]):
         env["HERDR_HELPER_OK"] = "1"
     try:
         proc = subprocess.run(command, capture_output=True, text=True,
@@ -394,7 +395,7 @@ def main() -> int:
     parser.add_argument("--plain", action="store_true", help="omit ANSI colors")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("refresh", help="refresh and print compact field view")
-    pane = sub.add_parser("pane", help="open or reuse the Field Status tab")
+    pane = sub.add_parser("pane", help="open or reuse the Field Status pane")
     pane.add_argument("--setup-timeout", type=float, default=15)
     watch = sub.add_parser("watch", help="redraw only when live field or notes change")
     watch.add_argument("--interval", type=float, default=5)

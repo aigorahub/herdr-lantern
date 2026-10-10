@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.17.0 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.17.1 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -337,14 +337,14 @@
       <p class="note">The lantern checks for a newer published version at light-up and offers the update — it asks first, never upgrades silently. There is no <code>herdr plugin update</code>; a GitHub install refreshes by running the install command again. A linked checkout is only told it is behind; pull it yourself.</p>
 
       <h2>Field Status and Plan Usage</h2>
-      <p>Lantern opens chat, Field Status, and Plan Usage in separate tabs. Each tab has one pane. Focus stays on the chat. Later opens reuse the readouts and restore missing tabs. A busy or unrelated tab stays untouched. A readout setup failure does not stop the chat.</p>
-      <p>Field Status shows ET time, open tabs, agent states, saved notes, and verified outcomes. Ask <code>Field Status</code> or <code>what's going on</code> to restore its tab.</p>
-      <p>Plan Usage groups verified accounts with an open agent tab anywhere on this Herdr server. Idle and Done tabs count. Several models on one account share a row. Tabs hidden from Field Status still count. Each allowance shows its remaining percentage, reset time, source, and age. Credits have a separate value. Account labels use opaque IDs.</p>
+      <p>Lantern opens one tab with three panes. Chat is on the left. Plan Usage is on the top right. Field Status is on the bottom right. Focus stays on the chat. Later opens reuse the readouts and restore missing panes. Verified readouts from old tabs move into this layout. Busy or unrelated panes stay untouched. A readout setup failure does not stop the chat.</p>
+      <p>Field Status shows ET time, open tabs, agent states, saved notes, and verified outcomes. Ask <code>Field Status</code> or <code>what's going on</code> to restore its pane.</p>
+      <p>Plan Usage shows one table row per service with an open agent tab anywhere on this Herdr server. Idle and Done tabs count. Tabs hidden from Field Status still count. The table aligns allowance left and reset times. Low allowance and failed reads use color and text. It does not list agents or tab counts. Separate accounts keep separate allowances within the service row. Credits have a separate value. Account labels use opaque IDs.</p>
       <p>The shared collector scans tabs every five seconds and reads usage every 60 seconds. Values become stale after 120 seconds. A past reset time does not prove a new allowance. An unknown account or lost login hides prior usage values. The collector does not send prompts or start model turns.</p>
       <p>Codex uses its native app server. Claude and Grok need CodexBar CLI 0.74.0 on macOS or Linux. From the plugin checkout, run:</p>
       <pre>sh bin/plan-usage install</pre>
-      <p>The installer checks the pinned release digest and installs into private Lantern state. It does not install the desktop app or change the user's CodexBar config. The watcher does not download tools. Ask <code>Plan Usage</code> or <code>usage limits</code> to restore its tab.</p>
-      <p>Antigravity shows <code>Account unknown</code> because its checked quota source has no verified account identity. Grok also shows <code>Account unknown</code> when its process has <code>XAI_API_KEY</code>, <code>GROK_API_KEY</code>, <code>GROK_OAUTH_TOKEN</code>, or <code>XAI_BASE_URL</code> set. Inherited values count. Key presence does not prove the tab's billing mode. These rows show tab counts without usage percentages. Custom credentials or provider settings can also prevent Codex or Claude account readings.</p>
+      <p>The installer checks the pinned release digest and installs into private Lantern state. It does not install the desktop app or change the user's CodexBar config. The watcher does not download tools. Ask <code>Plan Usage</code> or <code>usage limits</code> to restore its pane.</p>
+      <p>Antigravity shows <code>Account unknown</code> because its checked quota source has no verified account identity. Grok also shows <code>Account unknown</code> when its process has <code>XAI_API_KEY</code>, <code>GROK_API_KEY</code>, <code>GROK_OAUTH_TOKEN</code>, or <code>XAI_BASE_URL</code> set. Inherited values count. Key presence does not prove the tab's billing mode. These rows show Account unknown without usage percentages. Custom credentials or provider settings can also prevent Codex or Claude account readings.</p>
       <p>On Windows, Codex shows <code>Account unknown</code>. Claude and Grok show <code>Dependency unavailable</code> because CodexBar has no Windows release asset. Antigravity shows <code>Account unknown</code> on all platforms. Unsupported agent kinds show <code>Limits unavailable</code>.</p>
 
       <h2>Where it sits</h2>
@@ -356,7 +356,7 @@
             the chat runs, e.g. <code>home · claude · opus</code>,
             and the chat's first line names the same. Nothing is dropped
             into the workspace you are working in, and the empty shell tab of the new workspace is
-            closed. The workspace has the chat, Field Status, and Plan Usage tabs.
+            closed. The workspace has the chat, Field Status, and Plan Usage panes.
           </div>
         </li>
         <li>
@@ -373,7 +373,7 @@
           </div>
         </li>
       </ol>
-      <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, its chat tab closes. The readout tabs can remain open. Herdr reuses workspace and pane ids after a restart, so Lantern checks the remembered ids before it trusts them: keep the <code>🔥 lantern</code> label if you want that workspace reused after the chat closes.</p>
+      <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, its chat tab closes. The readout panes can remain open. Herdr reuses workspace and pane ids after a restart, so Lantern checks the remembered ids before it trusts them: keep the <code>🔥 lantern</code> label if you want that workspace reused after the chat closes.</p>
     </div>
 
     <div class="wrap wide">
