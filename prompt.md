@@ -634,18 +634,21 @@ the usage pane. Use `refresh` for the shared cache. Include plans with an open
 agent tab in any workspace on this Herdr server. Idle and Done tabs count.
 Field Status Keep visibility does not select usage plans. Group by verified
 provider and account for collection. Display one table row per service.
-Keep each verified account allowance distinct within that service row.
-Show only session and weekly percentages and their reset times in the main table.
-Do not display agents, tab counts, account IDs, model IDs, plan names, credits,
-or source details. Each period shows its lowest remaining allowance and that
-allowance's reset time. Never add separate limits. Keep separate logins on
-separate lines within the service row. Antigravity shows Account unknown until a source can prove its account.
-Unknown usage has no percentage. Do not assign another account's usage to it.
-Grok uses the verified OAuth source with cookies off. If its process has an
-API key, OAuth token, or base URL override, show Account unknown. Inherited
-values also count. Key presence does not prove the tab's billing mode.
-Unknown accounts show Account unknown without subscription percentages. Windows shows
-Account unknown for Codex and Dependency unavailable for Claude and Grok.
+Show Service, Session left, and Week left. Use percentages only in the value
+columns. Hide IDs, model names, plan codes, credits, reset times, source details,
+and tab counts. Each period shows its lowest remaining percentage across that
+service's limits and login profiles. Never add percentages. Missing values
+show --. Keep warnings for stale readings and failed reads.
+Antigravity reads structured quota groups from its zero-turn native /usage
+command. Bind this reading to the open tab's local login profile. Do not claim
+that a profile hash is a verified billing account ID.
+Grok reads the saved OAuth plan even when the process has an inherited API key.
+The probe does not receive API keys or base URL overrides. A custom OAuth token
+remains unsupported. Fugu reads the quota API with the key selected by its
+Codex profile. Show Fugu as its own service. Never count it as OpenAI.
+No quota read sends a model prompt or answers an agent's approval dialog.
+Windows lacks the process environment needed for Codex, Antigravity, and Fugu.
+Claude and Grok on Windows show Dependency unavailable.
 
 The private cache keeps each allowance's percentage, reset time, source, and age.
 Values become stale after 120 seconds. A past reset does not prove a full

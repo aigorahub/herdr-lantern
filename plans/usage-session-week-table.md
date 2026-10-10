@@ -28,3 +28,13 @@ does not assign quota from one login to another.
 
 Tests cover hidden metadata, missing periods, the limiting reset, separate
 logins, warnings, color, plain output, and widths from 20 to 88 columns.
+
+Version 0.17.3 changes this contract at the user's request. The table now shows
+only Service, Session left, and Week left. Each service has one row with the
+lowest remaining percentage across its pools and local login profiles.
+Reset times, plan codes, credits, model names, and IDs stay hidden.
+Google reads structured native usage groups with zero model turns and binds
+the result to its local login profile. Grok reads the saved OAuth plan despite
+an inherited API key. Fugu reads Sakana's usage API with its configured profile
+key. All reads check source binding and avoid model turns.
+Field Status uses the top two thirds of the right column. Usage uses the bottom third.

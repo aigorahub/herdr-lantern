@@ -37,6 +37,108 @@ def measured(account="account-one"):
 
 
 class UsageTests(unittest.TestCase):
+    def test_agy_structured_quota_uses_remaining_fraction_without_model_turns(self):
+        payload = {"status": "SUCCESS", "num_turns": 0, "command": {"name": "usage", "data": {"groups": [
+            {"name": "Gemini Models", "buckets": [
+                {"id": "gemini-weekly", "window": "weekly", "remaining_fraction": .9064},
+                {"id": "gemini-5h", "window": "5h", "remaining_fraction": .5847}]},
+            {"name": "Claude and GPT models", "buckets": [
+                {"id": "other-weekly", "window": "weekly", "remaining_fraction": 1}]}]}}}
+        scope = {"env": {"HOME": "/profile"}}
+        row = sources.parse_agy(payload, scope, 1800000000)
+        self.assertEqual([v["remaining"] for v in row["windows"]], [90.6, 58.5, 100])
+        output = usage.render({"rows": [dict(row, state="Measured")]}, now=1800000030, width=61)
+        self.assertIn("Google", output)
+        self.assertIn("58.5%", output)
+        self.assertIn("90.6%", output)
+        self.assertNotIn("Gemini Models", output)
+        for turns in (1, None, False):
+            with self.assertRaises(sources.SourceError):
+                sources.parse_agy(dict(payload, num_turns=turns), scope, 0)
+        bad = dict(payload, command={"name": "usage", "data": {"groups": [{"buckets": [
+            {"window": "weekly", "remaining_fraction": "NaN"},
+            {"window": "5h", "remaining_fraction": 2}]}]}})
+        with self.assertRaises(sources.SourceError):
+            sources.parse_agy(bad, scope, 0)
+
+    def test_grok_saved_login_ignores_inherited_api_key_and_accepts_oauth_proxy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            (home / ".grok").mkdir()
+            (home / ".grok/auth.json").write_text("{}")
+            process = {"argv": ["grok", "--api-key", "hidden"], "executable": str(home / "grok-1.0")}
+            scope = sources.scope_for("grok", process, {"HOME": str(home), "XAI_API_KEY": "hidden", "XAI_BASE_URL": "https://other.invalid"})
+            self.assertNotIn("hidden", json.dumps(scope))
+            self.assertNotIn("XAI_API_KEY", scope["env"])
+            row = {"provider": "grok", "source": "grok-cli-proxy", "usage": {
+                "identity": {"accountEmail": "test@example.invalid"},
+                "primary": {"usedPercent": 11, "windowMinutes": 10080}}}
+            parsed = sources.parse_codexbar(row, "grok", 0)
+            self.assertEqual(parsed["windows"][0]["remaining"], 89)
+            with self.assertRaises(sources.SourceError):
+                sources.parse_codexbar(dict(row, source="manual-cookie"), "grok", 0)
+
+    def test_agy_probe_is_scoped_and_rejects_login_change(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "agy"
+            exe.touch(); exe.chmod(0o700)
+            token = home / ".gemini/antigravity-cli/antigravity-oauth-token"
+            token.parent.mkdir(parents=True); token.write_text("first-login")
+            scope = sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)},
+                                      {"HOME": str(home), "GOOGLE_API_KEY": "hidden"})
+            self.assertNotIn("hidden", json.dumps(scope))
+            payload = {"status": "SUCCESS", "num_turns": 0, "command": {"name": "usage", "data": {
+                "groups": [{"buckets": [{"window": "5h", "remaining_fraction": .7}]}]}}}
+            with patch.object(runtime, "capture", return_value=(0, json.dumps(payload).encode())) as probe:
+                self.assertEqual(sources.fetch(scope, home / "state", threading.Event())["windows"][0]["remaining"], 70)
+                self.assertEqual(probe.call_args.args[0], [str(exe), "-p", "/usage", "--output-format", "json"])
+                self.assertEqual(probe.call_args.kwargs["cwd"], str(home))
+            def change_login(*args, **kwargs):
+                token.write_text("another-login")
+                return 0, json.dumps(payload).encode()
+            with patch.object(runtime, "capture", side_effect=change_login):
+                with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.fetch(scope, home / "state", threading.Event())
+
+    def test_fugu_modern_and_legacy_profiles_bind_the_configured_key(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary); root = home / ".codex"; root.mkdir()
+            exe = home / "codex"; exe.touch(); exe.chmod(0o700)
+            provider = '[model_providers.sakana]\nbase_url = "https://api.sakana.ai/v1"\nenv_key = "SAKANA_API_KEY"\n'
+            (root / "config.toml").write_text(provider)
+            modern = root / "fugu.config.toml"; modern.write_text('model_provider = "sakana"\n')
+            process = {"argv": ["codex", "-p", "fugu"], "executable": str(exe)}
+            env = {"HOME": str(home), "SAKANA_API_KEY": "private-key", "OPENAI_API_KEY": "other-key"}
+            scope = sources.scope_for("codex", process, env)
+            self.assertEqual(scope["provider"], "fugu")
+            self.assertEqual(scope["api_key"], "private-key")
+            self.assertIn(str(modern), scope["files"])
+            modern.unlink()
+            (root / "config.toml").write_text(provider + '\n[profiles.fugu]\nmodel_provider = "sakana"\n')
+            legacy = sources.scope_for("codex", process, env)
+            self.assertEqual(legacy["provider"], "fugu")
+            self.assertNotEqual(scope["key"], legacy["key"])
+            with self.assertRaisesRegex(sources.SourceError, "Sign in required") as missing:
+                sources.scope_for("codex", process, {"HOME": str(home)})
+            self.assertEqual(missing.exception.provider, "fugu")
+            (root / "config.toml").write_text(provider.replace("api.sakana.ai", "other.invalid") +
+                                             '\n[profiles.fugu]\nmodel_provider = "sakana"\n')
+            with self.assertRaises(sources.SourceError):
+                sources.scope_for("codex", process, env)
+
+    def test_fugu_usage_percent_is_used_not_remaining(self):
+        payload = {"plan": "max", "window_seconds": 18000,
+                   "window_usage": {"usage_percent": 6.0848578}, "weekly_usage": {"usage_percent": 55.0257938}}
+        row = sources.parse_fugu(payload, "private-key", 1800000000)
+        self.assertEqual([v["remaining"] for v in row["windows"]], [93.9, 45])
+        self.assertEqual([v["minutes"] for v in row["windows"]], [300, 10080])
+        self.assertNotIn("private-key", json.dumps(row))
+        self.assertNotIn("plan", row)
+        for bad in ({}, {"weekly_usage": {"usage_percent": "NaN"}}, {"window_usage": {"usage_percent": -1}}):
+            with self.assertRaises(sources.SourceError):
+                sources.parse_fugu(bad, "private-key", 0)
+
     def test_codex_preserves_pools_without_default_duplicate(self):
         row = measured()
         self.assertEqual([v["remaining"] for v in row["windows"]], [79, 10, 95])
@@ -103,7 +205,7 @@ class UsageTests(unittest.TestCase):
                   {"agent": "claude", "tab_id": "closed", "pane_id": "4"}]
         self.assertEqual(set(usage.eligible([{"tab_id": "a"}, {"tab_id": "b"}], agents)), {"codex", "grok"})
 
-    def test_collector_agy_has_no_probe_and_deduplicates_tabs(self):
+    def test_collector_agy_binds_profile_and_deduplicates_tabs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             server = {"key": "server", "lifetime": "one"}
@@ -114,9 +216,9 @@ class UsageTests(unittest.TestCase):
                       {"agent": "agy", "tab_id": "b", "pane_id": "3"}]
             try:
                 with patch.object(runtime, "server_identity", return_value=server), patch.object(field, "snapshot", return_value=(tabs, agents, [])), \
-                        patch.object(usage, "verified_scope", side_effect=AssertionError("must not probe agy")):
+                        patch.object(usage, "verified_scope", return_value={"key": "agy-profile", "provider": "agy"}):
                     collector.scan()
-                self.assertEqual(collector.write()["rows"], [{"provider": "agy", "state": "Account unknown", "tabs": 2}])
+                self.assertEqual(collector.write()["rows"], [{"provider": "agy", "state": "Reading usage", "tabs": 2}])
                 with patch.object(runtime, "server_identity", return_value=server), patch.object(field, "snapshot", side_effect=RuntimeError()):
                     collector.scan()
                 self.assertEqual(collector.write()["rows"][0]["tabs"], 2)
@@ -126,7 +228,7 @@ class UsageTests(unittest.TestCase):
             finally:
                 collector.close()
 
-    def test_windows_dependency_state_does_not_change_agy_notice(self):
+    def test_windows_dependency_state_keeps_agy_identity_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             server = {"key": "server", "lifetime": "one"}
@@ -136,7 +238,7 @@ class UsageTests(unittest.TestCase):
             try:
                 with patch.object(usage.os, "name", "nt"), patch.object(runtime, "server_identity", return_value=server), \
                         patch.object(field, "snapshot", return_value=(tabs, agents, [])), \
-                        patch.object(usage, "verified_scope", side_effect=AssertionError("no probe")):
+                        patch.object(usage, "verified_scope", side_effect=sources.SourceError("Account unknown")):
                     collector.scan()
                 rows = {row["provider"]: row["state"] for row in collector.write()["rows"]}
                 self.assertEqual(rows, {"agy": "Account unknown", "claude": "Dependency unavailable", "grok": "Dependency unavailable"})
@@ -196,14 +298,13 @@ class UsageTests(unittest.TestCase):
         row = dict(measured(), state="Last update failed", tabs=2)
         row["windows"][1]["reset_text"] = "next Tuesday"
         output = usage.render({"rows": [row]}, now=1800000300, width=28)
-        self.assertIn("Stale", output)
+        self.assertIn("Waiting for fresh", output)
         self.assertIn("79%*", output)
-        self.assertIn("Reset time passed", output)
-        self.assertIn("next Tuesday", output)
-        self.assertNotIn("next Tuesday ET", output)
+        self.assertNotIn("next Tuesday", output)
+        self.assertNotIn("Reset", output)
         self.assertTrue(all(len(line) <= 28 for line in output.splitlines()))
         with patch.object(field, "ZoneInfo", side_effect=field.ZoneInfoNotFoundError()):
-            self.assertIn("(ET)", usage.render({"rows": [row]}, now=1800000300))
+            self.assertIn("79%*", usage.render({"rows": [row]}, now=1800000300))
 
     def test_table_groups_services_and_keeps_accounts_and_unknowns(self):
         first = dict(measured("one"), state="Measured", tabs=18)
@@ -215,15 +316,15 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(sum(line.startswith("Google ") for line in output.splitlines()), 1)
         self.assertNotIn(first["account"][:6], output)
         self.assertNotIn(second["account"][:6], output)
-        self.assertEqual(output.count("79%"), 2)
-        self.assertEqual(output.count("Account unknown"), 2)
+        self.assertEqual(output.count("79%"), 1)
+        self.assertEqual(output.count("Account unknown"), 1)
         self.assertNotIn("agent", output)
         self.assertNotIn("tabs", output)
         for width in (20, 28, 43, 44, 61, 88):
             plain = usage.render(snapshot, now=1800000030, width=width)
             self.assertTrue(all(len(line) <= width for line in plain.splitlines()), (width, plain))
 
-    def test_period_table_omits_details_and_uses_matching_limiting_reset(self):
+    def test_percentage_table_omits_details_and_uses_lowest_allowance(self):
         row = dict(measured(), state="Measured", tabs=4, plan="promax")
         row["windows"] += [{"id": "other-week", "label": "Model identifier", "minutes": 10080,
                             "remaining": 2, "reset_at": 1800003600}]
@@ -233,10 +334,10 @@ class UsageTests(unittest.TestCase):
         self.assertIn("79%", output)
         self.assertIn("2%", output)
         self.assertNotIn("10%", output)
-        self.assertIn(field.eastern(usage.datetime.fromtimestamp(1800003600, usage.timezone.utc)).strftime("%H:%M"), output)
         for hidden in ("promax", "credits", "Updated", "Native", "Model identifier", row["account"][:6], "█", "░"):
             self.assertNotIn(hidden, output)
-        self.assertIn("lowest remaining limit", output)
+        self.assertNotIn("Reset", output)
+        self.assertNotIn("ET", output)
 
     def test_missing_period_and_unreadable_login_do_not_make_percentages(self):
         row = dict(measured(), state="Measured", tabs=4)

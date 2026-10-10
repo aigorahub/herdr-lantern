@@ -1,4 +1,4 @@
-"""Read verified account limits. No model turns, cookies, or ambient accounts."""
+"""Read plan limits from the login profile of an open agent. No model turns."""
 from __future__ import annotations
 
 import json
@@ -9,6 +9,8 @@ import re
 import shutil
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,22 +18,26 @@ import field_status as field
 import usage_runtime as runtime
 
 VERSION = "0.74.0"
-SUPPORTED = {"codex", "claude", "grok"}
-SELECTORS = {"codex": ["CODEX_HOME"], "claude": ["CLAUDE_CONFIG_DIR"], "grok": ["GROK_HOME"]}
+SUPPORTED = {"codex", "claude", "grok", "agy", "fugu"}
+SELECTORS = {"codex": ["CODEX_HOME"], "claude": ["CLAUDE_CONFIG_DIR"], "grok": ["GROK_HOME"], "agy": []}
 OVERRIDES = {
     "codex": ["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"],
     "claude": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
                "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
                "CLAUDE_CODE_USE_FOUNDRY"],
-    "grok": ["XAI_API_KEY", "GROK_API_KEY", "GROK_OAUTH_TOKEN", "XAI_BASE_URL"],
+    # API keys do not select the saved Grok subscription login. Read its OAuth
+    # quota even when an agent has an API key. Never pass that key to the probe.
+    "grok": ["GROK_OAUTH_TOKEN"],
+    "agy": ["AGY_HOME", "ANTIGRAVITY_HOME", "GEMINI_CLI_HOME"],
 }
 
 
 class SourceError(RuntimeError):
-    def __init__(self, state: str, retry_after: float = 0):
+    def __init__(self, state: str, retry_after: float = 0, provider: str | None = None):
         super().__init__(state)
         self.state = state
         self.retry_after = retry_after
+        self.provider = provider
 
 
 def stamp(path: Path) -> list:
@@ -71,11 +77,9 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     argv = process.get("argv")
     if not home or not Path(home).is_absolute() or not isinstance(argv, list) or not argv:
         raise SourceError("Account unknown")
-    if provider == "codex" and any("codex-fugu" in str(value).lower() for value in argv):
-        raise SourceError("Limits unavailable")
     if provider == "codex" and any(str(value).startswith(("--oss", "--local-provider")) for value in argv):
         raise SourceError("Limits unavailable")
-    if any(env.get(key) for key in OVERRIDES[provider]):
+    if provider != "codex" and any(env.get(key) for key in OVERRIDES[provider]):
         raise SourceError("Account unknown")
     # Keep only absolute executable search paths. Never use a shell alias.
     path = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep) if Path(p).is_absolute() and p)
@@ -84,7 +88,8 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
             or (provider != "grok" and not os.access(executable, os.X_OK))):
         raise SourceError("Account unknown")
     basename = Path(executable).name.lower()
-    expected = {"codex": r"codex(?:\.exe)?", "claude": r"claude(?:\.exe)?", "grok": r"grok(?:[-.].*)?"}
+    expected = {"codex": r"codex(?:\.exe)?", "claude": r"claude(?:\.exe)?", "grok": r"grok(?:[-.].*)?",
+                "agy": r"agy(?:\.exe)?"}
     if not re.fullmatch(expected[provider], basename):
         raise SourceError("Account unknown")
     native = {"HOME": home, "PATH": path}
@@ -100,8 +105,6 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     profile = []
     if provider == "codex":
         root = Path(native.get("CODEX_HOME", str(root / ".codex")))
-        if any("codex-fugu" in str(value).lower() for value in argv):
-            raise SourceError("Limits unavailable")
         for index, value in enumerate(argv):
             if value in ("-p", "--profile"):
                 if index + 1 >= len(argv):
@@ -115,9 +118,9 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
                     raise SourceError("Account unknown")
             elif str(value).startswith("--config="):
                 raise SourceError("Account unknown")
-        if profile:
-            raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
         config = root / "config.toml"
+        files = [root / "auth.json", config]
+        data = {}
         if config.exists():
             try:
                 import tomllib
@@ -127,11 +130,37 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
             providers = data.get("model_providers") or {}
             if not isinstance(providers, dict):
                 raise SourceError("Account unknown")
+            selected = data
+            if profile:
+                profiles = data.get("profiles") or {}
+                modern = root / f"{profile[0]}.config.toml"
+                if not re.fullmatch(r"[A-Za-z0-9_-]+", profile[0]) or not isinstance(profiles, dict):
+                    raise SourceError("Account unknown")
+                if modern.is_file():
+                    try:
+                        profile_data = tomllib.loads(modern.read_text(encoding="utf-8"))
+                    except ValueError:
+                        raise SourceError("Account unknown") from None
+                    files.append(modern)
+                elif isinstance(profiles.get(profile[0]), dict):
+                    profile_data = profiles[profile[0]]
+                else:
+                    raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
+                selected = dict(data, **profile_data)
+                providers = dict(providers, **(profile_data.get("model_providers") or {}))
+            provider_config = providers.get(selected.get("model_provider", "openai")) or {}
+            if not isinstance(provider_config, dict):
+                raise SourceError("Account unknown")
+            if provider_config.get("base_url", "").rstrip("/") == "https://api.sakana.ai/v1":
+                return fugu_scope(native, env, root, files, provider_config)
             if (data.get("model_provider", "openai") != "openai"
                     or data.get("chatgpt_base_url")
                     or providers.get("openai")):
                 raise SourceError("Limits unavailable")
-        files = [root / "auth.json", config]
+        if profile or any("codex-fugu" in str(value).lower() for value in argv):
+            raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
+        if any(env.get(key) for key in OVERRIDES[provider]):
+            raise SourceError("Account unknown")
         native["CODEX_HOME"] = str(root)
     elif provider == "claude":
         root = Path(native.get("CLAUDE_CONFIG_DIR", str(root / ".claude")))
@@ -150,9 +179,14 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
                 files.append(config)
         # An explicit default path changes Claude's macOS keychain namespace.
         # Preserve an absent selector as absent.
+    elif provider == "agy":
+        root = root / ".gemini" / "antigravity-cli"
+        files = [root / "antigravity-oauth-token", root / "settings.json", Path(home) / ".gemini" / "settings.json"]
+        if not files[0].is_file() or not files[0].stat().st_size:
+            raise SourceError("Sign in required")
     else:
         root = Path(native.get("GROK_HOME", str(root / ".grok")))
-        if any(str(value).startswith(("--home", "--profile", "--api-key", "--base-url")) for value in argv):
+        if any(str(value).startswith(("--home", "--profile")) for value in argv):
             raise SourceError("Account unknown")
         files = [root / "auth.json", root / "settings.json"]
         native["GROK_HOME"] = str(root)
@@ -165,6 +199,96 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
                                   native["HOME"], [(key, native.get(key)) for key in SELECTORS[provider]],
                                   executable if provider != "grok" else "oauth"])
     return scope
+
+
+def fugu_scope(native: dict, env: dict, root: Path, files: list[Path], provider_config: dict) -> dict:
+    key_name = provider_config.get("env_key")
+    if not isinstance(key_name, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key_name):
+        raise SourceError("Account unknown", provider="fugu")
+    credential = env.get(key_name)
+    if not credential:
+        raise SourceError("Sign in required", provider="fugu")
+    scope = {"provider": "fugu", "env": native, "api_key": credential,
+             "files": [str(path) for path in files]}
+    scope["stamp"] = current_stamp(scope)
+    scope["key"] = runtime.digest(["fugu", str(root.resolve()), scope["stamp"], credential])
+    return scope
+
+
+def parse_fugu(payload: object, credential: str, observed: float) -> dict:
+    if not isinstance(payload, dict):
+        raise SourceError("Limits unavailable")
+    windows = []
+    for key, label, minutes in (("window_usage", "Session", number(payload.get("window_seconds"))),
+                               ("weekly_usage", "Weekly", 10080 * 60)):
+        raw = payload.get(key)
+        if not isinstance(raw, dict):
+            continue
+        parsed = window({"usedPercent": raw.get("usage_percent"),
+                         "windowMinutes": minutes / 60 if minutes else None,
+                         "resetsAt": raw.get("reset_at")}, label, key)
+        if parsed:
+            parsed["remaining"] = round(parsed["remaining"], 1)
+            windows.append(parsed)
+    if not windows:
+        raise SourceError("Limits unavailable")
+    return {"account": runtime.digest(["fugu", credential]), "provider": "fugu", "windows": windows,
+            "credits": [], "observed_at": observed, "source": "Sakana /v1/usage"}
+
+
+def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
+    if cancel.is_set() or time.monotonic() >= deadline:
+        raise SourceError("Last update failed")
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    request = urllib.request.Request("https://api.sakana.ai/v1/usage",
+                                     headers={"Authorization": "Bearer " + scope["api_key"],
+                                              "Accept": "application/json"})
+    try:
+        with opener.open(request, timeout=min(10, max(.1, deadline - time.monotonic()))) as response:
+            raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024 or cancel.is_set():
+            raise SourceError("Last update failed")
+        return parse_fugu(json.loads(raw), scope["api_key"], time.time())
+    except urllib.error.HTTPError as exc:
+        raise SourceError("Sign in required" if exc.code in (401, 403) else "Last update failed") from None
+    except (urllib.error.URLError, TimeoutError):
+        raise SourceError("Last update failed") from None
+
+
+def parse_agy(payload: object, scope: dict, observed: float) -> dict:
+    if not isinstance(payload, dict) or payload.get("status") != "SUCCESS":
+        raise SourceError("Last update failed")
+    command = payload.get("command") or {}
+    if (type(payload.get("num_turns")) is not int or payload["num_turns"] != 0
+            or not isinstance(command, dict) or command.get("name") != "usage"):
+        raise SourceError("Limits unavailable")
+    data = command.get("data") or {}
+    groups = data.get("groups") if isinstance(data, dict) else None
+    if not isinstance(groups, list):
+        raise SourceError("Limits unavailable")
+    windows = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("buckets"), list):
+            raise SourceError("Limits unavailable")
+        for bucket in group["buckets"]:
+            if not isinstance(bucket, dict):
+                raise SourceError("Limits unavailable")
+            remaining = number(bucket.get("remaining_fraction"))
+            minutes = {"weekly": 10080, "5h": 300}.get(bucket.get("window"))
+            if remaining is None or not 0 <= remaining <= 1 or minutes is None:
+                continue
+            windows.append({"id": field.clean(bucket.get("id") or "quota"),
+                            "label": "Weekly" if minutes == 10080 else "Session",
+                            "remaining": round(remaining * 100, 1), "minutes": minutes,
+                            "reset_at": epoch(bucket.get("reset_time"))})
+    if not windows:
+        raise SourceError("Limits unavailable")
+    return {"account": runtime.digest(["agy", "login-profile", scope["env"]["HOME"]]),
+            "provider": "agy", "windows": windows, "credits": [], "observed_at": observed,
+            "source": "agy /usage"}
 
 
 def number(value: object) -> float | None:
@@ -249,8 +373,9 @@ def parse_codexbar(payload: object, provider: str, observed: float, auth: dict |
         message = str(error.get("message", "")).lower()
         retry = number(error.get("retryAfterSeconds")) or 0
         raise SourceError("Sign in required" if any(x in message for x in ("credentials not found", "sign in", "not authenticated", "expired", "not logged in")) else "Last update failed", max(0, retry))
-    allowed = {"claude": "claude", "grok": "grok-web", "antigravity": "cli"}
-    if row.get("source") != allowed.get(provider):
+    allowed = {"claude": {"claude"}, "grok": {"grok-web", "grok-cli-proxy"},
+               "antigravity": {"cli"}}
+    if row.get("source") not in allowed.get(provider, set()):
         raise SourceError("Limits unavailable")
     usage = row.get("usage") or {}
     if not isinstance(usage, dict):
@@ -403,6 +528,15 @@ def fetch(scope: dict, state: Path, cancel: threading.Event) -> dict:
             raise SourceError("Account unknown")
         if provider == "codex":
             result = codex_read(scope, deadline, cancel)
+        elif provider == "fugu":
+            result = fugu_read(scope, deadline, cancel)
+        elif provider == "agy":
+            code, output = runtime.capture([scope["executable"], "-p", "/usage", "--output-format", "json"],
+                                           scope["env"], min(deadline, time.monotonic() + 20), cancel,
+                                           cwd=scope["env"]["HOME"])
+            if code:
+                raise SourceError("Last update failed")
+            result = parse_agy(json.loads(output), scope, time.time())
         else:
             tool = resolve_codexbar(state, deadline, cancel)
             config = state / "usage-provider-config.json"

@@ -10,6 +10,13 @@ All notable changes to Lantern, by Elves are documented here.
   opens in the bottom third. Chat stays on the left.
 - Setup moves verified readouts from the previous order into this layout.
   It keeps focus and running watchers. Later opens preserve manual pane sizes.
+- Plan Usage shows only Service, Session left, and Week left. Each service has
+  one row. Values are percentages. Reset times and plan codes stay hidden.
+- Google reads structured quota groups from the native Antigravity usage
+  command with zero model turns. Grok accepts the OAuth proxy source and
+  reads the saved plan when an inherited API key is present.
+- Fugu reads Sakana's quota API through the key selected by its Codex profile.
+  Both modern profile files and legacy profiles work. No read sends a model prompt.
 
 ## [0.17.2] - 2026-10-10
 
