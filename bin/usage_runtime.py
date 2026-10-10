@@ -246,7 +246,7 @@ def stop_process(proc: subprocess.Popen) -> None:
             pass
 
 
-def spawn(argv: list[str], env: dict[str, str]) -> subprocess.Popen:
+def spawn(argv: list[str], env: dict[str, str], cwd: str | None = None) -> subprocess.Popen:
     lease_fd = None
     if os.name != "nt":
         # A separate lease survives an abrupt watcher exit. It owns and reaps
@@ -259,12 +259,13 @@ def spawn(argv: list[str], env: dict[str, str]) -> subprocess.Popen:
         if env.get("LANTERN_USAGE_LOCK_FD"):
             lease_fd = int(env["LANTERN_USAGE_LOCK_FD"])
             os.fstat(lease_fd)
-    return spawn_owned(argv, env, lease_fd)
+    return spawn_owned(argv, env, lease_fd, cwd)
 
 
-def spawn_owned(argv: list[str], env: dict[str, str], lease_fd: int | None = None) -> subprocess.Popen:
+def spawn_owned(argv: list[str], env: dict[str, str], lease_fd: int | None = None,
+                cwd: str | None = None) -> subprocess.Popen:
     options = {"pass_fds": (lease_fd,)} if lease_fd is not None and os.name != "nt" else {}
-    proc = subprocess.Popen(argv, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    proc = subprocess.Popen(argv, env=env, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, bufsize=0, start_new_session=os.name != "nt",
                             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0, **options)
     attach_tracker(proc)
@@ -306,9 +307,10 @@ def attach_tracker(proc: subprocess.Popen) -> None:
 
 
 def capture(argv: list[str], env: dict[str, str], deadline: float,
-            cancel: threading.Event | None = None, limit: int = 1024 * 1024) -> tuple[int, bytes]:
+            cancel: threading.Event | None = None, limit: int = 1024 * 1024,
+            cwd: str | None = None) -> tuple[int, bytes]:
     """Bound output during execution, not after communicate has allocated it."""
-    proc = spawn(argv, env)
+    proc = spawn(argv, env, cwd)
     output = bytearray()
     overflow = threading.Event()
     done = threading.Event()

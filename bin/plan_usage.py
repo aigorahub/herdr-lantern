@@ -23,7 +23,7 @@ import usage_runtime as runtime
 import usage_sources as sources
 from terminal_readout import Readout
 
-NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok", "agy": "Google", "gemini": "Google"}
+NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok", "agy": "Google", "gemini": "Google", "fugu": "Fugu"}
 CONFIG = {"version": 1, "hooks": {"enabled": False, "events": []}, "providers": [
     {"id": provider, "enabled": True, "cookieSource": "off", "source": source}
     for provider, source in (("claude", "cli"), ("grok", "oauth"))]}
@@ -48,6 +48,18 @@ def verified_scope(binary: str, provider: str, agent: dict) -> dict:
     if len(candidates) != 1:
         raise sources.SourceError("Account unknown")
     process = candidates[0]
+    hint = sources.route_hint(provider, process["argv"])
+    try:
+        return verified_process_scope(binary, provider, pane, process)
+    except sources.SourceError as exc:
+        if hint == "fugu":
+            exc.provider = "fugu"
+        raise
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        raise sources.SourceError("Account unknown", provider=hint) from None
+
+
+def verified_process_scope(binary: str, provider: str, pane: str, process: dict) -> dict:
     pid = process["pid"]
     start = runtime.process_start(pid)
     if not start:
@@ -126,7 +138,7 @@ class Collector:
                 try:
                     scope = verified_scope(self.binary, provider, agent)
                 except sources.SourceError as exc:
-                    notices.setdefault((provider, exc.state), set()).add(agent["tab_id"])
+                    notices.setdefault((exc.provider or provider, exc.state), set()).add(agent["tab_id"])
                     continue
                 except (OSError, RuntimeError, ValueError, TypeError, KeyError):
                     notices.setdefault((provider, "Account unknown"), set()).add(agent["tab_id"])
@@ -248,7 +260,7 @@ def cached_snapshot(shared: Path, server: dict) -> dict:
 
 def render(snapshot: dict, now: float | None = None, width: int | None = None,
            color: bool = False) -> str:
-    """Show session and weekly allowance left, with the matching reset times."""
+    """Show session and weekly percentages left, one row per service."""
     import textwrap
     now = time.time() if now is None else now
     width = max(20, width or shutil.get_terminal_size((88, 24)).columns)
@@ -266,36 +278,21 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         services.setdefault(name, []).append(row)
     if not services:
         return "\n".join(lines + ["No open service plans."]) + "\n"
-    wide = width >= 52
-    stacked = width < 35
-    service_width = 7
-    if wide:
-        full_labels = width >= 60
-        session_width, week_width = (12, 9) if full_labels else (7, 6)
-        reset_width = min(16, (width - service_width - session_width - week_width - 8) // 2)
-        widths = [service_width, session_width, reset_width, week_width, reset_width]
-        heading = ["Service", "Session left" if full_labels else "Session", "Reset (ET)",
-                   "Week left" if full_labels else "Week", "Reset (ET)"]
-        if not full_labels:
-            lines.append("Percent left. Reset times in ET.")
-    elif not stacked:
-        period_width = (width - service_width - 4) // 2
-        widths = [service_width, period_width, period_width]
-        heading = ["Service", "Session", "Week"]
-        lines.append("Percent left. Reset times in ET.")
-    else:
-        widths = [service_width, width - service_width - 2]
-        heading = ["Service", "Left/reset"]
-        lines.extend(textwrap.wrap("Percent left. Reset times in ET.", width))
-    lines.append(style("  ".join(t.ljust(w) for t, w in zip(heading, widths)).rstrip(), "1"))
-    lines.append(style("  ".join("-" * w for w in widths), "2"))
+    full_labels = width >= 32
+    gap = "  " if full_labels else " "
+    widths = [7, 12, 9] if full_labels else [7, width - 14, 5]
+    heading = ["Service", "Session left", "Week left"] if full_labels else ["Service", "Sess", "Week"]
+    if not full_labels:
+        lines.append("Percent left.")
+    lines.append(style(gap.join(t.ljust(w) for t, w in zip(heading, widths)).rstrip(), "1"))
+    lines.append(style(gap.join("-" * w for w in widths), "2"))
     notes = []
 
     def add(cells: list[str], codes: list[str] | None = None):
         parts = [textwrap.wrap(field.clean(cell, 500), width=w) or [""] for cell, w in zip(cells, widths)]
         for index in range(max(map(len, parts))):
             values = [part[index] if index < len(part) else "" for part in parts]
-            lines.append("  ".join(style(value.ljust(w) if i < len(widths) - 1 else value, (codes or [""] * len(widths))[i])
+            lines.append(gap.join(style(value.ljust(w) if i < len(widths) - 1 else value, (codes or [""] * len(widths))[i])
                                     if (codes or [""] * len(widths))[i] else (value.ljust(w) if i < len(widths) - 1 else value)
                                     for i, (value, w) in enumerate(zip(values, widths))).rstrip())
 
@@ -310,20 +307,6 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             return "session"
         return None
 
-    def reset_text(value: dict | None) -> str:
-        if value is None:
-            return "--"
-        reset = value.get("reset_at")
-        if reset:
-            when = field.eastern(datetime.fromtimestamp(reset, timezone.utc))
-            today = field.eastern(datetime.fromtimestamp(now, timezone.utc))
-            text = when.strftime("%H:%M" if when.date() == today.date() else "%b %d %H:%M")
-            if reset <= now:
-                text += "*"
-                notes.append("* Reset time passed. Waiting for fresh limits.")
-            return text
-        return value.get("reset_text") or "--"
-
     def allowance(value: dict | None, stale: bool) -> tuple[str, str]:
         if value is None:
             return "--", "2"
@@ -331,52 +314,42 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         code = "1;31" if remaining <= 10 else "1;33" if remaining <= 25 else "1"
         return f"{remaining:g}%" + ("*" if stale else ""), code
 
-    order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google"))}
+    order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google", "Fugu"))}
     for name in sorted(services, key=lambda key: (order.get(key, 99), key)):
         accounts = sorted(services[name], key=lambda row: not bool(row.get("windows")))
-        measured = [row for row in accounts if row.get("windows")]
-        if len(measured) > 1:
-            notes.append(f"{name}: separate logins use separate lines.")
-        first = True
+        selected = {}
+        stale = False
         notices = set()
         for row in accounts:
             if not row.get("windows"):
-                notice = field.clean(row.get("state", "Limits unavailable"))
-                if notice in notices:
-                    continue
-                notices.add(notice)
-                notes.append(f"{name}: {notice}.")
-                if not measured and first:
-                    add([name] + ["--"] * (len(widths) - 1), ["1"] + ["2"] * (len(widths) - 1))
-                    first = False
+                notices.add(field.clean(row.get("state", "Limits unavailable")))
                 continue
             age = max(0, now - row["observed_at"])
-            stale = age >= 120 or snapshot.get("scan_failed") or row.get("state") != "Measured"
-            if stale:
-                notes.append("* Stale limits. The latest read did not confirm these values.")
-            selected = {}
+            row_stale = age >= 120 or snapshot.get("scan_failed") or row.get("state") != "Measured"
             for label in ("session", "week"):
                 candidates = [value for value in row["windows"] if period(value) == label]
-                if candidates:
-                    selected[label] = min(candidates, key=lambda value: (value["remaining"], -(value.get("reset_at") or 0)))
-                if len(candidates) > 1:
-                    notes.append("Each period shows its lowest remaining limit and that limit's reset.")
-            session, week = selected.get("session"), selected.get("week")
-            session_left, session_code = allowance(session, stale)
-            week_left, week_code = allowance(week, stale)
-            if wide:
-                add([name if first else "", session_left, reset_text(session), week_left, reset_text(week)],
-                    ["1", session_code, "", week_code, ""])
-            elif not stacked:
-                add([name if first else "", session_left, week_left], ["1", session_code, week_code])
-                add(["", reset_text(session), reset_text(week)], ["", "2", "2"])
-            else:
-                for label, value, left, code in (("Session", session, session_left, session_code),
-                                                ("Week", week, week_left, week_code)):
-                    add([name if first else "", f"{label} {left}"], ["1", code])
-                    add(["", reset_text(value)], ["", "2"])
-                    first = False
-            first = False
+                for value in candidates:
+                    previous = selected.get(label)
+                    if previous is None or value["remaining"] < previous[0]["remaining"]:
+                        selected[label] = (value, row_stale)
+                    elif value["remaining"] == previous[0]["remaining"]:
+                        selected[label] = (previous[0], previous[1] or row_stale)
+        values, codes = [name], ["1"]
+        for label in ("session", "week"):
+            value, outdated = selected.get(label, (None, False))
+            if value and value.get("reset_at") and value["reset_at"] <= now:
+                outdated = True
+            stale = stale or outdated
+            left, code = allowance(value, outdated)
+            values.append(left)
+            codes.append(code)
+        add(values, codes)
+        if stale:
+            notes.append(f"{name}: * Waiting for fresh limits.")
+        if not selected:
+            notes.append(f"{name}: {', '.join(sorted(notices)) or 'Limits unavailable'}.")
+        elif notices:
+            notes.append(f"{name}: some limits are unavailable.")
     if notes:
         lines.append("")
         for note in dict.fromkeys(notes):

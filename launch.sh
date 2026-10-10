@@ -235,14 +235,15 @@ Runtime (injected by launch.sh; do not ignore):
 
 - Plan Usage executable: $LANTERN_PLAN_USAGE
   (environment: LANTERN_PLAN_USAGE). Chat, Field Status, and Plan Usage open
-  beside chat in one tab at startup. Chat is on the left. Usage is on the
-  top right. Field Status is on the bottom right. For a usage request, invoke \`pane\` with
+  beside chat in one tab at startup. Chat is on the left. Field Status uses the
+  top two thirds of the right column. Usage uses the bottom third. For a usage request, invoke \`pane\` with
   the detected Python 3 command to restore its pane. Use \`refresh\` to read
   the cache. The view shows one table row per service with open agent tabs across workspaces.
-  Show session and weekly percentages with their reset times. Omit agents, tab counts,
+  Show only session and weekly percentages left. Omit agents, tab counts,
   account IDs, model IDs, plan names, credits, and source details from the main table.
-  Each period shows its lowest remaining allowance and the reset for that allowance.
-  Keep separate account allowances distinct. Never add separate limits.
+  Each period shows its lowest remaining percentage across service limits and login profiles.
+  Hide reset times. Never add separate limits. Google uses its zero-turn native usage
+  command. Grok uses the saved OAuth plan. Fugu uses the configured profile quota API.
   Idle and Done tabs count. Account unknown has no measured allowance.
   Do not prompt an agent or answer its approval to collect usage.
 
@@ -371,8 +372,8 @@ $onboard_note
   plan. Run it only after the user confirms that exact plan.
 - Field Status uses $LANTERN_FIELD_STATUS. On light-up, use \`--plain refresh\`
   for the initial readout. For "Field Status", "what’s going on", or any field
-  question, use the detected Python 3 command with \`pane\` to open or reuse one
-  separate Field Status tab; \`watch\` keeps the display current.
+  question, use the detected Python 3 command with \`pane\` to restore or reuse
+  the top right pane in the chat tab; \`watch\` keeps the display current.
   Join \`herdr tab list\`, \`herdr agent list\`, and \`herdr workspace list\`
   by ID. Keep every open tab, including quiet/idle, Daily Tasks, and Lantern
   Home. Show human-readable workspace names in yellow, never internal agent

@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.2** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.3** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -118,8 +118,8 @@ Code gets `CLAUDE.md`.
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
 working toward?” for that readout. Ask “Field Status” or “what’s going on”
-to restore the Field Status pane. Lantern opens three panes in one tab. Chat fills the left side. Plan Usage
-fills the top right. Field Status fills the bottom right. Focus stays on chat. The repo-backed
+to restore the Field Status pane. Lantern opens three panes in one tab. Chat fills the left side. Field Status
+fills the top two thirds of the right column. Plan Usage fills the bottom third. Focus stays on chat. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
 date/time, separate red Important and purple Needs You sections, and every
 open tab. Human-readable workspace names are yellow; In Motion, Done, and
@@ -143,36 +143,40 @@ under Important. Legacy review-gate notes display under Important until cleared.
 Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
 Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
 
-Plan Usage shows accounts with an open agent tab anywhere on the current
-Herdr server. Idle and Done tabs count. Tabs hidden from Field Status Keep
-still count. The table has one row per service: Claude, OpenAI, Grok, Google, and other
-open services. It does not list agents or tab counts. Separate accounts keep
-separate allowances within the service row. The table shows Session, Session
-reset, Week, and Week reset. It omits account IDs, model IDs, plan names,
-credits, and source details. Each period shows its lowest remaining allowance
-and that allowance's reset time. It does not add values from separate limits.
-Separate logins use separate lines within a service row. Narrow panes put
-reset times below percentages. All reset times use ET.
-Color shows low allowances. A warning marks stale values and failed reads.
-NO_COLOR disables color. Plain snapshots have no color.
-A past reset time does not mean that usage has reset.
+Plan Usage includes plans with an open agent tab anywhere on this Herdr
+server. Idle and Done tabs count. Tabs hidden from Field Status still count.
+The table shows one row per service: Claude, OpenAI, Grok, Google, Fugu,
+and other open services. Its columns are Service, Session left, and Week left.
+Only percentages appear in the value columns. It omits IDs, model names,
+plan codes, credits, reset times, source details, and tab counts.
+Each period shows its lowest remaining percentage across that service's
+limits and login profiles. It never adds percentages. This is a conservative
+service summary. Low allowances use color. A warning marks stale values or
+failed reads. NO_COLOR disables color. Plain snapshots have no color.
 
 The watcher scans tabs every five seconds and reads usage every 60 seconds.
-All Plan Usage panes on the server share one collector. Ordinary read failures
-keep the last measured value and its age. An unknown account or a lost login
-hides the prior usage value. Values become stale after 120 seconds.
-Unknown usage has no percentage. Antigravity shows Account unknown because
-the checked source has no verified account identity. Unsupported agent
-kinds show Limits unavailable. Native Codex on Windows shows Account unknown
-when no verified process environment is available. Claude and Grok on Windows
-show Dependency unavailable because CodexBar has no Windows release asset.
+All usage panes share one collector. A changed login hides prior values.
+Ordinary read failures keep the last measured value with a warning.
+Values become stale after 120 seconds. Missing values show --.
 
-Grok uses the verified OAuth account source with cookies off. A process with
-`XAI_API_KEY`, `GROK_API_KEY`, `GROK_OAUTH_TOKEN`, or `XAI_BASE_URL` set shows
-Account unknown. Inherited values also cause this state. A key's presence
-does not prove which billing mode the tab uses. These rows show Account unknown
-without subscription percentages. API credentials and custom provider
-settings can also prevent verified Codex or Claude account readings.
+Antigravity reads `agy -p /usage --output-format json`. It extracts the
+remaining fractions from the structured quota groups and requires zero
+model turns. The reader uses the open tab's HOME and local login file.
+It checks the login file before and after the read. It does not invent a
+billing account ID from the installation ID.
+Grok reads the saved OAuth subscription with cookies off. An inherited API
+key or base URL does not block that plan reading. Those values never enter
+the quota probe. A custom OAuth token remains unsupported.
+Fugu reads Sakana's `/v1/usage` API with the key selected by the open Codex
+profile. Both modern profile files and legacy profiles work. The reader
+converts used percentages to percentages left. It makes no model calls.
+The API key stays in memory and never enters the shared cache.
+
+Native Codex, Antigravity, and Fugu require a readable process environment.
+They remain unmeasured on Windows. Claude and Grok on Windows show
+Dependency unavailable because CodexBar has no Windows release asset.
+Unsupported agent kinds show Limits unavailable. API credentials and custom
+provider settings can prevent Codex or Claude subscription readings.
 
 Codex uses its native app server. Claude and Grok require CodexBar CLI
 0.74.0. Install the pinned CLI into private Lantern state with
