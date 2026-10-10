@@ -879,6 +879,9 @@ for version_page in howto.html docs/index.html; do
     fi
 done
 
+grep -qF "Lantern $version and Elves " "$root/docs/teams.html" ||
+    fail "team guide header does not say Lantern $version"
+
 if grep -qE '^(width|height) =' "$root/herdr-plugin.toml"; then
     fail "pane still sizes a popup"
 fi
