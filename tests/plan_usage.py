@@ -197,13 +197,13 @@ class UsageTests(unittest.TestCase):
         row["windows"][1]["reset_text"] = "next Tuesday"
         output = usage.render({"rows": [row]}, now=1800000300, width=28)
         self.assertIn("Stale", output)
-        self.assertIn("79% left", output)
-        self.assertIn("(past)", output)
-        self.assertIn("Reset next Tuesday\n", output)
+        self.assertIn("79%*", output)
+        self.assertIn("Reset time passed", output)
+        self.assertIn("next Tuesday", output)
         self.assertNotIn("next Tuesday ET", output)
         self.assertTrue(all(len(line) <= 28 for line in output.splitlines()))
         with patch.object(field, "ZoneInfo", side_effect=field.ZoneInfoNotFoundError()):
-            self.assertIn(" ET", usage.render({"rows": [row]}, now=1800000300))
+            self.assertIn("(ET)", usage.render({"rows": [row]}, now=1800000300))
 
     def test_table_groups_services_and_keeps_accounts_and_unknowns(self):
         first = dict(measured("one"), state="Measured", tabs=18)
@@ -211,10 +211,10 @@ class UsageTests(unittest.TestCase):
         snapshot = {"rows": [first, second, {"provider": "codex", "tabs": 7, "state": "Account unknown"},
                              {"provider": "agy", "tabs": 2, "state": "Account unknown"}]}
         output = usage.render(snapshot, now=1800000030, width=88)
-        self.assertEqual(output.count("OpenAI"), 1)
-        self.assertEqual(output.count("Google"), 1)
-        self.assertIn(first["account"][:6], output)
-        self.assertIn(second["account"][:6], output)
+        self.assertEqual(sum(line.startswith("OpenAI ") for line in output.splitlines()), 1)
+        self.assertEqual(sum(line.startswith("Google ") for line in output.splitlines()), 1)
+        self.assertNotIn(first["account"][:6], output)
+        self.assertNotIn(second["account"][:6], output)
         self.assertEqual(output.count("79%"), 2)
         self.assertEqual(output.count("Account unknown"), 2)
         self.assertNotIn("agent", output)
@@ -222,6 +222,31 @@ class UsageTests(unittest.TestCase):
         for width in (20, 28, 43, 44, 61, 88):
             plain = usage.render(snapshot, now=1800000030, width=width)
             self.assertTrue(all(len(line) <= width for line in plain.splitlines()), (width, plain))
+
+    def test_period_table_omits_details_and_uses_matching_limiting_reset(self):
+        row = dict(measured(), state="Measured", tabs=4, plan="promax")
+        row["windows"] += [{"id": "other-week", "label": "Model identifier", "minutes": 10080,
+                            "remaining": 2, "reset_at": 1800003600}]
+        output = usage.render({"rows": [row]}, now=1800000030, width=61)
+        self.assertIn("Session left", output)
+        self.assertIn("Week left", output)
+        self.assertIn("79%", output)
+        self.assertIn("2%", output)
+        self.assertNotIn("10%", output)
+        self.assertIn(field.eastern(usage.datetime.fromtimestamp(1800003600, usage.timezone.utc)).strftime("%H:%M"), output)
+        for hidden in ("promax", "credits", "Updated", "Native", "Model identifier", row["account"][:6], "█", "░"):
+            self.assertNotIn(hidden, output)
+        self.assertIn("lowest remaining limit", output)
+
+    def test_missing_period_and_unreadable_login_do_not_make_percentages(self):
+        row = dict(measured(), state="Measured", tabs=4)
+        row["windows"] = [row["windows"][1]]
+        output = usage.render({"rows": [row, {"provider": "grok", "state": "Account unknown", "tabs": 3}]},
+                              now=1800000030, width=61)
+        self.assertIn("OpenAI   --", output)
+        self.assertIn("Grok     --", output)
+        self.assertNotIn("0%", output.replace("10%", ""))
+        self.assertIn("Grok: Account unknown.", output)
 
     def test_table_color_preserves_plain_text_and_no_color(self):
         import re

@@ -239,7 +239,10 @@ Runtime (injected by launch.sh; do not ignore):
   top right. Field Status is on the bottom right. For a usage request, invoke \`pane\` with
   the detected Python 3 command to restore its pane. Use \`refresh\` to read
   the cache. The view shows one table row per service with open agent tabs across workspaces.
-  Do not display agents or tab counts. Keep separate account allowances distinct.
+  Show session and weekly percentages with their reset times. Omit agents, tab counts,
+  account IDs, model IDs, plan names, credits, and source details from the main table.
+  Each period shows its lowest remaining allowance and the reset for that allowance.
+  Keep separate account allowances distinct. Never add separate limits.
   Idle and Done tabs count. Account unknown has no measured allowance.
   Do not prompt an agent or answer its approval to collect usage.
 

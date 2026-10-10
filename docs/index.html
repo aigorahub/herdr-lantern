@@ -262,7 +262,7 @@
       <img src="assets/lantern-banner.jpeg" width="1280" height="720" alt="The cobbler on a ridge at night, lantern in hand, looking down on his herd">
       <div class="hero-copy">
         <div class="wrap">
-          <p class="kicker">aigora.lantern · v0.17.1 · herdr 0.7.5+</p>
+          <p class="kicker">aigora.lantern · v0.17.2 · herdr 0.7.5+</p>
           <h1>Lantern, illuminating your herd</h1>
           <p class="lede">Herdr manages the herd. The herd is in the field. Lantern lights who needs you, what they are working toward, and how to get there. You talk. It runs <code>herdr</code>.</p>
         </div>
@@ -339,7 +339,7 @@
       <h2>Field Status and Plan Usage</h2>
       <p>Lantern opens one tab with three panes. Chat is on the left. Plan Usage is on the top right. Field Status is on the bottom right. Focus stays on the chat. Later opens reuse the readouts and restore missing panes. Verified readouts from old tabs move into this layout. Busy or unrelated panes stay untouched. A readout setup failure does not stop the chat. Readouts stay within the pane. Use Up/Down or Page Up/Page Down to scroll. Press q to close a readout. A later Lantern open restores it.</p>
       <p>Field Status shows ET time, open tabs, agent states, saved notes, and verified outcomes. Ask <code>Field Status</code> or <code>what's going on</code> to restore its pane.</p>
-      <p>Plan Usage shows one table row per service with an open agent tab anywhere on this Herdr server. Idle and Done tabs count. Tabs hidden from Field Status still count. The table aligns allowance left and reset times. Low allowance and failed reads use color and text. It does not list agents or tab counts. Separate accounts keep separate allowances within the service row. Credits have a separate value. Account labels use opaque IDs.</p>
+      <p>Plan Usage shows one table row per service with an open agent tab anywhere on this Herdr server. Idle and Done tabs count. Tabs hidden from Field Status still count. The table shows session and weekly percentages beside their reset times. All reset times use ET. It omits account IDs, model IDs, plan names, credits, source details, and tab counts. Each period shows its lowest remaining allowance and that allowance's reset time. Separate logins keep separate values within the service row. Narrow panes put reset times below percentages. Low allowances use color. Stale readings and past reset times keep a warning.</p>
       <p>The shared collector scans tabs every five seconds and reads usage every 60 seconds. Values become stale after 120 seconds. A past reset time does not prove a new allowance. An unknown account or lost login hides prior usage values. The collector does not send prompts or start model turns.</p>
       <p>Codex uses its native app server. Claude and Grok need CodexBar CLI 0.74.0 on macOS or Linux. From the plugin checkout, run:</p>
       <pre>sh bin/plan-usage install</pre>

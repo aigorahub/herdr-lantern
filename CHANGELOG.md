@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.2] - 2026-10-10
+
+### Changed
+
+- Plan Usage shows session and weekly percentages beside their reset times.
+  The table omits account IDs, model IDs, plan names, credits, source details,
+  update age, and allowance bars. Narrow panes put reset times below percentages.
+- Each period shows its lowest remaining allowance and that allowance's reset
+  time. Separate logins keep separate values. Missing values have no percentage.
+  Stale readings and past reset times keep a warning.
+
 ## [0.17.1] - 2026-10-10
 
 ### Changed
