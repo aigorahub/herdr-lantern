@@ -127,6 +127,54 @@ class UsageTests(unittest.TestCase):
             with self.assertRaises(sources.SourceError):
                 sources.scope_for("codex", process, env)
 
+    def test_failed_fugu_profiles_keep_the_service_route(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary); root = home / ".codex"; root.mkdir()
+            exe = home / "codex"; exe.touch(); exe.chmod(0o700)
+            process = {"argv": ["codex", "-p", "fugu"], "executable": str(exe)}
+            config = root / "config.toml"
+            for text in (None, "[broken", "", 'model_providers = "wrong"',
+                         '[profiles.fugu]\nmodel_provider = "sakana"\n[model_providers.sakana]\nbase_url = 123'):
+                with self.subTest(config=text):
+                    if text is None:
+                        config.unlink(missing_ok=True)
+                    else:
+                        config.write_text(text)
+                    with self.assertRaises(sources.SourceError) as failure:
+                        sources.scope_for("codex", process, {"HOME": str(home)})
+                    self.assertEqual(failure.exception.provider, "fugu")
+            config.write_text("")
+            (root / "fugu.config.toml").write_text("[broken")
+            with self.assertRaises(sources.SourceError) as failure:
+                sources.scope_for("codex", process, {"HOME": str(home)})
+            self.assertEqual(failure.exception.provider, "fugu")
+            self.assertEqual(sources.route_hint("codex", ["codex", "--profile=fugu-work"]), "fugu")
+            self.assertEqual(sources.route_hint("codex", ["codex-fugu"]), "fugu")
+            self.assertEqual(sources.route_hint("codex", ["codex"]), "codex")
+
+    def test_fugu_process_inspection_failure_stays_out_of_openai_row(self):
+        for argv, provider in ((["codex", "-p", "fugu"], "fugu"), (["codex"], "codex")):
+            with self.subTest(argv=argv), \
+                    patch.object(field, "control", return_value={"process_info": {
+                        "shell_pid": 1, "foreground_processes": [{"pid": 2, "argv": argv}]}}), \
+                    patch.object(runtime, "process_start", return_value="started"), \
+                    patch.object(runtime, "process_environment", side_effect=RuntimeError("unavailable")):
+                with self.assertRaises(sources.SourceError) as failure:
+                    usage.verified_scope("herdr", "codex", {"pane_id": "p"})
+                self.assertEqual(failure.exception.provider, provider)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); server = {"key": "server", "lifetime": "one"}
+            collector = usage.Collector(root / "state", root / "shared", "herdr", server)
+            try:
+                with patch.object(runtime, "server_identity", return_value=server), \
+                        patch.object(field, "snapshot", return_value=([{"tab_id": "a"}], [
+                            {"agent": "codex", "tab_id": "a", "pane_id": "p"}], [])), \
+                        patch.object(usage, "verified_scope", side_effect=sources.SourceError("Account unknown", provider="fugu")):
+                    collector.scan()
+                self.assertEqual(collector.write()["rows"], [{"provider": "fugu", "state": "Account unknown", "tabs": 1}])
+            finally:
+                collector.close()
+
     def test_fugu_usage_percent_is_used_not_remaining(self):
         payload = {"plan": "max", "window_seconds": 18000,
                    "window_usage": {"usage_percent": 6.0848578}, "weekly_usage": {"usage_percent": 55.0257938}}

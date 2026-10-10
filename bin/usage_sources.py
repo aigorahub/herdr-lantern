@@ -72,7 +72,33 @@ def current_stamp(scope: dict) -> str:
     return runtime.digest(values)
 
 
+def route_hint(provider: str, argv: object) -> str:
+    if provider != "codex" or not isinstance(argv, list):
+        return provider
+    profile = ""
+    for index, value in enumerate(argv):
+        if value in ("-p", "--profile") and index + 1 < len(argv):
+            profile = str(argv[index + 1])
+        elif str(value).startswith("--profile="):
+            profile = str(value).split("=", 1)[1]
+    if profile == "fugu" or profile.startswith("fugu-") or (argv and "codex-fugu" in Path(str(argv[0])).name):
+        return "fugu"
+    return provider
+
+
 def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
+    hint = route_hint(provider, process.get("argv"))
+    try:
+        return _scope_for(provider, process, env)
+    except SourceError as exc:
+        if hint == "fugu":
+            exc.provider = "fugu"
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise SourceError("Account unknown", provider=hint) from None
+
+
+def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     home = env.get("HOME", "")
     argv = process.get("argv")
     if not home or not Path(home).is_absolute() or not isinstance(argv, list) or not argv:
@@ -151,7 +177,8 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
             provider_config = providers.get(selected.get("model_provider", "openai")) or {}
             if not isinstance(provider_config, dict):
                 raise SourceError("Account unknown")
-            if provider_config.get("base_url", "").rstrip("/") == "https://api.sakana.ai/v1":
+            base_url = provider_config.get("base_url")
+            if isinstance(base_url, str) and base_url.rstrip("/") == "https://api.sakana.ai/v1":
                 return fugu_scope(native, env, root, files, provider_config)
             if (data.get("model_provider", "openai") != "openai"
                     or data.get("chatgpt_base_url")

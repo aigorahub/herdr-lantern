@@ -48,6 +48,18 @@ def verified_scope(binary: str, provider: str, agent: dict) -> dict:
     if len(candidates) != 1:
         raise sources.SourceError("Account unknown")
     process = candidates[0]
+    hint = sources.route_hint(provider, process["argv"])
+    try:
+        return verified_process_scope(binary, provider, pane, process)
+    except sources.SourceError as exc:
+        if hint == "fugu":
+            exc.provider = "fugu"
+        raise
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        raise sources.SourceError("Account unknown", provider=hint) from None
+
+
+def verified_process_scope(binary: str, provider: str, pane: str, process: dict) -> dict:
     pid = process["pid"]
     start = runtime.process_start(pid)
     if not start:
