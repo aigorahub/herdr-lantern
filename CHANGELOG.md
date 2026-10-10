@@ -2,6 +2,16 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.5] - 2026-10-10
+
+### Fixed
+
+- Claude model preflight accepts setup-token / `CLAUDE_CODE_OAUTH_TOKEN`
+  logins whose usage output shows costs without quota buckets, reporting
+  `quota: unknown` after model and effort catalog checks. Logged-out sessions
+  still fail explicitly, as does a missing or empty token source with no
+  usage buckets. Malformed usage or exhausted quotas still fail.
+
 ## [0.17.4] - 2026-10-10
 
 ### Changed

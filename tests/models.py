@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -349,15 +350,53 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                 self.assertEqual(result["substitute"]["model"], "opus")
             self.assertEqual(self.check("claude", "opus", "high")[0], 0)
 
-    def test_fable_51_available_and_unreadable_usage(self):
-        for usage in ("Current session: 0% used", "unparseable"):
-            with patch.object(preflight, "run", side_effect=[CLAUDE_HELP, CLAUDE_CATALOG, json.dumps({"result": usage})]):
-                if usage == "unparseable":
-                    with self.assertRaises(preflight.CheckError):
-                        self.check("claude", "claude-fable-5-1", "high")
+    def test_claude_login_and_usage_preflight(self):
+        cases = (
+            ("oauth-token", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 0, "unknown"),
+            ("none", json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
+            ("login-source", json.dumps({"result": "Current session: 0% used"}), 0, None),
+            ("login-source", json.dumps({"result": "Current session: 100% used"}), 3, "100% used"),
+            (None, json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
+            ("", json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
+            (None, json.dumps({"result": "Current session: 0% used"}), 0, None),
+            ("oauth-token", "unparseable", 2, "unparseable usage JSON"),
+            ("oauth-token", json.dumps({"result": None}), 2, "usage result is not text"),
+        )
+        for token_source, usage, expected_code, expected in cases:
+            with self.subTest(token_source=token_source, usage=usage):
+                catalog = json.loads(CLAUDE_CATALOG)
+                if token_source is None:
+                    catalog["response"]["response"].pop("account", None)
                 else:
-                    self.assertEqual(self.check("claude", "claude-fable-5-1", "high")[0], 0)
+                    catalog["response"]["response"]["account"] = {"tokenSource": token_source}
 
+                def run(command, *, input_text=None, catalog=catalog, usage=usage):
+                    if command == ["claude", "--help"]:
+                        return CLAUDE_HELP
+                    if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                        return usage
+                    if command == ["agent", "--list-models"]:
+                        return "gpt-5.6-sol-high-fast - GPT Sol\n"
+                    return json.dumps(catalog)
+
+                with patch.object(preflight, "run", side_effect=run):
+                    if expected_code == 2:
+                        with self.assertRaises(preflight.CheckError) as raised:
+                            self.check("claude", "opus", "high")
+                        self.assertIn(expected, str(raised.exception))
+                        continue
+                    code, payload = self.check("claude", "opus", "high")
+                    self.assertEqual(code, expected_code)
+                    if expected_code == 3:
+                        self.assertIn(expected, payload["reason"])
+                    elif expected is None:
+                        self.assertTrue(payload["available"])
+                        self.assertNotIn("quota", payload)
+                    else:
+                        self.assertTrue(payload["available"])
+                        self.assertEqual(payload["quota"], expected)
+                        self.assertEqual(self.check("claude", "sonnet", "max")[0], 3)
+                        self.assertEqual(self.check("claude", "invented", "high")[0], 3)
 
 if __name__ == "__main__":
     unittest.main()

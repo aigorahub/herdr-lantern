@@ -12,7 +12,7 @@ import sys
 
 from dataclasses import dataclass
 
-from model_catalog import claude_model_catalog, listed_codex_models, model_words
+from model_catalog import claude_initialization, listed_codex_models, model_words
 
 
 class CheckError(RuntimeError):
@@ -190,9 +190,9 @@ def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | No
     return None
 
 
-def claude_capabilities() -> dict[str, tuple[str, set[str]]]:
+def claude_capabilities() -> tuple[dict[str, tuple[str, set[str]]], str | None]:
     try:
-        return claude_model_catalog(run)
+        return claude_initialization(run)
     except ValueError as error:
         fail(f"availability check failed: {error}")
 
@@ -236,8 +236,11 @@ def claude_substitute(
     return cursor_sol_substitute()
 
 
-def report_available(kind: str, model: str, effort: str) -> int:
-    print(json.dumps({"available": True, "kind": kind, "model": model, "effort": effort}, separators=(",", ":")))
+def report_available(kind: str, model: str, effort: str, *, quota: str | None = None) -> int:
+    payload = {"available": True, "kind": kind, "model": model, "effort": effort}
+    if quota is not None:
+        payload["quota"] = quota
+    print(json.dumps(payload, separators=(",", ":")))
     return 0
 
 
@@ -297,10 +300,14 @@ def check(kind: str, model: str, effort: str) -> int:
             )
         return report_available(kind, model, effort)
     if kind == "claude":
-        models = claude_capabilities()
+        models, token_source = claude_capabilities()
+        if token_source == "none":
+            fail("availability check failed: Claude is not logged in")
         _, buckets = parse_claude_usage()
-        if not buckets:
-            fail("availability check failed: Claude returned no usage buckets")
+        if not buckets and not token_source:
+            # No token source and no quota buckets: nothing shows a login.
+            fail("availability check failed: Claude is not logged in "
+                 "(no token source and no usage buckets)")
         if model.lower() not in models:
             return report_unavailable(
                 kind,
@@ -323,7 +330,7 @@ def check(kind: str, model: str, effort: str) -> int:
                 exhausted_reason(exhausted),
                 claude_substitute(model, buckets, models),
             )
-        return report_available(kind, model, effort)
+        return report_available(kind, model, effort, quota="unknown" if not buckets else None)
     if kind == "cursor":
         models = cursor_models()
         if model not in models:

@@ -80,6 +80,10 @@ def parse_claude_capabilities(help_text: str) -> tuple[set[str], set[str]]:
 
 
 def claude_model_catalog(run) -> dict[str, tuple[str, set[str]]]:
+    return claude_initialization(run)[0]
+
+
+def claude_initialization(run) -> tuple[dict[str, tuple[str, set[str]]], str | None]:
     # Help supplies grammar and alias examples, not a model allowlist.
     aliases, _ = parse_claude_capabilities(run(["claude", "--help"]))
     request_id = "lantern-model-catalog"
@@ -129,6 +133,7 @@ def claude_model_catalog(run) -> dict[str, tuple[str, set[str]]]:
             alias = strip_terminal_control(display_name).lower() if isinstance(display_name, str) else ""
             if alias in aliases:
                 catalog[alias] = entry
-        return catalog
+        token_source = response["response"].get("account", {}).get("tokenSource")
+        return catalog, token_source
     except (ValueError, KeyError, TypeError, AttributeError, StopIteration) as error:
         raise ValueError(f"Claude returned an unparseable initialization catalog ({error})") from error
