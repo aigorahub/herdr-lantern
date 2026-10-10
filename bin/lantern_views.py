@@ -12,7 +12,9 @@ from pathlib import Path
 import field_status as field
 from usage_runtime import FileLock, private_dir, server_identity
 
-VIEWS = {"usage": ("Plan Usage", "plan_usage.py"), "field": ("Field Status", "field_status.py")}
+VIEWS = {"field": ("Field Status", "field_status.py"), "usage": ("Plan Usage", "plan_usage.py")}
+RIGHT_SPLIT_RATIO = "0.6666666667"
+LAYOUT = "field-above-usage"
 
 
 def watcher_command(root: Path, state: Path, view: str, shell: str | None = None) -> str:
@@ -96,7 +98,7 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
         while not lock.acquire():
             if time.monotonic() + 0.1 >= deadline:
                 completed = field.read_json(state / "views.json", {})
-                if (completed.get("setup_complete") and completed.get("layout") == "split" and completed.get("server") == server
+                if (completed.get("setup_complete") and completed.get("layout") == LAYOUT and completed.get("server") == server
                         and completed.get("home_pane_id") == home and completed.get("workspace_id") == workspace
                         and not completed.get("errors") and all(
                             completed.get("views", {}).get(kind, {}).get("status") == "running"
@@ -111,7 +113,7 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
         owned = (record.get("home_pane_id") == home and record.get("server") == server
                  and bool(server["lifetime"]))
         saved = record.get("views", {}) if owned else {}
-        record = {"schema": 2, "layout": "split", "home_pane_id": home, "workspace_id": workspace,
+        record = {"schema": 2, "layout": LAYOUT, "home_pane_id": home, "workspace_id": workspace,
                   "server": server, "views": saved, "errors": [], "setup_complete": False}
         field.write_json(path, record)
         def check_context(end: float) -> None:
@@ -195,11 +197,11 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                         raise RuntimeError("Readout identity changed before move")
                     response = call(["pane", "move", pane["pane_id"], "--tab", home_tab,
                                      "--target-pane", anchor, "--split", direction,
-                                     "--ratio", "0.6" if direction == "down" else "0.5", "--no-focus"], end)
+                                     "--ratio", RIGHT_SPLIT_RATIO if direction == "down" else "0.5", "--no-focus"], end)
                     pane = response.get("move_result", {}).get("pane", {})
                 else:
                     pane = call(["pane", "split", anchor, "--direction", direction,
-                                 "--ratio", "0.6" if direction == "down" else "0.5", "--cwd", cwd, "--no-focus"], end).get("pane", {})
+                                 "--ratio", RIGHT_SPLIT_RATIO if direction == "down" else "0.5", "--cwd", cwd, "--no-focus"], end).get("pane", {})
                 if (not pane.get("pane_id") or pane.get("pane_id") == home
                         or pane.get("tab_id") != home_tab or pane.get("workspace_id") != workspace):
                     raise RuntimeError("Herdr returned no readout pane in the home tab")
@@ -218,7 +220,7 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                         or usage.get("x") != activity.get("x")
                         or usage["x"] <= chat_rect["x"]):
                     raise RuntimeError("Readout panes are outside the right column")
-                if usage["y"] > activity["y"]:
+                if activity["y"] > usage["y"]:
                     check_context(end)
                     for target, target_kind in ((pane, kind), (sibling, other)):
                         settle = min(end, time.monotonic() + 2)
@@ -237,41 +239,41 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                             time.sleep(.1)
                     usage_pane = pane if kind == "usage" else sibling
                     field_pane = pane if kind == "field" else sibling
-                    # Herdr swap focuses its source. Move the lower readout under
-                    # usage with no focus instead. Detaching it expands usage first.
-                    record["views"]["field"] = dict(record["views"].get("field", {}),
-                        pane_id=field_pane["pane_id"], tab_id=home_tab, layout_phase="moving",
-                        command=watcher_command(root, state, "field"))
+                    # Herdr swap focuses its source. Move usage under Field Status
+                    # with no focus instead. Detaching usage expands Field Status.
+                    record["views"]["usage"] = dict(record["views"].get("usage", {}),
+                        pane_id=usage_pane["pane_id"], tab_id=home_tab, layout_phase="moving",
+                        command=watcher_command(root, state, "usage"))
                     field.write_json(path, record)
                     # A move to the current tab is a no-op. Move through an owned
-                    # temporary tab, then return below usage. Both moves keep focus.
-                    staged = call(["pane", "move", field_pane["pane_id"], "--new-tab",
-                                   "--workspace", workspace, "--label", VIEWS["field"][0],
+                    # temporary tab, then return below Field Status. Both moves keep focus.
+                    staged = call(["pane", "move", usage_pane["pane_id"], "--new-tab",
+                                   "--workspace", workspace, "--label", VIEWS["usage"][0],
                                    "--no-focus"], end).get("move_result", {}).get("pane", {})
                     if (not staged.get("pane_id") or staged.get("workspace_id") != workspace
                             or not staged.get("tab_id") or staged.get("tab_id") == home_tab):
                         raise RuntimeError("Herdr returned no temporary readout tab")
-                    record["views"]["field"].update(pane_id=staged["pane_id"], tab_id=staged["tab_id"])
+                    record["views"]["usage"].update(pane_id=staged["pane_id"], tab_id=staged["tab_id"])
                     field.write_json(path, record)
                     check_context(end)
                     live = call(["pane", "get", staged["pane_id"]], end).get("pane", {})
                     info = call(["pane", "process-info", "--pane", staged["pane_id"]], end).get("process_info", {})
                     if (live.get("agent") or live.get("tab_id") != staged["tab_id"]
                             or live.get("workspace_id") != workspace
-                            or occupancy(info, root, state, "field") not in ("idle", "running")):
+                            or occupancy(info, root, state, "usage") not in ("idle", "running")):
                         raise RuntimeError("Readout identity changed during layout repair")
                     moved = call(["pane", "move", staged["pane_id"], "--tab", home_tab,
-                                  "--target-pane", usage_pane["pane_id"], "--split", "down",
-                                  "--ratio", "0.6", "--no-focus"], end).get("move_result", {}).get("pane", {})
+                                  "--target-pane", field_pane["pane_id"], "--split", "down",
+                                  "--ratio", RIGHT_SPLIT_RATIO, "--no-focus"], end).get("move_result", {}).get("pane", {})
                     if (not moved.get("pane_id") or moved.get("tab_id") != home_tab
                             or moved.get("workspace_id") != workspace):
                         raise RuntimeError("Herdr returned no readout pane after layout repair")
-                    record["views"]["field"] = dict(record["views"].get("field", {}),
+                    record["views"]["usage"] = dict(record["views"].get("usage", {}),
                         pane_id=moved["pane_id"], tab_id=home_tab,
-                        command=watcher_command(root, state, "field"))
-                    record["views"]["field"].pop("layout_phase", None)
+                        command=watcher_command(root, state, "usage"))
+                    record["views"]["usage"].pop("layout_phase", None)
                     field.write_json(path, record)
-                    if kind == "field":
+                    if kind == "usage":
                         pane = moved
             return pane
 

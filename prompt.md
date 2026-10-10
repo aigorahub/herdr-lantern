@@ -588,7 +588,7 @@ quiet tabs, Daily Tasks, and Lantern Home. Never close Daily Tasks or Lantern
 Home as part of Field Status.
 
 - Show an explicitly requested view in the Field Status pane with `pane`, which opens or
-  reuses its bottom right pane and starts `watch`.
+  reuses its top right pane and starts `watch`.
   Do not paste tool output, command transcripts, or "Ran command" lines into
   the chat. If the pane cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
@@ -619,8 +619,8 @@ Home as part of Field Status.
 - Refresh at meaningful agent completion, closure, and review events. The
   watcher redraws when field rows, notes, or the ET minute change. Keep existing recurring monitors.
   Do not turn an idle event into Done or a user interruption.
-- Startup opens one tab with chat on the left, Plan Usage on the top right,
-  and Field Status on the bottom right. The command uses the explicit Lantern
+- Startup opens one tab with chat on the left, Field Status in the top two thirds
+  of the right column, and Plan Usage in the bottom third. The command uses the explicit Lantern
   home pane ID and `--no-focus`. Reuse the panes on later requests. Move only
   verified readout watchers from old tabs into this layout. Never close Lantern Home.
 

@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.2** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.3** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -118,8 +118,8 @@ Code gets `CLAUDE.md`.
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
 working toward?” for that readout. Ask “Field Status” or “what’s going on”
-to restore the Field Status pane. Lantern opens three panes in one tab. Chat fills the left side. Plan Usage
-fills the top right. Field Status fills the bottom right. Focus stays on chat. The repo-backed
+to restore the Field Status pane. Lantern opens three panes in one tab. Chat fills the left side. Field Status
+fills the top two thirds of the right column. Plan Usage fills the bottom third. Focus stays on chat. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
 date/time, separate red Important and purple Needs You sections, and every
 open tab. Human-readable workspace names are yellow; In Motion, Done, and

@@ -2,6 +2,15 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.3] - 2026-10-10
+
+### Changed
+
+- Field Status opens in the top two thirds of the right column. Plan Usage
+  opens in the bottom third. Chat stays on the left.
+- Setup moves verified readouts from the previous order into this layout.
+  It keeps focus and running watchers. Later opens preserve manual pane sizes.
+
 ## [0.17.2] - 2026-10-10
 
 ### Changed

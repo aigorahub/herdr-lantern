@@ -235,8 +235,8 @@ Runtime (injected by launch.sh; do not ignore):
 
 - Plan Usage executable: $LANTERN_PLAN_USAGE
   (environment: LANTERN_PLAN_USAGE). Chat, Field Status, and Plan Usage open
-  beside chat in one tab at startup. Chat is on the left. Usage is on the
-  top right. Field Status is on the bottom right. For a usage request, invoke \`pane\` with
+  beside chat in one tab at startup. Chat is on the left. Field Status uses the
+  top two thirds of the right column. Usage uses the bottom third. For a usage request, invoke \`pane\` with
   the detected Python 3 command to restore its pane. Use \`refresh\` to read
   the cache. The view shows one table row per service with open agent tabs across workspaces.
   Show session and weekly percentages with their reset times. Omit agents, tab counts,

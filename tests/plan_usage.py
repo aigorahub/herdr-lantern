@@ -661,8 +661,9 @@ class ViewTests(unittest.TestCase):
         chat = data["rects"]["w9:p1"]
         self.assertEqual(usage["x"], activity["x"])
         self.assertEqual(usage["x"], chat["x"] + chat["width"])
-        self.assertLess(usage["y"], activity["y"])
-        self.assertGreater(usage["height"], activity["height"])
+        self.assertLess(activity["y"], usage["y"])
+        self.assertGreater(activity["height"], usage["height"])
+        self.assertAlmostEqual(activity["height"] / chat["height"], 2 / 3, delta=1 / chat["height"])
         self.assertEqual(chat["height"], usage["height"] + activity["height"])
         self.assertTrue(all(entry["tab_id"] == "w9:t1" for entry in record["views"].values()))
         self.assertEqual(data.get("focused_pane", "w9:p1"), "w9:p1")
@@ -697,16 +698,36 @@ class ViewTests(unittest.TestCase):
         entries = field.read_json(self.state / "views.json", {})["views"]
         usage = data["rects"][entries["usage"]["pane_id"]]
         activity = data["rects"][entries["field"]["pane_id"]]
-        usage["height"], activity["y"], activity["height"] = 18, 18, 22
+        activity["height"], usage["y"], usage["height"] = 18, 18, 22
         self.save(data)
         self.assertEqual(self.setup_views()["errors"], [])
         self.assertEqual(self.data()["rects"], data["rects"])
+
+    def test_old_usage_above_field_layout_moves_without_restart(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        data = self.data()
+        entries = field.read_json(self.state / "views.json", {})["views"]
+        usage = data["rects"][entries["usage"]["pane_id"]]
+        activity = data["rects"][entries["field"]["pane_id"]]
+        usage.update(y=0, height=24)
+        activity.update(y=24, height=16)
+        self.save(data)
+        processes = data["processes"]
+        runs = sum(c[:2] == ["pane", "run"] for c in data["calls"])
+        splits = sum(c[:2] == ["pane", "split"] for c in data["calls"])
+        self.assertEqual(self.setup_views()["errors"], [])
+        self.assert_layout()
+        after = self.data()
+        self.assertEqual(after["processes"], processes)
+        self.assertEqual(sum(c[:2] == ["pane", "run"] for c in after["calls"]), runs)
+        self.assertEqual(sum(c[:2] == ["pane", "split"] for c in after["calls"]), splits)
+        self.assertEqual(sum(c[:2] == ["pane", "move"] for c in after["calls"]), 2)
 
     def test_new_and_saved_shells_wait_before_layout_repair_and_start(self):
         data = self.data()
         data["starting_reads"] = 2
         self.save(data)
-        self.assertEqual(self.setup_views("field")["errors"], [])
+        self.assertEqual(self.setup_views("usage")["errors"], [])
         self.assertEqual(self.setup_views()["errors"], [])
         self.assert_layout()
         data = self.data()
@@ -719,8 +740,8 @@ class ViewTests(unittest.TestCase):
 
     def test_lost_layout_move_response_recovers_without_new_panes(self):
         for lost_stage in (True, False):
-            self.assertEqual(self.setup_views("field")["errors"], [])
-            entry = field.read_json(self.state / "views.json", {})["views"]["field"]
+            self.assertEqual(self.setup_views("usage")["errors"], [])
+            entry = field.read_json(self.state / "views.json", {})["views"]["usage"]
             data = self.data()
             data["processes"][entry["pane_id"]] = []
             self.save(data)
@@ -732,11 +753,11 @@ class ViewTests(unittest.TestCase):
                     lost.append(True)
                     raise RuntimeError("response lost")
                 return result
-            # Recreate usage so repair must move field through a temporary tab.
-            old_usage = field.read_json(self.state / "views.json", {}).get("views", {}).get("usage")
-            if old_usage:
+            # Recreate Field Status so repair must move usage through a temporary tab.
+            old_field = field.read_json(self.state / "views.json", {}).get("views", {}).get("field")
+            if old_field:
                 with patch.dict(os.environ, {"HERDR_HELPER_OK": "1"}):
-                    field.control(str(ROOT / "bin/herdr"), ["pane", "close", old_usage["pane_id"]], 2)
+                    field.control(str(ROOT / "bin/herdr"), ["pane", "close", old_field["pane_id"]], 2)
             with patch.object(field, "control", side_effect=uncertain):
                 self.assertTrue(self.setup_views()["errors"])
             self.assertTrue(lost)
@@ -745,8 +766,8 @@ class ViewTests(unittest.TestCase):
             self.assertEqual(len(self.data()["panes"]), 3)
             self.assertEqual(len(self.data()["tabs"]), 1)
 
-    def test_field_first_then_usage_uses_upper_right(self):
-        self.assertEqual(self.setup_views("field")["errors"], [])
+    def test_usage_first_then_field_uses_upper_right(self):
+        self.assertEqual(self.setup_views("usage")["errors"], [])
         self.assertEqual(self.setup_views()["errors"], [])
         self.assert_layout()
         self.assertEqual(sum(c[:2] == ["pane", "split"] for c in self.data()["calls"]), 2)
