@@ -22,6 +22,7 @@ import lantern_views as views
 import plan_usage as usage
 import usage_runtime as runtime
 import usage_sources as sources
+from terminal_readout import Readout, page, fit
 
 
 def limits(account="account-one"):
@@ -214,7 +215,7 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(output.count("Google"), 1)
         self.assertIn(first["account"][:6], output)
         self.assertIn(second["account"][:6], output)
-        self.assertEqual(output.count("79% left"), 2)
+        self.assertEqual(output.count("79%"), 2)
         self.assertEqual(output.count("Account unknown"), 2)
         self.assertNotIn("agent", output)
         self.assertNotIn("tabs", output)
@@ -235,6 +236,79 @@ class UsageTests(unittest.TestCase):
                 self.assertEqual(re.sub(r"\x1b\[[0-9;]*m", "", styled), plain)
             with patch.dict(os.environ, {"NO_COLOR": ""}):
                 self.assertEqual(usage.render(snapshot, now=1800000030, width=61, color=True), plain)
+
+    def test_readout_viewport_scrolls_and_keeps_top_visible(self):
+        output = "\n".join(f"Line {i}" for i in range(30)) + "\n"
+        visible, offset = page(output, 0, 40, 10)
+        self.assertEqual(visible.splitlines()[0], "Line 0")
+        self.assertEqual(len(visible.splitlines()), 10)
+        self.assertIn("Up/Down", visible)
+        screen = Readout()
+        screen.output = output
+        screen.size = os.terminal_size((40, 10))
+        screen.key("\033[6~")
+        self.assertEqual(screen.offset, 8)
+        screen.key("G")
+        visible, screen.offset = page(output, screen.offset, 40, 10)
+        self.assertIn("Line 29", visible)
+        screen.key("g")
+        self.assertEqual(screen.offset, 0)
+        screen.feed("jj\033OB")
+        self.assertEqual(screen.offset, 3)
+        screen.key("q")
+        self.assertTrue(screen.stop.is_set())
+        self.assertEqual(page("Short\n", 20, 40, 10), ("Short", 0))
+        self.assertEqual(len(page(output, 0, 20, 1)[0].splitlines()), 1)
+        self.assertEqual(fit("你好abcdef", 6), "你好ab")
+        self.assertEqual(fit("\033[31mabcdef\033[0m", 3), "\033[31mabc\033[0m")
+        self.assertEqual(page("abcdef\n", 0, 3, 10), ("abc", 0))
+
+    @unittest.skipIf(os.name == "nt", "requires a Unix pseudoterminal")
+    def test_readout_live_terminal_scroll_and_close_restore_terminal(self):
+        import pty
+        import select
+        master, slave = pty.openpty()
+        code = r'''import sys
+sys.path.insert(0, sys.argv[1])
+from terminal_readout import Readout
+with Readout() as r:
+    r.draw("\n".join(str(i) for i in range(100)))
+    while not r.stop.is_set():
+        r.wait(.1)
+'''
+        proc = subprocess.Popen([sys.executable, "-c", code, str(ROOT / "bin")], stdin=slave, stdout=slave, stderr=slave)
+        output = b""
+        try:
+            deadline = time.monotonic() + 5
+            while b"Up/Down" not in output and time.monotonic() < deadline:
+                if select.select([master], [], [], .1)[0]:
+                    output += os.read(master, 8192)
+            self.assertIn(b"Up/Down", output)
+            os.write(master, b"G")
+            deadline = time.monotonic() + 5
+            while b"99" not in output and time.monotonic() < deadline:
+                if select.select([master], [], [], .1)[0]:
+                    output += os.read(master, 8192)
+            self.assertIn(b"99", output)
+            os.write(master, b"q")
+            proc.wait(timeout=5)
+            while select.select([master], [], [], .1)[0]:
+                try:
+                    chunk = os.read(master, 8192)
+                    if not chunk:
+                        break
+                    output += chunk
+                except OSError:
+                    break
+            self.assertEqual(proc.returncode, 0, output)
+            self.assertIn(b"99", output)
+            self.assertIn(b"\x1b[?25h\x1b[?1049l", output)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            os.close(master)
+            os.close(slave)
 
     def test_kernel_lock_survives_file_age_and_releases_on_exit(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -563,6 +637,7 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(usage["x"], activity["x"])
         self.assertEqual(usage["x"], chat["x"] + chat["width"])
         self.assertLess(usage["y"], activity["y"])
+        self.assertGreater(usage["height"], activity["height"])
         self.assertEqual(chat["height"], usage["height"] + activity["height"])
         self.assertTrue(all(entry["tab_id"] == "w9:t1" for entry in record["views"].values()))
 
@@ -570,7 +645,8 @@ class ViewTests(unittest.TestCase):
         for kind in ("usage", "field"):
             self.assertEqual(self.setup_views()["errors"], [])
             entry = field.read_json(self.state / "views.json", {})["views"][kind]
-            field.control(str(ROOT / "bin/herdr"), ["pane", "close", entry["pane_id"]], 2)
+            with patch.dict(os.environ, {"HERDR_HELPER_OK": "1"}):
+                field.control(str(ROOT / "bin/herdr"), ["pane", "close", entry["pane_id"]], 2)
             self.assertEqual(self.setup_views()["errors"], [])
             self.assert_layout()
 
@@ -586,6 +662,17 @@ class ViewTests(unittest.TestCase):
         self.assertIn("unowned", self.setup_views()["errors"][0])
         self.assertEqual(sum(c[:2] == ["pane", "split"] for c in self.data()["calls"]), 1)
         self.assertFalse(any(c[:2] == ["pane", "run"] for c in self.data()["calls"]))
+
+    def test_existing_pane_sizes_stay_unchanged_on_reopen(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        data = self.data()
+        entries = field.read_json(self.state / "views.json", {})["views"]
+        usage = data["rects"][entries["usage"]["pane_id"]]
+        activity = data["rects"][entries["field"]["pane_id"]]
+        usage["height"], activity["y"], activity["height"] = 18, 18, 22
+        self.save(data)
+        self.assertEqual(self.setup_views()["errors"], [])
+        self.assertEqual(self.data()["rects"], data["rects"])
 
     def test_field_first_then_usage_uses_upper_right(self):
         self.assertEqual(self.setup_views("field")["errors"], [])

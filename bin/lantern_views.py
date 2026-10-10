@@ -186,11 +186,11 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                         raise RuntimeError("Readout identity changed before move")
                     response = call(["pane", "move", pane["pane_id"], "--tab", home_tab,
                                      "--target-pane", anchor, "--split", direction,
-                                     "--ratio", ("0.4" if kind == "usage" else "0.6") if direction == "down" else "0.5", "--no-focus"], end)
+                                     "--ratio", "0.6" if direction == "down" else "0.5", "--no-focus"], end)
                     pane = response.get("move_result", {}).get("pane", {})
                 else:
                     pane = call(["pane", "split", anchor, "--direction", direction,
-                                 "--ratio", ("0.4" if kind == "usage" else "0.6") if direction == "down" else "0.5", "--cwd", cwd, "--no-focus"], end).get("pane", {})
+                                 "--ratio", "0.6" if direction == "down" else "0.5", "--cwd", cwd, "--no-focus"], end).get("pane", {})
                 if (not pane.get("pane_id") or pane.get("pane_id") == home
                         or pane.get("tab_id") != home_tab or pane.get("workspace_id") != workspace):
                     raise RuntimeError("Herdr returned no readout pane in the home tab")

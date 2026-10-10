@@ -128,7 +128,9 @@ only other sessions explicitly pinned by the user; hiding a quiet tab does not
 close it. Done agents show a verified short outcome, and verified settled
 sessions disappear immediately after closure. Daily Tasks and Lantern Home
 are never closed by this view. The watcher redraws when field state or
-notes change and leaves command transcripts out of the chat.
+notes change and leaves command transcripts out of the chat. Both readouts
+stay within the pane. Use Up/Down or Page Up/Page Down to scroll. Press q
+to close a readout. A later Lantern open restores it.
 
 Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
 the repo. The runtime prompt calls the detected Python 3 command with

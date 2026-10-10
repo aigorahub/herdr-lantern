@@ -9,6 +9,8 @@ All notable changes to Lantern, by Elves are documented here.
 - Lantern opens one tab with chat on the left, Plan Usage on the top right,
   and Field Status on the bottom right. Existing verified readout watchers
   move from separate tabs into this layout without a restart.
+- Both readouts fit their pane. Keyboard controls scroll long output and
+  restore terminal settings on exit.
 - Plan Usage shows one table row per service. It aligns allowance left and
   reset times. Low allowances and failed reads use color and text. Separate
   accounts keep separate allowances within the service row. The display

@@ -588,9 +588,9 @@ quiet tabs, Daily Tasks, and Lantern Home. Never close Daily Tasks or Lantern
 Home as part of Field Status.
 
 - Show an explicitly requested view in the Field Status pane with `pane`, which opens or
-  reuses its separate tab and starts `watch`.
+  reuses its bottom right pane and starts `watch`.
   Do not paste tool output, command transcripts, or "Ran command" lines into
-  the chat. If the tab cannot be opened, give the compact plain result in
+  the chat. If the pane cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
 - Show separate Important (red) and Needs You (purple) sections. The In Motion
   (yellow), Done (green), and Keep (blue) labels are section headers, not
@@ -623,6 +623,9 @@ Home as part of Field Status.
   and Field Status on the bottom right. The command uses the explicit Lantern
   home pane ID and `--no-focus`. Reuse the panes on later requests. Move only
   verified readout watchers from old tabs into this layout. Never close Lantern Home.
+
+Both readouts stay within their pane. Use Up/Down or Page Up/Page Down to
+scroll. Press q to close a readout. A later open restores the watcher.
 
 ### Plan Usage
 

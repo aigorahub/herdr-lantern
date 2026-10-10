@@ -21,6 +21,7 @@ from pathlib import Path
 import field_status as field
 import usage_runtime as runtime
 import usage_sources as sources
+from terminal_readout import Readout
 
 NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok", "agy": "Google", "gemini": "Google"}
 CONFIG = {"version": 1, "hooks": {"enabled": False, "events": []}, "providers": [
@@ -257,7 +258,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         return f"\033[{code}m{text}\033[0m" if color else text
 
     stamp = field.eastern(datetime.fromtimestamp(now, timezone.utc)).strftime("%a %b %d %H:%M ET")
-    lines = [style("Plan Usage", "1") + "  " + stamp, ""] if width >= 44 else [style("Plan Usage", "1"), stamp, ""]
+    lines = [style("Plan Usage", "1") + "  " + stamp] if width >= 44 else [style("Plan Usage", "1"), stamp, ""]
     if snapshot.get("scan_failed"):
         lines += [style(line, "33") for line in textwrap.wrap("Herdr scan failed. Plan data is not current.", width)]
     services = {}
@@ -285,8 +286,9 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
 
     order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google"))}
     for name in sorted(services, key=lambda key: (order.get(key, 99), key)):
-        accounts = services[name]
+        accounts = sorted(services[name], key=lambda row: not bool(row.get("windows")))
         multiple = len({row["account"] for row in accounts if row.get("account")}) > 1
+        identify = multiple or (any(row.get("windows") for row in accounts) and any(not row.get("windows") for row in accounts))
         first = True
         notices = set()
         for row in accounts:
@@ -300,17 +302,17 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
                 add(cells, ["1", "33", ""])
                 first = False
                 continue
-            if multiple:
+            if identify:
                 label = f"Account {account[:6]} ({row.get('plan', 'Plan unknown')})"
                 add([name if first else "", label] + ([] if narrow else [""]), ["1", "", ""])
                 first = False
             for value in row["windows"]:
                 label = field.clean(value["label"]).removeprefix("codex ").replace("5 hours", "5h")
                 remaining = value["remaining"]
-                left = f"{label}: {remaining:g}% left"
-                if left_width >= 24 and len(label) <= 7:
+                left = f"{label}: {remaining:g}%" if not narrow else f"{label}: {remaining:g}% left"
+                if not narrow and left_width >= 18 and len(label) <= 7:
                     filled = min(5, max(0, int(remaining / 20 + 0.5)))
-                    left = f"{label} {'█' * filled}{'░' * (5 - filled)} {remaining:g}% left"
+                    left = f"{label} {'█' * filled}{'░' * (5 - filled)} {remaining:g}%"
                 reset = value.get("reset_at")
                 if reset:
                     reset_text = field.eastern(datetime.fromtimestamp(reset, timezone.utc)).strftime("%b %d %H:%M")
@@ -332,10 +334,10 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             if age >= 120:
                 status = f"Stale ({int(age)}s old)"
             if row.get("state") != "Measured":
-                status += ". Last update failed"
+                failure = field.clean(row.get("state", "Last update failed"))
+                status += ". " + (failure if failure.startswith("Last update failed") else "Last update failed: " + failure)
             source = {"codex": "Native", "claude": "CLI", "grok": "OAuth"}.get(row["provider"], row.get("source", ""))
             add([field.clean(row.get("plan", "")).title() if not multiple else "", status] + ([] if narrow else [source]), ["", "33" if age >= 120 or row.get("state") != "Measured" else "", ""])
-        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -420,6 +422,9 @@ def install(state: Path) -> Path:
 
 def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: float) -> None:
     lock, collector, shared, server = None, None, None, None
+    screen = Readout(stop) if watch else None
+    if screen:
+        screen.__enter__()
     try:
         while not stop.is_set():
             try:
@@ -461,13 +466,16 @@ def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: 
                 output = render(snapshot, color=watch and os.isatty(1))
             except (RuntimeError, OSError, ValueError) as exc:
                 output = "Plan Usage\n" + field.clean(exc, 180) + "\n"
-            if watch and os.isatty(1):
-                print("\033[2J\033[H", end="")
-            print(output, end="", flush=True)
+            if screen:
+                screen.draw(output)
+            else:
+                print(output, end="", flush=True)
             if not watch:
                 break
-            stop.wait(max(0.1, interval))
+            screen.wait(max(0.1, interval))
     finally:
+        if screen:
+            screen.__exit__()
         if collector:
             collector.close()
         if lock:

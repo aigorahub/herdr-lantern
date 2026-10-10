@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from terminal_readout import Readout
+
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m", "purple": "\x1b[35m"}
 RESET = "\x1b[0m"
@@ -448,20 +450,23 @@ def main() -> int:
             if args.interval <= 0:
                 parser.error("--interval must be positive")
             old_body = None
-            while True:
-                now = datetime.now(timezone.utc)
-                try:
-                    output = refresh(state_dir, binary, args.timeout, now, not args.plain)
-                except (RuntimeError, ValueError, OSError) as exc:
-                    output = f"FIELD STATUS unavailable: {exc}\n"
-                body = output.split("\n", 1)[1] if "\n" in output else output
-                signature = (body, eastern(now).strftime("%Y%m%d%H%M"))
-                if signature != old_body:
-                    print("\x1b[H\x1b[2J" + output, end="", flush=True)
-                    old_body = signature
-                time.sleep(args.interval)
+            with Readout() as screen:
+                while not screen.stop.is_set():
+                    now = datetime.now(timezone.utc)
+                    try:
+                        output = refresh(state_dir, binary, args.timeout, now, not args.plain and "NO_COLOR" not in os.environ)
+                    except (RuntimeError, ValueError, OSError) as exc:
+                        output = f"FIELD STATUS unavailable: {exc}\n"
+                    body = output.split("\n", 1)[1] if "\n" in output else output
+                    signature = (body, eastern(now).strftime("%Y%m%d%H%M"))
+                    if signature != old_body:
+                        screen.draw(output)
+                        old_body = signature
+                    screen.wait(args.interval)
         else:
             print(refresh(state_dir, binary, args.timeout, datetime.now(timezone.utc), not args.plain), end="")
+        return 0
+    except KeyboardInterrupt:
         return 0
     except (RuntimeError, ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"field-status: {exc}", file=sys.stderr)

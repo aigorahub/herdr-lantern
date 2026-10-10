@@ -30,3 +30,7 @@ uncertain responses, identity checks, account distinctions, unknown scopes,
 color output, and narrow widths. The full smoke and team suites run before
 review. Independent reviewers inspect the final commit. The follow on PR
 stays open until the user approves a merge.
+
+Both watchers use a terminal viewport. It keeps titles visible in small panes.
+Up/Down and Page Up/Page Down scroll. Home and End select the first or last
+page. Press q to exit. Terminal settings and cursor state restore on exit.
