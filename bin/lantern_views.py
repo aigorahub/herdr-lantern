@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open Lantern readouts in separate tabs without changing chat focus."""
+"""Open Lantern readouts beside chat without changing focus."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ from pathlib import Path
 import field_status as field
 from usage_runtime import FileLock, private_dir, server_identity
 
-VIEWS = {"field": ("Field Status", "field_status.py"), "usage": ("Plan Usage", "plan_usage.py")}
+VIEWS = {"usage": ("Plan Usage", "plan_usage.py"), "field": ("Field Status", "field_status.py")}
 
 
 def watcher_command(root: Path, state: Path, view: str, shell: str | None = None) -> str:
@@ -96,10 +96,11 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
         while not lock.acquire():
             if time.monotonic() + 0.1 >= deadline:
                 completed = field.read_json(state / "views.json", {})
-                if (completed.get("setup_complete") and completed.get("server") == server
+                if (completed.get("setup_complete") and completed.get("layout") == "split" and completed.get("server") == server
                         and completed.get("home_pane_id") == home and completed.get("workspace_id") == workspace
                         and not completed.get("errors") and all(
                             completed.get("views", {}).get(kind, {}).get("status") == "running"
+                            and completed["views"][kind].get("tab_id") == home_tab
                             and completed["views"][kind].get("command") == watcher_command(root, state, kind)
                             for kind in requested)):
                     return completed
@@ -110,67 +111,184 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
         owned = (record.get("home_pane_id") == home and record.get("server") == server
                  and bool(server["lifetime"]))
         saved = record.get("views", {}) if owned else {}
-        record = {"schema": 1, "home_pane_id": home, "workspace_id": workspace,
+        record = {"schema": 2, "layout": "split", "home_pane_id": home, "workspace_id": workspace,
                   "server": server, "views": saved, "errors": [], "setup_complete": False}
         field.write_json(path, record)
-        panes = []
-
         def check_context(end: float) -> None:
             if server_identity(binary, min(2, max(0.1, end - time.monotonic()))) != server:
                 raise RuntimeError("Herdr server identity changed")
             current_chat = call(["pane", "get", home], end).get("pane", {})
-            if current_chat.get("label") != "Lantern" or current_chat.get("workspace_id") != workspace:
+            if (current_chat.get("label") != "Lantern" or current_chat.get("workspace_id") != workspace
+                    or current_chat.get("tab_id") != home_tab):
                 raise RuntimeError("Lantern chat identity changed")
+
+        def find_target(kind: str, end: float):
+            label, _ = VIEWS[kind]
+            tabs = call(["tab", "list", "--workspace", workspace], end).get("tabs")
+            panes = call(["pane", "list", "--workspace", workspace], end).get("panes")
+            if not isinstance(tabs, list) or not isinstance(panes, list):
+                raise RuntimeError("Readout layout unavailable")
+            current = saved.get(kind, {})
+            candidates = []
+            for pane in panes:
+                tab = next((t for t in tabs if t.get("tab_id") == pane.get("tab_id")), {})
+                if (pane.get("workspace_id") != workspace or pane.get("pane_id") == home
+                        or tab.get("workspace_id") != workspace):
+                    continue
+                dedicated = tab.get("label") == label and tab.get("pane_count") == 1
+                if (pane.get("label") == label or dedicated
+                        or pane.get("pane_id") == current.get("pane_id")):
+                    candidates.append(pane)
+            for pane in candidates:
+                pid = pane.get("pane_id")
+                if not pid or pane.get("agent"):
+                    continue
+                info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
+                status = occupancy(info, root, state, kind)
+                if status == "running":
+                    return pane, status
+                if (current.get("pane_id") == pid and (current.get("tab_id") == pane.get("tab_id")
+                         or current.get("layout_phase") == "moving" and pane.get("label") == label)
+                        and current.get("command") == watcher_command(root, state, kind)):
+                    settle = min(end, time.monotonic() + 2)
+                    while status not in ("idle", "running") and time.monotonic() < settle:
+                        time.sleep(0.1)
+                        live = call(["pane", "get", pid], end).get("pane", {})
+                        if live.get("agent") or live.get("tab_id") != pane.get("tab_id"):
+                            raise RuntimeError("Recorded readout identity changed")
+                        info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
+                        status = occupancy(info, root, state, kind)
+                    if status not in ("idle", "running"):
+                        raise RuntimeError("Recorded readout is occupied or not ready")
+                    return pane, status
+            # Recover a running watcher after a lost move/rename response.
+            for pane in panes:
+                if (pane.get("tab_id") != home_tab or pane.get("pane_id") == home
+                        or pane.get("agent") or pane in candidates):
+                    continue
+                info = call(["pane", "process-info", "--pane", pane["pane_id"]], end).get("process_info", {})
+                if occupancy(info, root, state, kind) == "running":
+                    return pane, "running"
+            if candidates:
+                raise RuntimeError("Unowned readout label conflict")
+            return None, None
+
+        def place(kind: str, pane: dict | None, end: float) -> dict:
+            # Only exact watchers or saved idle shells can move into the home tab.
+            # Keep existing ratios when both readouts are already in place.
+            other = "field" if kind == "usage" else "usage"
+            sibling, _ = find_target(other, end)
+            anchor = sibling["pane_id"] if sibling and sibling.get("tab_id") == home_tab else home
+            direction = "down" if anchor != home else "right"
+            if not pane or pane.get("tab_id") != home_tab:
+                check_context(end)
+                layout = call(["pane", "layout", "--pane", home], end).get("layout", {})
+                allowed = {home, anchor}
+                if any(p.get("pane_id") not in allowed for p in layout.get("panes", [])):
+                    raise RuntimeError("Home tab contains an unowned pane")
+                if pane:
+                    live = call(["pane", "get", pane["pane_id"]], end).get("pane", {})
+                    info = call(["pane", "process-info", "--pane", pane["pane_id"]], end).get("process_info", {})
+                    if (live.get("agent") or live.get("workspace_id") != workspace
+                            or live.get("tab_id") != pane.get("tab_id")
+                            or occupancy(info, root, state, kind) not in ("idle", "running")):
+                        raise RuntimeError("Readout identity changed before move")
+                    response = call(["pane", "move", pane["pane_id"], "--tab", home_tab,
+                                     "--target-pane", anchor, "--split", direction,
+                                     "--ratio", "0.6" if direction == "down" else "0.5", "--no-focus"], end)
+                    pane = response.get("move_result", {}).get("pane", {})
+                else:
+                    pane = call(["pane", "split", anchor, "--direction", direction,
+                                 "--ratio", "0.6" if direction == "down" else "0.5", "--cwd", cwd, "--no-focus"], end).get("pane", {})
+                if (not pane.get("pane_id") or pane.get("pane_id") == home
+                        or pane.get("tab_id") != home_tab or pane.get("workspace_id") != workspace):
+                    raise RuntimeError("Herdr returned no readout pane in the home tab")
+                # Save ownership before a label or shell command can fail.
+                record["views"][kind] = {"tab_id": home_tab, "pane_id": pane["pane_id"],
+                    "command": watcher_command(root, state, kind), "status": "starting"}
+                field.write_json(path, record)
+                call(["pane", "rename", pane["pane_id"], VIEWS[kind][0]], end)
+            if sibling and sibling.get("tab_id") == home_tab:
+                layout = call(["pane", "layout", "--pane", home], end).get("layout", {})
+                rects = {p["pane_id"]: p.get("rect", {}) for p in layout.get("panes", [])}
+                usage = rects.get(pane["pane_id"] if kind == "usage" else sibling["pane_id"], {})
+                activity = rects.get(pane["pane_id"] if kind == "field" else sibling["pane_id"], {})
+                chat_rect = rects.get(home, {})
+                if (not usage or not activity or not chat_rect
+                        or usage.get("x") != activity.get("x")
+                        or usage["x"] <= chat_rect["x"]):
+                    raise RuntimeError("Readout panes are outside the right column")
+                if usage["y"] > activity["y"]:
+                    check_context(end)
+                    for target, target_kind in ((pane, kind), (sibling, other)):
+                        settle = min(end, time.monotonic() + 2)
+                        while True:
+                            live = call(["pane", "get", target["pane_id"]], end).get("pane", {})
+                            info = call(["pane", "process-info", "--pane", target["pane_id"]], end).get("process_info", {})
+                            status = occupancy(info, root, state, target_kind)
+                            if (live.get("agent") or live.get("tab_id") != home_tab
+                                    or live.get("workspace_id") != workspace):
+                                raise RuntimeError("Readout identity changed before layout repair")
+                            if status == "running" or (status == "idle" and shell_ready(binary,
+                                    target["pane_id"], info, min(2, max(.01, end - time.monotonic())))):
+                                break
+                            if time.monotonic() >= settle:
+                                raise RuntimeError("Readout shell is occupied or not ready for layout repair")
+                            time.sleep(.1)
+                    usage_pane = pane if kind == "usage" else sibling
+                    field_pane = pane if kind == "field" else sibling
+                    # Herdr swap focuses its source. Move the lower readout under
+                    # usage with no focus instead. Detaching it expands usage first.
+                    record["views"]["field"] = dict(record["views"].get("field", {}),
+                        pane_id=field_pane["pane_id"], tab_id=home_tab, layout_phase="moving",
+                        command=watcher_command(root, state, "field"))
+                    field.write_json(path, record)
+                    # A move to the current tab is a no-op. Move through an owned
+                    # temporary tab, then return below usage. Both moves keep focus.
+                    staged = call(["pane", "move", field_pane["pane_id"], "--new-tab",
+                                   "--workspace", workspace, "--label", VIEWS["field"][0],
+                                   "--no-focus"], end).get("move_result", {}).get("pane", {})
+                    if (not staged.get("pane_id") or staged.get("workspace_id") != workspace
+                            or not staged.get("tab_id") or staged.get("tab_id") == home_tab):
+                        raise RuntimeError("Herdr returned no temporary readout tab")
+                    record["views"]["field"].update(pane_id=staged["pane_id"], tab_id=staged["tab_id"])
+                    field.write_json(path, record)
+                    check_context(end)
+                    live = call(["pane", "get", staged["pane_id"]], end).get("pane", {})
+                    info = call(["pane", "process-info", "--pane", staged["pane_id"]], end).get("process_info", {})
+                    if (live.get("agent") or live.get("tab_id") != staged["tab_id"]
+                            or live.get("workspace_id") != workspace
+                            or occupancy(info, root, state, "field") not in ("idle", "running")):
+                        raise RuntimeError("Readout identity changed during layout repair")
+                    moved = call(["pane", "move", staged["pane_id"], "--tab", home_tab,
+                                  "--target-pane", usage_pane["pane_id"], "--split", "down",
+                                  "--ratio", "0.6", "--no-focus"], end).get("move_result", {}).get("pane", {})
+                    if (not moved.get("pane_id") or moved.get("tab_id") != home_tab
+                            or moved.get("workspace_id") != workspace):
+                        raise RuntimeError("Herdr returned no readout pane after layout repair")
+                    record["views"]["field"] = dict(record["views"].get("field", {}),
+                        pane_id=moved["pane_id"], tab_id=home_tab,
+                        command=watcher_command(root, state, "field"))
+                    record["views"]["field"].pop("layout_phase", None)
+                    field.write_json(path, record)
+                    if kind == "field":
+                        pane = moved
+            return pane
 
         for kind in requested:
             end = min(deadline, time.monotonic() + 7)
             label, _ = VIEWS[kind]
             try:
-                tabs = call(["tab", "list", "--workspace", workspace], end).get("tabs")
-                panes = call(["pane", "list", "--workspace", workspace], end).get("panes")
-                if not isinstance(tabs, list) or not isinstance(panes, list):
-                    raise RuntimeError("Readout layout unavailable")
-                candidates = []
-                for tab in tabs:
-                    if tab.get("workspace_id") != workspace or tab.get("label") != label:
-                        continue
-                    roots = [p for p in panes if p.get("tab_id") == tab.get("tab_id")]
-                    if tab.get("pane_count") == 1 and len(roots) == 1 and tab.get("tab_id") != home_tab:
-                        candidates.append((tab, roots[0]))
-                target = None
-                current = saved.get(kind, {})
-                for tab, pane in candidates:
-                    pid = pane.get("pane_id")
-                    if not pid or pid == home or pane.get("agent"):
-                        continue
-                    info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
-                    status = occupancy(info, root, state, kind)
-                    if status == "running":
-                        target = (tab, pane, False, status)
-                        break
-                    if (current.get("pane_id") == pid and current.get("tab_id") == tab.get("tab_id")
-                            and current.get("command") == watcher_command(root, state, kind)):
-                        if status != "idle":
-                            raise RuntimeError("Recorded readout is occupied or not ready")
-                        target = (tab, pane, False, status)
-                        break
-                if target is None:
-                    if any(t.get("label") == label for t in tabs):
-                        raise RuntimeError("Unowned readout label conflict")
-                    check_context(end)
-                    created = call(["tab", "create", "--workspace", workspace, "--cwd", cwd,
-                                    "--label", label, "--no-focus"], end)
-                    tab, pane = created.get("tab", {}), created.get("root_pane", {})
-                    if (not tab.get("tab_id") or not pane.get("pane_id") or pane.get("pane_id") == home
-                            or tab.get("tab_id") == home_tab or tab.get("workspace_id") != workspace):
-                        raise RuntimeError("Herdr returned no new readout root pane")
-                    target = (tab, pane, True, "starting")
-                tab, pane, created, status = target
+                pane, status = find_target(kind, end)
+                created = pane is None
+                pane = place(kind, pane, end)
+                tab = {"tab_id": home_tab}
                 pid = pane["pane_id"]
+                status = status or "starting"
                 entry = {"tab_id": tab["tab_id"], "pane_id": pid, "created": created,
                          "status": status, "command": watcher_command(root, state, kind)}
                 record["views"][kind] = entry
-                field.write_json(path, record)  # Own the new tab before submission.
+                field.write_json(path, record)  # Own the pane before submission.
                 ready = status == "running"
                 while not ready:
                     info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
@@ -213,10 +331,6 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                 if kind in record["views"]:
                     record["views"][kind]["status"] = "start not confirmed"
             field.write_json(path, record)
-        legacy = [p for p in panes
-                  if p.get("tab_id") == home_tab and p.get("label") == "Field Status"]
-        if legacy:
-            record["notice"] = "Legacy Field Status side pane remains open"
         record["setup_complete"] = True
         field.write_json(path, record)
         return record

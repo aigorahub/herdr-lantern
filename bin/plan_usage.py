@@ -21,8 +21,9 @@ from pathlib import Path
 import field_status as field
 import usage_runtime as runtime
 import usage_sources as sources
+from terminal_readout import Readout
 
-NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok Build", "agy": "Antigravity"}
+NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok", "agy": "Google", "gemini": "Google"}
 CONFIG = {"version": 1, "hooks": {"enabled": False, "events": []}, "providers": [
     {"id": provider, "enabled": True, "cookieSource": "off", "source": source}
     for provider, source in (("claude", "cli"), ("grok", "oauth"))]}
@@ -245,46 +246,99 @@ def cached_snapshot(shared: Path, server: dict) -> dict:
     return value
 
 
-def render(snapshot: dict, now: float | None = None, width: int | None = None) -> str:
+def render(snapshot: dict, now: float | None = None, width: int | None = None,
+           color: bool = False) -> str:
+    """One service row, with aligned allowance windows inside each cell."""
+    import textwrap
     now = time.time() if now is None else now
     width = max(20, width or shutil.get_terminal_size((88, 24)).columns)
+    color = color and "NO_COLOR" not in os.environ and os.environ.get("TERM") != "dumb"
+
+    def style(text: str, code: str) -> str:
+        return f"\033[{code}m{text}\033[0m" if color else text
+
     stamp = field.eastern(datetime.fromtimestamp(now, timezone.utc)).strftime("%a %b %d %H:%M ET")
-    lines = ["Plan Usage", stamp, ""]
+    lines = [style("Plan Usage", "1") + "  " + stamp] if width >= 44 else [style("Plan Usage", "1"), stamp, ""]
     if snapshot.get("scan_failed"):
-        lines.extend(["Herdr scan failed. Tab data is not current.", ""])
-    rows = snapshot.get("rows", [])
-    if not rows:
-        lines.append("No agent plans in the current tab list.")
-    for row in rows:
-        title = NAMES.get(row["provider"], field.clean(row["provider"]))
-        if row.get("account"):
-            title += f" / {row.get('plan', 'Plan unknown')} / Account {row['account'][:6]}"
-        lines.append(title)
-        lines.append(f"{row['tabs']} open agent tab" + ("s" if row["tabs"] != 1 else ""))
-        if row.get("windows"):
-            age = max(0, now - row["observed_at"])
-            lines.append(f"Updated {int(age)} seconds ago" + (". Stale" if age >= 120 else ""))
-            if row["state"] != "Measured":
-                lines.append("Last update failed: " + row["state"])
+        lines += [style(line, "33") for line in textwrap.wrap("Herdr scan failed. Plan data is not current.", width)]
+    services = {}
+    for row in snapshot.get("rows", []):
+        name = NAMES.get(row["provider"], field.clean(row["provider"]))
+        services.setdefault(name, []).append(row)
+    if not services:
+        return "\n".join(lines + ["No open service plans."]) + "\n"
+    narrow = width < 44
+    service_width = min(10, max(7, width // 6))
+    left_width = width - service_width - 3 if narrow else (width - service_width - 6) // 2 + 2
+    reset_width = 0 if narrow else width - service_width - left_width - 6
+    widths = [service_width, left_width] if narrow else [service_width, left_width, reset_width]
+    heading = ["Service", "Left (ET)"] if narrow else ["Service", "Left", "Reset (ET)"]
+    lines.append(style(" | ".join(t.ljust(w) for t, w in zip(heading, widths)), "1"))
+    lines.append(style("-+-".join("-" * w for w in widths), "2"))
+
+    def add(cells: list[str], codes: list[str] | None = None):
+        parts = [textwrap.wrap(field.clean(cell, 500), width=w) or [""] for cell, w in zip(cells, widths)]
+        for index in range(max(map(len, parts))):
+            values = [part[index] if index < len(part) else "" for part in parts]
+            lines.append(" | ".join(style(value.ljust(w) if i < len(widths) - 1 else value, (codes or ["", "", ""])[i])
+                                    if (codes or ["", "", ""])[i] else (value.ljust(w) if i < len(widths) - 1 else value)
+                                    for i, (value, w) in enumerate(zip(values, widths))).rstrip())
+
+    order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google"))}
+    for name in sorted(services, key=lambda key: (order.get(key, 99), key)):
+        accounts = sorted(services[name], key=lambda row: not bool(row.get("windows")))
+        multiple = len({row["account"] for row in accounts if row.get("account")}) > 1
+        identify = multiple or (any(row.get("windows") for row in accounts) and any(not row.get("windows") for row in accounts))
+        first = True
+        notices = set()
+        for row in accounts:
+            account = str(row.get("account", ""))
+            if not row.get("windows"):
+                notice = field.clean(row.get("state", "Limits unavailable"))
+                if notice in notices:
+                    continue
+                notices.add(notice)
+                cells = [name if first else "", notice] + ([] if narrow else ["Unavailable"])
+                add(cells, ["1", "33", ""])
+                first = False
+                continue
+            if identify:
+                label = f"Account {account[:6]} ({row.get('plan', 'Plan unknown')})"
+                add([name if first else "", label] + ([] if narrow else [""]), ["1", "", ""])
+                first = False
             for value in row["windows"]:
-                lines.append(f"{value['label']}: {value['remaining']:g}% left")
+                label = field.clean(value["label"]).removeprefix("codex ").replace("5 hours", "5h")
+                remaining = value["remaining"]
+                left = f"{label}: {remaining:g}%" if not narrow else f"{label}: {remaining:g}% left"
+                if not narrow and left_width >= 18 and len(label) <= 7:
+                    filled = min(5, max(0, int(remaining / 20 + 0.5)))
+                    left = f"{label} {'█' * filled}{'░' * (5 - filled)} {remaining:g}%"
                 reset = value.get("reset_at")
                 if reset:
-                    text = field.eastern(datetime.fromtimestamp(reset, timezone.utc)).strftime("%a %b %d %H:%M ET")
-                    lines.append("Reset " + text + (" (past)" if reset <= now else ""))
-                elif value.get("reset_text"):
-                    lines.append("Reset " + value["reset_text"])
+                    reset_text = field.eastern(datetime.fromtimestamp(reset, timezone.utc)).strftime("%b %d %H:%M")
+                    if reset <= now:
+                        reset_text += " (past)"
                 else:
-                    lines.append("Reset time unavailable")
+                    reset_text = value.get("reset_text") or "Unavailable"
+                cells = [name if first else "", left] + ([] if narrow else [reset_text])
+                code = "1;31" if remaining <= 10 else "1;33" if remaining <= 25 else "1"
+                add(cells, ["1", code, ""])
+                if narrow:
+                    add(["", "Reset " + reset_text])
+                first = False
             for credit in row.get("credits", []):
-                text = "Unlimited" if credit.get("unlimited") else f"{credit['balance']:g} {credit['unit']}"
-                lines.append(credit["label"] + ": " + text)
-            lines.append("Source: " + row["source"])
-        else:
-            lines.append(row["state"])
-        lines.append("")
-    import textwrap
-    return "\n".join(part for line in lines for part in (textwrap.wrap(line, width=width) or [""])) + "\n"
+                balance = "Unlimited" if credit.get("unlimited") else f"{credit['balance']:g} {credit['unit']}"
+                add(["", balance] + ([] if narrow else [credit["label"]]))
+            age = max(0, now - row["observed_at"])
+            status = f"Updated {int(age)}s ago"
+            if age >= 120:
+                status = f"Stale ({int(age)}s old)"
+            if row.get("state") != "Measured":
+                failure = field.clean(row.get("state", "Last update failed"))
+                status += ". " + (failure if failure.startswith("Last update failed") else "Last update failed: " + failure)
+            source = {"codex": "Native", "claude": "CLI", "grok": "OAuth"}.get(row["provider"], row.get("source", ""))
+            add([field.clean(row.get("plan", "")).title() if not multiple else "", status] + ([] if narrow else [source]), ["", "33" if age >= 120 or row.get("state") != "Measured" else "", ""])
+    return "\n".join(lines).rstrip() + "\n"
 
 
 ASSETS = {
@@ -368,6 +422,9 @@ def install(state: Path) -> Path:
 
 def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: float) -> None:
     lock, collector, shared, server = None, None, None, None
+    screen = Readout(stop) if watch else None
+    if screen:
+        screen.__enter__()
     try:
         while not stop.is_set():
             try:
@@ -406,16 +463,19 @@ def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: 
                     snapshot = collector.write()
                 else:
                     snapshot = cached_snapshot(shared, server)
-                output = render(snapshot)
+                output = render(snapshot, color=watch and os.isatty(1))
             except (RuntimeError, OSError, ValueError) as exc:
                 output = "Plan Usage\n" + field.clean(exc, 180) + "\n"
-            if watch and os.isatty(1):
-                print("\033[2J\033[H", end="")
-            print(output, end="", flush=True)
+            if screen:
+                screen.draw(output)
+            else:
+                print(output, end="", flush=True)
             if not watch:
                 break
-            stop.wait(max(0.1, interval))
+            screen.wait(max(0.1, interval))
     finally:
+        if screen:
+            screen.__exit__()
         if collector:
             collector.close()
         if lock:

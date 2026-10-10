@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from terminal_readout import Readout
+
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m", "purple": "\x1b[35m"}
 RESET = "\x1b[0m"
@@ -124,7 +126,8 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
     """Use Lantern's gated Herdr wrapper for layout changes."""
     command = herdr_command(binary, args)
     env = herdr_environment(binary)
-    if args[:2] in (["pane", "run"], ["tab", "create"]):
+    if args[:2] in (["pane", "run"], ["pane", "split"], ["pane", "move"],
+                    ["pane", "rename"], ["tab", "create"]):
         env["HERDR_HELPER_OK"] = "1"
     try:
         proc = subprocess.run(command, capture_output=True, text=True,
@@ -394,7 +397,7 @@ def main() -> int:
     parser.add_argument("--plain", action="store_true", help="omit ANSI colors")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("refresh", help="refresh and print compact field view")
-    pane = sub.add_parser("pane", help="open or reuse the Field Status tab")
+    pane = sub.add_parser("pane", help="open or reuse the Field Status pane")
     pane.add_argument("--setup-timeout", type=float, default=15)
     watch = sub.add_parser("watch", help="redraw only when live field or notes change")
     watch.add_argument("--interval", type=float, default=5)
@@ -447,20 +450,23 @@ def main() -> int:
             if args.interval <= 0:
                 parser.error("--interval must be positive")
             old_body = None
-            while True:
-                now = datetime.now(timezone.utc)
-                try:
-                    output = refresh(state_dir, binary, args.timeout, now, not args.plain)
-                except (RuntimeError, ValueError, OSError) as exc:
-                    output = f"FIELD STATUS unavailable: {exc}\n"
-                body = output.split("\n", 1)[1] if "\n" in output else output
-                signature = (body, eastern(now).strftime("%Y%m%d%H%M"))
-                if signature != old_body:
-                    print("\x1b[H\x1b[2J" + output, end="", flush=True)
-                    old_body = signature
-                time.sleep(args.interval)
+            with Readout() as screen:
+                while not screen.stop.is_set():
+                    now = datetime.now(timezone.utc)
+                    try:
+                        output = refresh(state_dir, binary, args.timeout, now, not args.plain and "NO_COLOR" not in os.environ)
+                    except (RuntimeError, ValueError, OSError) as exc:
+                        output = f"FIELD STATUS unavailable: {exc}\n"
+                    body = output.split("\n", 1)[1] if "\n" in output else output
+                    signature = (body, eastern(now).strftime("%Y%m%d%H%M"))
+                    if signature != old_body:
+                        screen.draw(output)
+                        old_body = signature
+                    screen.wait(args.interval)
         else:
             print(refresh(state_dir, binary, args.timeout, datetime.now(timezone.utc), not args.plain), end="")
+        return 0
+    except KeyboardInterrupt:
         return 0
     except (RuntimeError, ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"field-status: {exc}", file=sys.stderr)

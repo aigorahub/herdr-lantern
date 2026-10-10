@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -118,9 +118,8 @@ Code gets `CLAUDE.md`.
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
 working toward?” for that readout. Ask “Field Status” or “what’s going on”
-to restore the Field Status tab. Lantern opens the chat, Field Status, and
-Plan Usage in separate tabs at startup. Each tab has one pane. Focus stays
-on the chat. The repo-backed
+to restore the Field Status pane. Lantern opens three panes in one tab. Chat fills the left side. Plan Usage
+fills the top right. Field Status fills the bottom right. Focus stays on chat. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
 date/time, separate red Important and purple Needs You sections, and every
 open tab. Human-readable workspace names are yellow; In Motion, Done, and
@@ -129,7 +128,9 @@ only other sessions explicitly pinned by the user; hiding a quiet tab does not
 close it. Done agents show a verified short outcome, and verified settled
 sessions disappear immediately after closure. Daily Tasks and Lantern Home
 are never closed by this view. The watcher redraws when field state or
-notes change and leaves command transcripts out of the chat.
+notes change and leaves command transcripts out of the chat. Both readouts
+stay within the pane. Use Up/Down or Page Up/Page Down to scroll. Press q
+to close a readout. A later Lantern open restores it.
 
 Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
 the repo. The runtime prompt calls the detected Python 3 command with
@@ -144,13 +145,16 @@ Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
 
 Plan Usage shows accounts with an open agent tab anywhere on the current
 Herdr server. Idle and Done tabs count. Tabs hidden from Field Status Keep
-still count. Several models on one account share a row. Separate accounts
-keep separate rows. Account labels contain an opaque ID, not an email.
-Each allowance shows its remaining percentage and reset time. Credits have
+still count. The table has one row per service: Claude, OpenAI, Grok, Google, and other
+open services. It does not list agents or tab counts. Separate accounts keep
+separate allowances within the service row. Account labels use opaque IDs.
+The table aligns remaining percentages and reset times. Color and text show
+low allowances and failed reads. Terminal watch output uses color. NO_COLOR
+disables color. Plain snapshots have no color. Each allowance keeps its reset time. Credits have
 a separate value. A past reset time does not mean that usage has reset.
 
 The watcher scans tabs every five seconds and reads usage every 60 seconds.
-All Plan Usage tabs on the server share one collector. Ordinary read failures
+All Plan Usage panes on the server share one collector. Ordinary read failures
 keep the last measured value and its age. An unknown account or a lost login
 hides the prior usage value. Values become stale after 120 seconds.
 Unknown usage has no percentage. Antigravity shows Account unknown because
@@ -162,7 +166,7 @@ show Dependency unavailable because CodexBar has no Windows release asset.
 Grok uses the verified OAuth account source with cookies off. A process with
 `XAI_API_KEY`, `GROK_API_KEY`, `GROK_OAUTH_TOKEN`, or `XAI_BASE_URL` set shows
 Account unknown. Inherited values also cause this state. A key's presence
-does not prove which billing mode the tab uses. These rows show tab counts
+does not prove which billing mode the tab uses. These rows show Account unknown
 without subscription percentages. API credentials and custom provider
 settings can also prevent verified Codex or Claude account readings.
 
@@ -176,7 +180,7 @@ An absolute `LANTERN_CODEXBAR_BIN` can select a CLI of the same version.
 An invalid explicit path does not fall back to another tool.
 
 Use the detected Python 3 command with `$LANTERN_PLAN_USAGE pane` to restore
-the usage tab. `refresh` prints the shared cache. `collect` makes one bounded
+the usage pane. `refresh` prints the shared cache. `collect` makes one bounded
 collection when no watcher owns the collector. State stays outside the repo.
 The readout does not send prompts or start model turns.
 
