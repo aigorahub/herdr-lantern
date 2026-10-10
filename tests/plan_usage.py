@@ -500,7 +500,7 @@ class ViewTests(unittest.TestCase):
             "tabs": {"w9:t1": {"tab_id": "w9:t1", "workspace_id": "w9", "label": "home", "pane_count": 1}},
             "panes": {"w9:p1": {"pane_id": "w9:p1", "tab_id": "w9:t1", "workspace_id": "w9", "label": "Lantern", "agent": "codex"}}}))
         self.fake = self.root / "herdr"
-        self.fake.write_text('#!/bin/sh\nexec "$VIEWS_PYTHON" "$VIEWS_BACKEND" "$@"\n')
+        self.fake.write_bytes(b'#!/bin/sh\nexec "$VIEWS_PYTHON" "$VIEWS_BACKEND" "$@"\n')
         self.fake.chmod(0o700)
         self.env = {"HERDR_ENV": "1", "HERDR_REAL": str(self.fake), "VIEWS_PYTHON": sys.executable,
                     "VIEWS_BACKEND": str(ROOT / "tests/fixtures/views_herdr.py"), "VIEWS_FIXTURE": str(self.fixture),
@@ -631,11 +631,12 @@ class ViewTests(unittest.TestCase):
         fake_bin = self.root / "bin"
         fake_bin.mkdir()
         agent = fake_bin / "codex"
-        agent.write_text('#!/bin/sh\nprintf "fixture chat started\\n"\n')
+        agent.write_bytes(b'#!/bin/sh\nprintf "fixture chat started\\n"\n')
         agent.chmod(0o700)
         conf = self.root / "config"
         conf.mkdir()
-        (conf / "helper.conf").write_text('HELPER_AGENT=codex\nHELPER_MODEL=\nHELPER_PERMISSION=smart\n')
+        # Shell fixtures need LF endings on Windows as well as Unix.
+        (conf / "helper.conf").write_bytes(b'HELPER_AGENT=codex\nHELPER_MODEL=\nHELPER_PERMISSION=smart\n')
         env = dict(os.environ, HERDR_PLUGIN_ROOT=str(ROOT), HERDR_PLUGIN_STATE_DIR=str(self.state.parent),
                    HERDR_PLUGIN_CONFIG_DIR=str(conf), HERDR_WORKSPACE_ID="w9", HERDR_PANE_ID="w9:p1",
                    HERDR_BIN_PATH=str(self.fake),
