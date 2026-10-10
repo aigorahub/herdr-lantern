@@ -635,7 +635,11 @@ agent tab in any workspace on this Herdr server. Idle and Done tabs count.
 Field Status Keep visibility does not select usage plans. Group by verified
 provider and account for collection. Display one table row per service.
 Keep each verified account allowance distinct within that service row.
-Do not display agents or tab counts. Antigravity shows Account unknown until a source can prove its account.
+Show only session and weekly percentages and their reset times in the main table.
+Do not display agents, tab counts, account IDs, model IDs, plan names, credits,
+or source details. Each period shows its lowest remaining allowance and that
+allowance's reset time. Never add separate limits. Keep separate logins on
+separate lines within the service row. Antigravity shows Account unknown until a source can prove its account.
 Unknown usage has no percentage. Do not assign another account's usage to it.
 Grok uses the verified OAuth source with cookies off. If its process has an
 API key, OAuth token, or base URL override, show Account unknown. Inherited
@@ -643,9 +647,9 @@ values also count. Key presence does not prove the tab's billing mode.
 Unknown accounts show Account unknown without subscription percentages. Windows shows
 Account unknown for Codex and Dependency unavailable for Claude and Grok.
 
-Each allowance has its own remaining percentage, reset time, source, and age.
+The private cache keeps each allowance's percentage, reset time, source, and age.
 Values become stale after 120 seconds. A past reset does not prove a full
-allowance. Credits have a separate value. Missing access or a failed read must
+allowance. Missing access or a failed read must
 stay visible. The shared collector scans every five seconds and reads usage
 every 60 seconds. It does not send prompts or start model turns. Do not
 answer another agent's approval dialog to collect usage. Missing CodexBar

@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.2** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -147,11 +147,15 @@ Plan Usage shows accounts with an open agent tab anywhere on the current
 Herdr server. Idle and Done tabs count. Tabs hidden from Field Status Keep
 still count. The table has one row per service: Claude, OpenAI, Grok, Google, and other
 open services. It does not list agents or tab counts. Separate accounts keep
-separate allowances within the service row. Account labels use opaque IDs.
-The table aligns remaining percentages and reset times. Color and text show
-low allowances and failed reads. Terminal watch output uses color. NO_COLOR
-disables color. Plain snapshots have no color. Each allowance keeps its reset time. Credits have
-a separate value. A past reset time does not mean that usage has reset.
+separate allowances within the service row. The table shows Session, Session
+reset, Week, and Week reset. It omits account IDs, model IDs, plan names,
+credits, and source details. Each period shows its lowest remaining allowance
+and that allowance's reset time. It does not add values from separate limits.
+Separate logins use separate lines within a service row. Narrow panes put
+reset times below percentages. All reset times use ET.
+Color shows low allowances. A warning marks stale values and failed reads.
+NO_COLOR disables color. Plain snapshots have no color.
+A past reset time does not mean that usage has reset.
 
 The watcher scans tabs every five seconds and reads usage every 60 seconds.
 All Plan Usage panes on the server share one collector. Ordinary read failures
