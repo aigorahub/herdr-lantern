@@ -69,6 +69,7 @@ if [ -n "$workspace" ]; then
     "$herdr" workspace focus "$workspace" >/dev/null 2>&1 || true
     if "$herdr" plugin pane focus "$pane"; then
         printf '%s\n' "$workspace" >"$workspace_file" || true
+        helper_setup_views "$plugin_root" "$state_dir" "$workspace" "$pane" "$HOME" "$herdr" || true
         exit 0
     fi
     # The chat quit between the check and the focus. Seat a new one, and
@@ -119,6 +120,7 @@ if [ -z "$root_pane" ]; then
         printf '%s\n' "$running" >"$pane_file" || true
         "$herdr" workspace focus "$workspace" >/dev/null 2>&1 || true
         if "$herdr" plugin pane focus "$running"; then
+            helper_setup_views "$plugin_root" "$state_dir" "$workspace" "$running" "$HOME" "$herdr" || true
             exit 0
         fi
         # It went away too. Seat a new one below.
@@ -211,4 +213,5 @@ if [ -n "$root_pane" ]; then
 fi
 
 "$herdr" workspace focus "$workspace" >/dev/null 2>&1 || true
+helper_setup_views "$plugin_root" "$state_dir" "$workspace" "$pane" "$HOME" "$herdr" || true
 printf '%s\n' "$opened"

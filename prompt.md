@@ -64,7 +64,8 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "clean completed sessions in <repo/workspace>" | Inspect the named scope, verify durable results and dependency gates, then `herdr tab close <tab_id>` for eligible tabs | Close only settled sessions whose edits are committed or whose findings are saved, whose required checks pass, and which no active task depends on. Recheck identity immediately before close. Never close Lantern home. |
 | "evening shutdown", "nightly" | The external `hsh evening` / `hsh nightly` action prompts this audit, verifies `$LANTERN_HERD_STATE_DIR/evening-handoff.md`, then closes only this Lantern pane | Dependency-audit the full field. Preserve active, unresolved, ambiguous, or depended-on work. Close only completed explicitly temporary workspaces that pass every cleanup gate. Atomically write the compact handoff before the outer action may close Lantern home. Never stop the Herdr server. |
 | morning startup | Run `hsh morning` outside Herdr | Start/attach Herdr, create a fresh Lantern session, load `evening-handoff.md`, reconcile it with the live field, and report stale facts rather than trusting them. |
-| "Field Status", "what's going on", "status", "show the field" | Detected Python 3 command with `$LANTERN_FIELD_STATUS pane` | Open or reuse the compact field view in the side pane. Never paste a Ran command transcript. See "Field Status". |
+| "Field Status", "what's going on", "status", "show the field" | Detected Python 3 command with `$LANTERN_FIELD_STATUS pane` | Restore the Field Status tab. Never paste a Ran command transcript. See "Field Status". |
+| "Plan Usage", "usage limits", "plan limits" | Detected Python 3 command with `$LANTERN_PLAN_USAGE pane` | Restore the Plan Usage tab. Use `refresh` for cached values. See "Plan Usage". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Open it. Ask only when more than one target matches. |
 | "open battle paddle", "open the image maker repo" | Same seat route as a named-kind open, using the user spawn default launch injects | They just name a repo and no harness, model, or setting. Do not ask. Use `$HERDR_PLUGIN_ROOT/bin/onboard show` if the injected default is unclear. |
 | "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, one `herdr agent prompt` that starts with the workspace brief, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
@@ -586,10 +587,10 @@ prints a compact view with ET date/time. Keep every open tab visible, including
 quiet tabs, Daily Tasks, and Lantern Home. Never close Daily Tasks or Lantern
 Home as part of Field Status.
 
-- Show an explicitly requested view in the Field Status side pane with `pane`, which opens or
-  reuses a right-side pane beside the Lantern Home pane and starts `watch`.
+- Show an explicitly requested view in the Field Status tab with `pane`, which opens or
+  reuses its separate tab and starts `watch`.
   Do not paste tool output, command transcripts, or "Ran command" lines into
-  the chat. If the side pane cannot be opened, give the compact plain result in
+  the chat. If the tab cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
 - Show separate Important (red) and Needs You (purple) sections. The In Motion
   (yellow), Done (green), and Keep (blue) labels are section headers, not
@@ -618,10 +619,33 @@ Home as part of Field Status.
 - Refresh at meaningful agent completion, closure, and review events. The
   watcher redraws when field rows, notes, or the ET minute change. Keep existing recurring monitors.
   Do not turn an idle event into Done or a user interruption.
-- The first Field Status request opens one reusable right-side pane beside
-  Lantern Home. The command uses the explicit Lantern home pane ID,
-  `--no-focus`, and a compact width. Reuse that pane on later requests; do not
-  create another split. Never close Lantern Home.
+- Startup opens chat, Field Status, and Plan Usage in separate tabs.
+  Each tab has one pane. The command uses the explicit Lantern home pane ID
+  and `--no-focus`. Reuse the readout tab on later requests. Never close Lantern Home.
+
+### Plan Usage
+
+Use `$LANTERN_PLAN_USAGE pane` with the detected Python 3 command to restore
+the usage tab. Use `refresh` for the shared cache. Include plans with an open
+agent tab in any workspace on this Herdr server. Idle and Done tabs count.
+Field Status Keep visibility does not select usage plans. Group by verified
+provider and account, not by model or agent. Separate accounts keep separate
+rows. Antigravity shows Account unknown until a source can prove its account.
+Unknown usage has no percentage. Do not assign another account's usage to it.
+Grok uses the verified OAuth source with cookies off. If its process has an
+API key, OAuth token, or base URL override, show Account unknown. Inherited
+values also count. Key presence does not prove the tab's billing mode.
+Unknown rows show tab counts without subscription percentages. Windows shows
+Account unknown for Codex and Dependency unavailable for Claude and Grok.
+
+Each allowance has its own remaining percentage, reset time, source, and age.
+Values become stale after 120 seconds. A past reset does not prove a full
+allowance. Credits have a separate value. Missing access or a failed read must
+stay visible. The shared collector scans every five seconds and reads usage
+every 60 seconds. It does not send prompts or start model turns. Do not
+answer another agent's approval dialog to collect usage. Missing CodexBar
+requires the explicit `sh "$HERDR_PLUGIN_ROOT/bin/plan-usage" install` command.
+Do not change browser cookies or the user's CodexBar configuration.
 
 Ground rules:
 

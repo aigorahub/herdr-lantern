@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.16.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -118,7 +118,9 @@ Code gets `CLAUDE.md`.
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
 working toward?” for that readout. Ask “Field Status” or “what’s going on”
-to open a compact right-side pane beside Lantern Home. The repo-backed
+to restore the Field Status tab. Lantern opens the chat, Field Status, and
+Plan Usage in separate tabs at startup. Each tab has one pane. Focus stays
+on the chat. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
 date/time, separate red Important and purple Needs You sections, and every
 open tab. Human-readable workspace names are yellow; In Motion, Done, and
@@ -139,6 +141,44 @@ for the user; noteworthy status or review gates with no user action belong
 under Important. Legacy review-gate notes display under Important until cleared.
 Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
 Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
+
+Plan Usage shows accounts with an open agent tab anywhere on the current
+Herdr server. Idle and Done tabs count. Tabs hidden from Field Status Keep
+still count. Several models on one account share a row. Separate accounts
+keep separate rows. Account labels contain an opaque ID, not an email.
+Each allowance shows its remaining percentage and reset time. Credits have
+a separate value. A past reset time does not mean that usage has reset.
+
+The watcher scans tabs every five seconds and reads usage every 60 seconds.
+All Plan Usage tabs on the server share one collector. Ordinary read failures
+keep the last measured value and its age. An unknown account or a lost login
+hides the prior usage value. Values become stale after 120 seconds.
+Unknown usage has no percentage. Antigravity shows Account unknown because
+the checked source has no verified account identity. Unsupported agent
+kinds show Limits unavailable. Native Codex on Windows shows Account unknown
+when no verified process environment is available. Claude and Grok on Windows
+show Dependency unavailable because CodexBar has no Windows release asset.
+
+Grok uses the verified OAuth account source with cookies off. A process with
+`XAI_API_KEY`, `GROK_API_KEY`, `GROK_OAUTH_TOKEN`, or `XAI_BASE_URL` set shows
+Account unknown. Inherited values also cause this state. A key's presence
+does not prove which billing mode the tab uses. These rows show tab counts
+without subscription percentages. API credentials and custom provider
+settings can also prevent verified Codex or Claude account readings.
+
+Codex uses its native app server. Claude and Grok require CodexBar CLI
+0.74.0. Install the pinned CLI into private Lantern state with
+`sh bin/plan-usage install`. The installer checks the release digest.
+It does not install the desktop app or change the user's CodexBar config.
+There is no Windows release asset for this dependency. An absent dependency
+affects only its provider row. The watcher does not download tools.
+An absolute `LANTERN_CODEXBAR_BIN` can select a CLI of the same version.
+An invalid explicit path does not fall back to another tool.
+
+Use the detected Python 3 command with `$LANTERN_PLAN_USAGE pane` to restore
+the usage tab. `refresh` prints the shared cache. `collect` makes one bounded
+collection when no watcher owns the collector. State stays outside the repo.
+The readout does not send prompts or start model turns.
 
 Lantern works great with Elves. Without Elves it is still the Herdr
 plugin: workspaces, panes, agents. If `.elves-session.json` files exist,
