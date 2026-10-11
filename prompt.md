@@ -634,9 +634,12 @@ the usage pane. Use `refresh` for the shared cache. Include plans with an open
 agent tab in any workspace on this Herdr server. Idle and Done tabs count.
 Field Status Keep visibility does not select usage plans. Group by verified
 provider and account for collection. Display one table row per service.
-Show Service, Session left, and Week left. Use percentages only in the value
-columns. Hide IDs, model names, plan codes, credits, reset times, source details,
-and tab counts. Each period shows its lowest remaining percentage across that
+Show Service, Session left, Week left, and Week resets. Allowances use percentages.
+Weekly resets use local time for the limit that sets the weekly percentage.
+Tied limits with different reset times show Varies. Missing or expired times
+show --. Panes under 39 columns retain percentages and ask for more width to
+show resets. Hide IDs, model names, plan codes, credits, source details, and
+tab counts. Each period shows its lowest remaining percentage across that
 service's limits and login profiles. Never add percentages. Missing values
 show --. Keep warnings for stale readings and failed reads.
 Antigravity reads structured quota groups from its zero-turn native /usage

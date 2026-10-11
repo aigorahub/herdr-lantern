@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.3** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.4** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -146,9 +146,13 @@ Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
 Plan Usage includes plans with an open agent tab anywhere on this Herdr
 server. Idle and Done tabs count. Tabs hidden from Field Status still count.
 The table shows one row per service: Claude, OpenAI, Grok, Google, Fugu,
-and other open services. Its columns are Service, Session left, and Week left.
-Only percentages appear in the value columns. It omits IDs, model names,
-plan codes, credits, reset times, source details, and tab counts.
+and other open services. Its columns are Service, Session left, Week left,
+and Week resets. Allowances use percentages. Weekly resets use local time,
+such as Sun 05:00 EDT, for the limit that sets the displayed weekly percentage.
+Tied limits with different reset times show Varies. Missing or expired reset
+times show --. Panes under 39 columns retain the percentages and ask for more
+width to show resets. It omits IDs, model names, plan codes, credits, source
+details, and tab counts.
 Each period shows its lowest remaining percentage across that service's
 limits and login profiles. It never adds percentages. This is a conservative
 service summary. Low allowances use color. A warning marks stale values or
