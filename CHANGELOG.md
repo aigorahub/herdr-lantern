@@ -2,6 +2,19 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.5] - 2026-10-11
+
+### Fixed
+
+- Claude uses its total weekly reset when total and model limits have the same
+  percentage. A lower model allowance still sets the weekly percentage and reset.
+- Unreadable extra tabs no longer add warnings to a service with measured limits.
+  Stale readings, failed updates, and required sign-ins still show warnings.
+
+### Changed
+
+- Percentage columns align to the right. Weekly reset times use normal text contrast.
+
 ## [0.17.4] - 2026-10-10
 
 ### Changed

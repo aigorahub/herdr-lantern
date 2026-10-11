@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.4** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.5** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -149,14 +149,18 @@ The table shows one row per service: Claude, OpenAI, Grok, Google, Fugu,
 and other open services. Its columns are Service, Session left, Week left,
 and Week resets. Allowances use percentages. Weekly resets use local time,
 such as Sun 05:00 EDT, for the limit that sets the displayed weekly percentage.
-Tied limits with different reset times show Varies. Missing or expired reset
+Claude uses its total weekly reset when total and model limits have the same
+percentage. Other tied limits with different reset times show Varies. Missing or expired reset
 times show --. Panes under 39 columns retain the percentages and ask for more
 width to show resets. It omits IDs, model names, plan codes, credits, source
 details, and tab counts.
 Each period shows its lowest remaining percentage across that service's
 limits and login profiles. It never adds percentages. This is a conservative
-service summary. Low allowances use color. A warning marks stale values or
-failed reads. NO_COLOR disables color. Plain snapshots have no color.
+service summary. Percentage columns align to the right. Low allowances use
+color. A warning marks stale values, failed updates, or a required sign-in.
+Unreadable extra tabs do not add warnings when that service has measured
+limits. A service with no measured limits still shows its state.
+NO_COLOR disables color. Plain snapshots have no color.
 
 The watcher scans tabs every five seconds and reads usage every 60 seconds.
 All usage panes share one collector. A changed login hides prior values.

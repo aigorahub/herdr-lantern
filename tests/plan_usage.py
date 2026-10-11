@@ -422,6 +422,71 @@ class UsageTests(unittest.TestCase):
                 row["windows"].reverse()
                 self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
 
+    def test_claude_total_reset_wins_tied_model_windows(self):
+        now = 1704067200
+        auth = {"loggedIn": True, "email": "test@example.invalid", "orgId": "org"}
+        payload = {"provider": "claude", "source": "claude", "rateWindowLabels": {
+            "primary": "Session", "secondary": "Weekly", "tertiary": "Model only"}, "usage": {
+            "identity": {"accountEmail": auth["email"]},
+            "primary": {"usedPercent": 0, "windowMinutes": 300, "resetsAt": now + 18000},
+            "secondary": {"usedPercent": 0, "windowMinutes": 10080, "resetsAt": "2024-01-07T11:15:00Z"},
+            "tertiary": {"usedPercent": 0, "windowMinutes": 10080, "resetsAt": now + 86400},
+            "extraRateWindows": [{"id": "claude-weekly-scoped-fable", "title": "Fable only", "window": {
+                "usedPercent": 0, "windowMinutes": 10080, "resetsAt": now + 172800}}]}}
+        row = dict(sources.parse_codexbar(payload, "claude", now, auth), state="Measured")
+        self.assertEqual([w["scope"] for w in row["windows"]], ["service", "service", "model", "model"])
+        output = usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc)
+        self.assertIn("Sun 11:15 UTC", output)
+        self.assertNotIn("Varies", output)
+        self.assertEqual(output.count("100%"), 2)
+        row["windows"].reverse()
+        self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
+        for window in row["windows"]:
+            window.pop("scope")  # Upgrade an older shared snapshot without a fresh probe.
+        self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
+        row["windows"][0]["remaining"] = 20
+        output = usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc)
+        self.assertIn("20%", output)
+        self.assertIn("Wed 00:00 UTC", output)
+        self.assertNotIn("Sun 11:15 UTC", output)
+        row["windows"][0]["remaining"] = 100
+        other = dict(row, windows=[dict(w, reset_at=now + 86400) for w in row["windows"]])
+        self.assertIn("Varies", usage.render({"rows": [row, other]}, now=now, width=61, zone=timezone.utc))
+        # A model limit from a different login must keep its own reset in the tie.
+        row["windows"] = [dict(row["windows"][0], remaining=80)]
+        other["windows"] = [dict(w, remaining=80 if w["id"] == "secondary" else 90)
+                            for w in other["windows"]]
+        output = usage.render({"rows": [row, other]}, now=now, width=61, zone=timezone.utc)
+        self.assertIn("80%", output)
+        self.assertIn("Varies", output)
+
+    def test_partial_unreadable_tabs_do_not_warn_when_plan_is_measured(self):
+        row = dict(measured(), state="Measured")
+        for state in ("Account unknown", "Limits unavailable", "Dependency unavailable", "Reading usage"):
+            with self.subTest(state=state):
+                notice = {"provider": "codex", "state": state}
+                plain = usage.render({"rows": [row]}, now=1800000030, width=61)
+                self.assertEqual(usage.render({"rows": [row, notice]}, now=1800000030, width=61), plain)
+                self.assertIn(state, usage.render({"rows": [notice]}, now=1800000030, width=61))
+        for state in ("Last update failed", "Sign in required"):
+            notice = {"provider": "codex", "state": state}
+            self.assertIn(f"OpenAI: {state}.", usage.render({"rows": [row, notice]}, now=1800000030, width=61))
+
+    def test_percentages_align_right_and_resets_are_not_dimmed(self):
+        now = 1704067200
+        row = dict(measured(), state="Measured", observed_at=now)
+        row["windows"] = [{"id": "week", "label": "Weekly", "minutes": 10080,
+                            "remaining": 87.3, "reset_at": now + 3600}]
+        other = dict(row, provider="grok", windows=[dict(row["windows"][0], remaining=9)])
+        plain = usage.render({"rows": [row, other]}, now=now, width=61, zone=timezone.utc)
+        lines = plain.splitlines()
+        self.assertEqual(lines[2].index("87.3%") + 5, lines[3].index("9%") + 2)
+        with patch.dict(os.environ, {"TERM": "xterm"}):
+            os.environ.pop("NO_COLOR", None)
+            colored = usage.render({"rows": [row]}, now=now, width=61, color=True, zone=timezone.utc)
+            self.assertIn("Mon 01:00 UTC", colored)
+            self.assertNotIn("\033[2mMon", colored)
+
     def test_weekly_reset_timezones_and_narrow_layout(self):
         now = 1704067200
         row = dict(measured(), state="Measured", observed_at=now)
@@ -444,8 +509,8 @@ class UsageTests(unittest.TestCase):
         row["windows"] = [row["windows"][1]]
         output = usage.render({"rows": [row, {"provider": "grok", "state": "Account unknown", "tabs": 3}]},
                               now=1800000030, width=61)
-        self.assertIn("OpenAI   --", output)
-        self.assertIn("Grok     --", output)
+        self.assertEqual(next(line.split()[1] for line in output.splitlines() if line.startswith("OpenAI ")), "--")
+        self.assertEqual(next(line.split()[1] for line in output.splitlines() if line.startswith("Grok ")), "--")
         self.assertNotIn("0%", output.replace("10%", ""))
         self.assertIn("Grok: Account unknown.", output)
 

@@ -242,11 +242,14 @@ Runtime (injected by launch.sh; do not ignore):
   Show session and weekly percentages left, plus weekly reset times in local time.
   Omit agents, tab counts, account IDs, model IDs, plan names, credits, and source details.
   Each period shows its lowest remaining percentage across service limits and login profiles.
-  The weekly reset belongs to that limiting value. Tied limits with different reset times
+  The weekly reset belongs to that limiting value. Claude uses its total weekly reset
+  when total and model limits have the same percentage. Other tied limits with different reset times
   show Varies. Missing or expired reset times show --. Narrow panes ask for more width.
   Never add separate limits. Google uses its zero-turn native usage
   command. Grok uses the saved OAuth plan. Fugu uses the configured profile quota API.
   Idle and Done tabs count. Account unknown has no measured allowance.
+  Align percentages to the right. Unreadable extra tabs do not add warnings when
+  that service has measured limits. Keep stale, failed-update, and sign-in warnings.
   Do not prompt an agent or answer its approval to collect usage.
 
 $session_capture_note
