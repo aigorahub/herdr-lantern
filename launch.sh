@@ -239,10 +239,12 @@ Runtime (injected by launch.sh; do not ignore):
   top two thirds of the right column. Usage uses the bottom third. For a usage request, invoke \`pane\` with
   the detected Python 3 command to restore its pane. Use \`refresh\` to read
   the cache. The view shows one table row per service with open agent tabs across workspaces.
-  Show only session and weekly percentages left. Omit agents, tab counts,
-  account IDs, model IDs, plan names, credits, and source details from the main table.
+  Show session and weekly percentages left, plus weekly reset times in local time.
+  Omit agents, tab counts, account IDs, model IDs, plan names, credits, and source details.
   Each period shows its lowest remaining percentage across service limits and login profiles.
-  Hide reset times. Never add separate limits. Google uses its zero-turn native usage
+  The weekly reset belongs to that limiting value. Tied limits with different reset times
+  show Varies. Missing or expired reset times show --. Narrow panes ask for more width.
+  Never add separate limits. Google uses its zero-turn native usage
   command. Grok uses the saved OAuth plan. Fugu uses the configured profile quota API.
   Idle and Done tabs count. Account unknown has no measured allowance.
   Do not prompt an agent or answer its approval to collect usage.

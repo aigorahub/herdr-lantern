@@ -12,6 +12,7 @@ import threading
 import time
 import unittest
 from concurrent.futures import Future
+from datetime import timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -368,7 +369,7 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(output.count("Account unknown"), 1)
         self.assertNotIn("agent", output)
         self.assertNotIn("tabs", output)
-        for width in (20, 28, 43, 44, 61, 88):
+        for width in (20, 28, 32, 38, 39, 43, 44, 49, 50, 61, 88):
             plain = usage.render(snapshot, now=1800000030, width=width)
             self.assertTrue(all(len(line) <= width for line in plain.splitlines()), (width, plain))
 
@@ -384,8 +385,59 @@ class UsageTests(unittest.TestCase):
         self.assertNotIn("10%", output)
         for hidden in ("promax", "credits", "Updated", "Native", "Model identifier", row["account"][:6], "█", "░"):
             self.assertNotIn(hidden, output)
-        self.assertNotIn("Reset", output)
-        self.assertNotIn("ET", output)
+        self.assertIn("Week resets", output)
+
+    def test_weekly_reset_follows_lowest_percentage_across_logins(self):
+        now = 1704067200  # Monday, January 1, 2024, 00:00 UTC.
+        rows = [dict(measured("one"), state="Measured", observed_at=now),
+                dict(measured("two"), state="Measured", observed_at=now)]
+        rows[0]["windows"] = [
+            {"id": "session", "label": "Session", "minutes": 300, "remaining": 5, "reset_at": now + 3600},
+            {"id": "week", "label": "Weekly", "minutes": 10080, "remaining": 10, "reset_at": now + 86400}]
+        rows[1]["windows"] = [{"id": "week", "label": "Weekly", "minutes": 10080,
+                               "remaining": 5, "reset_at": 1704626100}]
+        output = usage.render({"rows": rows}, now=now, width=61,
+                              zone=timezone(timedelta(hours=-5), "EST"))
+        self.assertEqual(sum(line.startswith("OpenAI ") for line in output.splitlines()), 1)
+        self.assertIn("Sun 06:15 EST", output)
+        self.assertNotIn("Mon 19:00", output)
+        self.assertNotIn("Sun 20:00", output)
+
+    def test_weekly_reset_handles_ties_missing_and_expired_times(self):
+        now = 1704067200
+        for resets, expected in (((1704626100, 1704626100), "Sun 11:15 UTC"),
+                                 ((1704626100, 1704539700), "Varies"),
+                                 ((1704626100, None), "--"),
+                                 ((None, None), "--"),
+                                 ((1704626100, now - 1), "--")):
+            with self.subTest(resets=resets):
+                row = dict(measured(), state="Measured", observed_at=now)
+                row["windows"] = [{"id": str(index), "label": "Weekly", "minutes": 10080,
+                                    "remaining": 10, "reset_at": reset} for index, reset in enumerate(resets)]
+                output = usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc)
+                self.assertTrue(output.splitlines()[2].endswith(expected), output)
+                if now - 1 in resets:
+                    self.assertIn("10%*", output)
+                    self.assertIn("Waiting for fresh limits", output)
+                row["windows"].reverse()
+                self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
+
+    def test_weekly_reset_timezones_and_narrow_layout(self):
+        now = 1704067200
+        row = dict(measured(), state="Measured", observed_at=now)
+        row["windows"] = [{"id": "week", "label": "Weekly", "minutes": 10080,
+                            "remaining": 40, "reset_at": now + 3600}]
+        for zone, expected in ((timezone.utc, "Mon 01:00 UTC"),
+                               (timezone(timedelta(hours=-5), "EST"), "Sun 20:00 EST"),
+                               (timezone(timedelta(hours=5, minutes=30)), "Mon 06:30 +0530")):
+            with self.subTest(zone=zone):
+                for width in (39, 49, 50, 61):
+                    output = usage.render({"rows": [row]}, now=now, width=width, zone=zone)
+                    self.assertIn(expected, output)
+                    self.assertTrue(all(len(line) <= width for line in output.splitlines()), output)
+        output = usage.render({"rows": [row]}, now=now, width=38, zone=timezone.utc)
+        self.assertNotIn("Mon 01:00", output)
+        self.assertIn("Widen pane for weekly reset times.", output)
 
     def test_missing_period_and_unreadable_login_do_not_make_percentages(self):
         row = dict(measured(), state="Measured", tabs=4)

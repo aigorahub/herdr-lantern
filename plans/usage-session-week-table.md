@@ -38,3 +38,10 @@ the result to its local login profile. Grok reads the saved OAuth plan despite
 an inherited API key. Fugu reads Sakana's usage API with its configured profile
 key. All reads check source binding and avoid model turns.
 Field Status uses the top two thirds of the right column. Usage uses the bottom third.
+
+
+Version 0.17.4 adds Week resets beside the percentages. The column uses local
+time for the weekly limit that sets the displayed percentage. Equal minimum
+percentages with different reset times show Varies. Missing or expired times
+show --. Panes under 39 columns keep the percentage table and ask for more width.
+No provider read changes. IDs, model names, plan codes, and credits stay hidden.

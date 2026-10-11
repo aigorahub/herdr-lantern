@@ -15,7 +15,7 @@ import threading
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 
 import field_status as field
@@ -259,8 +259,8 @@ def cached_snapshot(shared: Path, server: dict) -> dict:
 
 
 def render(snapshot: dict, now: float | None = None, width: int | None = None,
-           color: bool = False) -> str:
-    """Show session and weekly percentages left, one row per service."""
+           color: bool = False, zone: tzinfo | None = None) -> str:
+    """Show percentages left and weekly resets, one row per service."""
     import textwrap
     now = time.time() if now is None else now
     width = max(20, width or shutil.get_terminal_size((88, 24)).columns)
@@ -278,15 +278,20 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         services.setdefault(name, []).append(row)
     if not services:
         return "\n".join(lines + ["No open service plans."]) + "\n"
-    full_labels = width >= 32
+    show_resets = width >= 39
+    full_labels = width >= (50 if show_resets else 32)
     gap = "  " if full_labels else " "
     widths = [7, 12, 9] if full_labels else [7, width - 14, 5]
     heading = ["Service", "Session left", "Week left"] if full_labels else ["Service", "Sess", "Week"]
-    if not full_labels:
+    if show_resets:
+        gap = "  "
+        widths = [7, 12, 9, 16] if full_labels else [7, 5, 5, 16]
+        heading.append("Week resets")
+    elif not full_labels:
         lines.append("Percent left.")
     lines.append(style(gap.join(t.ljust(w) for t, w in zip(heading, widths)).rstrip(), "1"))
     lines.append(style(gap.join("-" * w for w in widths), "2"))
-    notes = []
+    notes = [] if show_resets else ["Widen pane for weekly reset times."]
 
     def add(cells: list[str], codes: list[str] | None = None):
         parts = [textwrap.wrap(field.clean(cell, 500), width=w) or [""] for cell, w in zip(cells, widths)]
@@ -314,6 +319,19 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         code = "1;31" if remaining <= 10 else "1;33" if remaining <= 25 else "1"
         return f"{remaining:g}%" + ("*" if stale else ""), code
 
+    def reset_time(resets: set) -> str:
+        if not resets or None in resets or any(value <= now for value in resets):
+            return "--"
+        if len(resets) > 1:
+            return "Varies"
+        try:
+            local = datetime.fromtimestamp(next(iter(resets)), timezone.utc).astimezone(zone)
+            text = local.strftime("%a %H:%M %Z")
+            # Some local zone names exceed the fixed column width.
+            return text if len(text) <= 16 else local.strftime("%a %H:%M %z")
+        except (ValueError, OverflowError, OSError):
+            return "--"
+
     order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google", "Fugu"))}
     for name in sorted(services, key=lambda key: (order.get(key, 99), key)):
         accounts = sorted(services[name], key=lambda row: not bool(row.get("windows")))
@@ -329,20 +347,23 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             for label in ("session", "week"):
                 candidates = [value for value in row["windows"] if period(value) == label]
                 for value in candidates:
+                    reset = value.get("reset_at")
+                    outdated = row_stale or bool(reset and reset <= now)
                     previous = selected.get(label)
                     if previous is None or value["remaining"] < previous[0]["remaining"]:
-                        selected[label] = (value, row_stale)
+                        selected[label] = (value, outdated, {reset})
                     elif value["remaining"] == previous[0]["remaining"]:
-                        selected[label] = (previous[0], previous[1] or row_stale)
+                        selected[label] = (previous[0], previous[1] or outdated, previous[2] | {reset})
         values, codes = [name], ["1"]
         for label in ("session", "week"):
-            value, outdated = selected.get(label, (None, False))
-            if value and value.get("reset_at") and value["reset_at"] <= now:
-                outdated = True
+            value, outdated, _ = selected.get(label, (None, False, set()))
             stale = stale or outdated
             left, code = allowance(value, outdated)
             values.append(left)
             codes.append(code)
+        if show_resets:
+            values.append(reset_time(selected.get("week", (None, False, set()))[2]))
+            codes.append("2")
         add(values, codes)
         if stale:
             notes.append(f"{name}: * Waiting for fresh limits.")

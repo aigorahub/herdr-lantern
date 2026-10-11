@@ -2,6 +2,16 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.4] - 2026-10-10
+
+### Changed
+
+- Plan Usage shows weekly reset times in local time beside each service.
+  The reset belongs to the limit that sets the displayed weekly percentage.
+- Tied weekly limits with different reset times show Varies. Missing or expired
+  times show --. Panes under 39 columns keep percentages and ask for more width.
+- Session and weekly allowances stay as percentages. Each service keeps one row.
+
 ## [0.17.3] - 2026-10-10
 
 ### Changed
