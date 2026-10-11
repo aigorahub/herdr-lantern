@@ -358,6 +358,17 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             ("login-source", json.dumps({"result": "Current session: 100% used"}), 3, "100% used"),
             (None, json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
             ("", json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
+            ("   ", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (True, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (7, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (["token"], json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            ({"status": "logged-out"}, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (" NONE ", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Failed to retrieve usage"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "unparseable"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": ""}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": True}), 2, "reported an error"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": "false"}), 2, "error flag is not boolean"),
             (None, json.dumps({"result": "Current session: 0% used"}), 0, None),
             ("oauth-token", "unparseable", 2, "unparseable usage JSON"),
             ("oauth-token", json.dumps({"result": None}), 2, "usage result is not text"),
@@ -397,6 +408,31 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                         self.assertEqual(payload["quota"], expected)
                         self.assertEqual(self.check("claude", "sonnet", "max")[0], 3)
                         self.assertEqual(self.check("claude", "invented", "high")[0], 3)
+
+    def test_claude_catalog_keeps_optional_account_metadata_optional(self):
+        for account in (None, {}, {"tokenSource": None}, {"tokenSource": True}, "invalid"):
+            with self.subTest(account=account):
+                catalog = json.loads(CLAUDE_CATALOG)
+                catalog["response"]["response"]["account"] = account
+                def run(command, *, input_text=None):
+                    if command == ["claude", "--help"]:
+                        return CLAUDE_HELP
+                    if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                        return json.dumps({"result": "Current session: 0% used"})
+                    return json.dumps(catalog)
+                self.assertIn("opus", route.claude_model_catalog(run))
+                with patch.object(preflight, "run", side_effect=run):
+                    self.assertEqual(preflight.claude_capabilities()[1], None)
+                    self.assertEqual(self.check("claude", "opus", "high")[0], 0)
+
+    def test_claude_cost_view_requires_successful_structured_text(self):
+        result = "\n".join(("Total cost:            $0.0000", "Total duration (API):  0s",
+                            "Total duration (wall): 4s", "Total code changes:    0 lines added, 0 lines removed",
+                            "Usage:                 0 input, 0 output, 0 cache read, 0 cache write"))
+        self.assertTrue(preflight.claude_cost_usage(result))
+        for invalid in ("", "Total cost: $0.00", "Usage: 0 input, 0 output", "Failed to retrieve usage",
+                        result + "\nAPI Error: authentication failed"):
+            self.assertFalse(preflight.claude_cost_usage(invalid))
 
 if __name__ == "__main__":
     unittest.main()

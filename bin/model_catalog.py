@@ -133,7 +133,9 @@ def claude_initialization(run) -> tuple[dict[str, tuple[str, set[str]]], str | N
             alias = strip_terminal_control(display_name).lower() if isinstance(display_name, str) else ""
             if alias in aliases:
                 catalog[alias] = entry
-        token_source = response["response"].get("account", {}).get("tokenSource")
-        return catalog, token_source
+        account = response["response"].get("account")
+        token_source = account.get("tokenSource") if isinstance(account, dict) else None
+        token_source = token_source.strip() if isinstance(token_source, str) else None
+        return catalog, token_source or None
     except (ValueError, KeyError, TypeError, AttributeError, StopIteration) as error:
         raise ValueError(f"Claude returned an unparseable initialization catalog ({error})") from error

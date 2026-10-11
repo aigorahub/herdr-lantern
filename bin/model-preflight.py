@@ -160,6 +160,11 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
         fail(f"availability check failed: Claude returned unparseable usage JSON ({error})")
     if not isinstance(result, str):
         fail("availability check failed: Claude usage result is not text")
+    is_error = payload.get("is_error", False)
+    if not isinstance(is_error, bool):
+        fail("availability check failed: Claude usage error flag is not boolean")
+    if is_error:
+        fail("availability check failed: Claude usage command reported an error")
     buckets = []
     limit = re.search(r"hit your\s+(.+?)\s+limit(?:[^\n]*?resets\s+([^\n]+))?", result, re.IGNORECASE)
     if limit:
@@ -173,6 +178,16 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
         reset = match.group(3).strip() if match.group(3) else ""
         buckets.append(UsageBucket(match.group(1), int(match.group(2)), reset))
     return result, buckets
+
+
+def claude_cost_usage(result: str) -> bool:
+    """Recognize the successful cost view returned by token-only logins."""
+    return bool(
+        re.search(r"^\s*Total cost:\s*\$\d+(?:\.\d+)?\s*$", result, re.MULTILINE)
+        and re.search(r"^\s*Usage:\s*\d+ input,\s*\d+ output(?:,|\s*$)", result, re.MULTILINE)
+        and not re.search(r"^\s*(?:API Error\b|Error\b|Failed\b|Unable\b)", result,
+                          re.MULTILINE | re.IGNORECASE)
+    )
 
 
 def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | None:
@@ -301,13 +316,15 @@ def check(kind: str, model: str, effort: str) -> int:
         return report_available(kind, model, effort)
     if kind == "claude":
         models, token_source = claude_capabilities()
-        if token_source == "none":
+        if token_source and token_source.lower() == "none":
             fail("availability check failed: Claude is not logged in")
-        _, buckets = parse_claude_usage()
+        usage, buckets = parse_claude_usage()
         if not buckets and not token_source:
             # No token source and no quota buckets: nothing shows a login.
             fail("availability check failed: Claude is not logged in "
                  "(no token source and no usage buckets)")
+        if not buckets and not claude_cost_usage(usage):
+            fail("availability check failed: Claude returned unrecognized usage text")
         if model.lower() not in models:
             return report_unavailable(
                 kind,
