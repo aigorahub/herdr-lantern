@@ -485,6 +485,8 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                      cache.replace("40s ago)", "40s ago, API Error: authentication failed)"),
                      cache.replace("40s ago)", "40s ago, malformed data)"),
                      cache.replace("last 6m 10s ago", "last bad time"),
+                     cache.replace("last 6m 10s ago, 310.2k tokens re-cached", "last 6m 10s ago \u2014 likely cause: tool definitions changed (+3/-0), 310.2k tokens re-cached, likely cause: session compaction"),
+                     cache.replace("last 6m 10s ago, 310.2k tokens re-cached", "last 6m 10s ago \u2014 likely cause: tool definitions changed, 99 tokens re-cached, 310.2k tokens re-cached"),
                      cache.replace("tokens re-cached)", "tokens re-cached, API Error: authentication failed)"),
                      cache.replace(" · warm", " · 1 expected rebuild (Authentication failed) · warm")):
             self.assertFalse(preflight.claude_cost_usage(result + "\n" + line))

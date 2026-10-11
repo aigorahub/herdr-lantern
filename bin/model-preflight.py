@@ -189,9 +189,10 @@ def claude_cost_usage(result: str) -> bool:
     duration = r"(?:\d+(?:\.\d+)?(?:ms|s|m|h|d)\s*)+"
     count = r"\d+(?:\.\d+)?[kKmMbB]?"
     usage = count + r" input,\s*" + count + r" output(?:,\s*" + count + r" cache read,\s*" + count + r" cache write)?"
-    cause = r"[^·\r\n]+?"
-    miss_detail = (r"\(last\s*" + duration + r"ago(?:\s*\u2014\s*likely cause:\s*" + cause + r")?,\s*"
-                   + count + r" tokens re-cached(?:,\s*likely cause:\s*" + cause + r")?\)")
+    cause = r"(?:(?!likely cause:|tokens re-cached)[^·\r\n])+?"
+    miss_detail = (r"\(last\s*" + duration + r"ago(?:,\s*" + count
+                   + r" tokens re-cached(?:,\s*likely cause:\s*" + cause + r")?"
+                   r"|\s*\u2014\s*likely cause:\s*" + cause + r",\s*" + count + r" tokens re-cached)\)")
     temperature = (r"(?:(?:warm|cold)\s*\(" + duration + r"TTL,\s*last activity\s*" + duration + r"ago\)"
                    r"|cold\s*\u2014\s*idle\s*" + duration
                    + r",\s*next turn re-caches (?:~" + count + r" tokens|the compacted prompt)"
