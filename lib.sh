@@ -599,7 +599,12 @@ helper_update_snapshot() {
             _helper_up_line="up to date: v$_helper_up_local ($_helper_up_kind)"
         fi
     fi
-    printf '%s\n' "$_helper_up_line" >"$_helper_up_out" 2>/dev/null || true
+    # Readers must see the prior line or the complete new line.
+    if _helper_up_tmp=$(mktemp "${_helper_up_out}.XXXXXX" 2>/dev/null); then
+        printf '%s\n' "$_helper_up_line" >"$_helper_up_tmp" 2>/dev/null &&
+            mv -f "$_helper_up_tmp" "$_helper_up_out" 2>/dev/null ||
+            rm -f "$_helper_up_tmp"
+    fi
 }
 
 helper_is_inspect() {

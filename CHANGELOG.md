@@ -12,6 +12,8 @@ All notable changes to Lantern, by Elves are documented here.
   environment or private .env store. It makes no model calls. Keys never enter
   the shared cache. Changed keys or profile files hide prior values.
 - Standalone modern Fugu profile files work without a main Codex config file.
+- The background version check replaces its file in one step. Readers no longer
+  see an empty file during the write.
 
 ## [0.17.7] - 2026-10-11
 

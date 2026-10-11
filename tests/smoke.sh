@@ -2774,6 +2774,27 @@ EOF
 chmod +x "$update_dir/bin/curl"
 export FAKE_MANIFEST=
 
+# Read at the exact point where the writer has opened its destination.
+# Direct truncation makes that read empty before the new line is written.
+printf '%s\n' 'previous snapshot' >"$update_dir/atomic.txt"
+(
+    PATH="$update_dir/bin:$PATH"
+    export PATH
+    printf() {
+        if [ "$#" = 2 ] && [ "$1" = '%s\n' ]; then
+            case $2 in
+            'update check unavailable:'*) cat "$update_dir/atomic.txt" >"$update_dir/observed.txt" ;;
+            esac
+        fi
+        command printf "$@"
+    }
+    helper_update_snapshot "$update_root" "$update_dir/atomic.txt"
+)
+[ "$(cat "$update_dir/observed.txt")" = 'previous snapshot' ] ||
+    fail "update readers must see the prior complete line during a write"
+grep -q 'update check unavailable' "$update_dir/atomic.txt" ||
+    fail "an atomic update must publish the new complete line"
+
 run_update_snapshot() {
     # $1 is the plugin root to classify and check.
     (
