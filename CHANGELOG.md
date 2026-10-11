@@ -2,7 +2,7 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
-## [Unreleased]
+## [0.17.7] - 2026-10-11
 
 ### Removed
 
@@ -17,6 +17,112 @@ All notable changes to Lantern, by Elves are documented here.
   Lantern Home is still never closed.
 - Examples and tests no longer use personal workspace names. The Windows
   plan no longer contains a personal user path.
+
+## [0.17.5] - 2026-10-11
+
+### Fixed
+
+- Claude uses its total weekly reset when total and model limits have the same
+  percentage. A lower model allowance still sets the weekly percentage and reset.
+- Unreadable extra tabs no longer add warnings to a service with measured limits.
+  Stale readings, failed updates, and required sign-ins still show warnings.
+
+### Changed
+
+- Percentage columns align to the right. Weekly reset times use normal text contrast.
+
+## [0.17.4] - 2026-10-10
+
+### Changed
+
+- Plan Usage shows weekly reset times in local time beside each service.
+  The reset belongs to the limit that sets the displayed weekly percentage.
+- Tied weekly limits with different reset times show Varies. Missing or expired
+  times show --. Panes under 39 columns keep percentages and ask for more width.
+- Session and weekly allowances stay as percentages. Each service keeps one row.
+
+## [0.17.3] - 2026-10-10
+
+### Changed
+
+- Field Status opens in the top two thirds of the right column. Plan Usage
+  opens in the bottom third. Chat stays on the left.
+- Setup moves verified readouts from the previous order into this layout.
+  It keeps focus and running watchers. Later opens preserve manual pane sizes.
+- Plan Usage shows only Service, Session left, and Week left. Each service has
+  one row. Values are percentages. Reset times and plan codes stay hidden.
+- Google reads structured quota groups from the native Antigravity usage
+  command with zero model turns. Grok accepts the OAuth proxy source and
+  reads the saved plan when an inherited API key is present.
+- Fugu reads Sakana's quota API through the key selected by its Codex profile.
+  Both modern profile files and legacy profiles work. No read sends a model prompt.
+
+## [0.17.2] - 2026-10-10
+
+### Changed
+
+- Plan Usage shows session and weekly percentages beside their reset times.
+  The table omits account IDs, model IDs, plan names, credits, source details,
+  update age, and allowance bars. Narrow panes put reset times below percentages.
+- Each period shows its lowest remaining allowance and that allowance's reset
+  time. Separate logins keep separate values. Missing values have no percentage.
+  Stale readings and past reset times keep a warning.
+
+## [0.17.1] - 2026-10-10
+
+### Changed
+
+- Lantern opens one tab with chat on the left, Plan Usage on the top right,
+  and Field Status on the bottom right. Existing verified readout watchers
+  move from separate tabs into this layout without a restart.
+- Both readouts fit their pane. Keyboard controls scroll long output and
+  restore terminal settings on exit.
+- Plan Usage shows one table row per service. It aligns allowance left and
+  reset times. Low allowances and failed reads use color and text. Separate
+  accounts keep separate allowances within the service row. The display
+  omits agents and tab counts. Plain output and NO_COLOR remain available.
+
+## [0.17.0] - 2026-10-10
+
+### Added
+
+- Plan Usage groups verified accounts with open agent tabs across workspaces.
+  It shows allowance windows, reset times, source, and age. Codex, Claude,
+  and Grok have measured sources on macOS and Linux. Antigravity shows
+  Account unknown. Grok also shows Account unknown when its process has an
+  API key, OAuth token, or base URL override, including an inherited value.
+  These rows show tab counts without usage percentages. Windows shows
+  Account unknown for Codex and Dependency unavailable for Claude and Grok.
+- A private installer checks the pinned CodexBar CLI 0.74.0 release digest.
+
+### Changed
+
+- Lantern opens chat, Field Status, and Plan Usage in separate tabs at startup.
+  Each tab has one pane. Reopening the chat restores missing readouts.
+  Readouts share safe tab setup and keep focus on the chat.
+
+## [0.16.1] - 2026-10-06
+
+### Changed
+
+- Green is two answers on the exact head: the PR can merge (required checks
+  passed or were skipped, `MERGEABLE`, not `BLOCKED` or `BEHIND`), and it
+  was tested (a `Local tests passed on <head SHA>` record from a repo
+  member listing every gate as passed, passed full-suite jobs on a
+  Dependabot PR, or passed release checks).
+  Socket, Vercel, and skipped checks never prove that tests ran.
+- Post-merge steps follow the landing path. A merge into `main` keeps the
+  tag/release, deploy check, and main pull. A merge into `dev` checks the
+  staging deploy and pulls `dev`. A release or hotfix into `main` gets a
+  same-day back-merge PR into `dev`. Publishing the GitHub version after an
+  everyday merge stays part of the kickoff's merge authority where `main`
+  is the default branch; a release into `main` while `dev` is the default
+  needs explicit release authority. The close bar reads the merged branch
+  from the PR base.
+- Session cleanup blocks on a missing required check, not on a repository
+  with no checks. `gh pr checks` reporting no checks is not a failure.
+- Bot reviews that ran inside PR CI (Gemini auto-comments, Claude review
+  workflows) are no longer expected once a repo stops PR tests.
 
 ## [0.16.0] - 2026-09-25
 

@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.16.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.7** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -118,7 +118,8 @@ Code gets `CLAUDE.md`.
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
 working toward?” for that readout. Ask “Field Status” or “what’s going on”
-to open a compact right-side pane beside Lantern Home. The repo-backed
+to restore the Field Status pane. Lantern opens three panes in one tab. Chat fills the left side. Field Status
+fills the top two thirds of the right column. Plan Usage fills the bottom third. Focus stays on chat. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
 date/time, separate red Important and purple Needs You sections, and every
 open tab. Human-readable workspace names are yellow; In Motion, Done, and
@@ -127,7 +128,9 @@ only other sessions explicitly pinned by the user; hiding a quiet tab does not
 close it. Done agents show a verified short outcome, and verified settled
 sessions disappear immediately after closure. Lantern Home is never closed
 by this view. The watcher redraws when field state or
-notes change and leaves command transcripts out of the chat.
+notes change and leaves command transcripts out of the chat. Both readouts
+stay within the pane. Use Up/Down or Page Up/Page Down to scroll. Press q
+to close a readout. A later Lantern open restores it.
 
 Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
 the repo. The runtime prompt calls the detected Python 3 command with
@@ -139,6 +142,63 @@ for the user; noteworthy status or review gates with no user action belong
 under Important. Legacy review-gate notes display under Important until cleared.
 Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
 Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
+
+Plan Usage includes plans with an open agent tab anywhere on this Herdr
+server. Idle and Done tabs count. Tabs hidden from Field Status still count.
+The table shows one row per service: Claude, OpenAI, Grok, Google, Fugu,
+and other open services. Its columns are Service, Session left, Week left,
+and Week resets. Allowances use percentages. Weekly resets use local time,
+such as Sun 05:00 EDT, for the limit that sets the displayed weekly percentage.
+Claude uses its total weekly reset when total and model limits have the same
+percentage. Other tied limits with different reset times show Varies. Missing or expired reset
+times show --. Panes under 39 columns retain the percentages and ask for more
+width to show resets. It omits IDs, model names, plan codes, credits, source
+details, and tab counts.
+Each period shows its lowest remaining percentage across that service's
+limits and login profiles. It never adds percentages. This is a conservative
+service summary. Percentage columns align to the right. Low allowances use
+color. A warning marks stale values, failed updates, or a required sign-in.
+Unreadable extra tabs do not add warnings when that service has measured
+limits. A service with no measured limits still shows its state.
+NO_COLOR disables color. Plain snapshots have no color.
+
+The watcher scans tabs every five seconds and reads usage every 60 seconds.
+All usage panes share one collector. A changed login hides prior values.
+Ordinary read failures keep the last measured value with a warning.
+Values become stale after 120 seconds. Missing values show --.
+
+Antigravity reads `agy -p /usage --output-format json`. It extracts the
+remaining fractions from the structured quota groups and requires zero
+model turns. The reader uses the open tab's HOME and local login file.
+It checks the login file before and after the read. It does not invent a
+billing account ID from the installation ID.
+Grok reads the saved OAuth subscription with cookies off. An inherited API
+key or base URL does not block that plan reading. Those values never enter
+the quota probe. A custom OAuth token remains unsupported.
+Fugu reads Sakana's `/v1/usage` API with the key selected by the open Codex
+profile. Both modern profile files and legacy profiles work. The reader
+converts used percentages to percentages left. It makes no model calls.
+The API key stays in memory and never enters the shared cache.
+
+Native Codex, Antigravity, and Fugu require a readable process environment.
+They remain unmeasured on Windows. Claude and Grok on Windows show
+Dependency unavailable because CodexBar has no Windows release asset.
+Unsupported agent kinds show Limits unavailable. API credentials and custom
+provider settings can prevent Codex or Claude subscription readings.
+
+Codex uses its native app server. Claude and Grok require CodexBar CLI
+0.74.0. Install the pinned CLI into private Lantern state with
+`sh bin/plan-usage install`. The installer checks the release digest.
+It does not install the desktop app or change the user's CodexBar config.
+There is no Windows release asset for this dependency. An absent dependency
+affects only its provider row. The watcher does not download tools.
+An absolute `LANTERN_CODEXBAR_BIN` can select a CLI of the same version.
+An invalid explicit path does not fall back to another tool.
+
+Use the detected Python 3 command with `$LANTERN_PLAN_USAGE pane` to restore
+the usage pane. `refresh` prints the shared cache. `collect` makes one bounded
+collection when no watcher owns the collector. State stays outside the repo.
+The readout does not send prompts or start model turns.
 
 Lantern works great with Elves. Without Elves it is still the Herdr
 plugin: workspaces, panes, agents. If `.elves-session.json` files exist,
@@ -247,7 +307,7 @@ session. It rechecks identity and repository state immediately before close
 and reports failed gates without closing those tabs. Workspace cleanup requires
 every child tab to pass. Worktree removal remains separate. The Lantern home
 tab, pane, and workspace are never cleanup targets. `close bar` remains the
-stricter merged-main-and-deploy workflow.
+stricter merged-branch-and-deploy workflow.
 
 At the end of the day, run this from a terminal outside the Lantern pane:
 
@@ -400,10 +460,10 @@ from its home tab and raises only decisions that need you.
 | `sweep battle-paddle, image-maker with astra high` | One audit agent per repo. High ROI issues only. Stop before Elves. |
 | `issue harvest battle-paddle, image-maker` | Read open issues. Bring a menu of 1-3 landable runs per repo. You pick. |
 | `stage relay recovery on battle-paddle with astra high` | Plan PR if needed, implementation draft PR, worktree, and exact phase routes. Stop before execution. |
-| `landable loop relay recovery on battle-paddle with astra high, merge when clean` | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, GitHub version, deploy check, pull main, report closable. |
+| `landable loop relay recovery on battle-paddle with astra high, merge when clean` | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, post-merge steps for its landing path, report closable. |
 | `parallel pack relay recovery on battle-paddle and export fixes on image-maker with astra high, merge when clean` | Start the selected independent runs. Continue healthy runs when another blocks. |
 | `cutoff resume relay recovery` | Exact session, same kind and model, same worktree and phase. No silent substitute. |
-| `close bar` | List merged tabs on current main with a passed deploy check or a stated deployment block. You name what to close. |
+| `close bar` | List merged tabs whose merged branch is current, with a passed deploy check or a stated deployment block. You name what to close. |
 
 For `landable loop` and `parallel pack`, omit `merge when clean` to stop at a
 landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage never grants merge authority.

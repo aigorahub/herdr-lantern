@@ -162,6 +162,8 @@ LANTERN_TEAM_STATE_DIR=$LANTERN_HERD_STATE_DIR
 export LANTERN_TEAM_STATE_DIR
 LANTERN_FIELD_STATUS=$(helper_native_path "$plugin_root/bin/field_status.py")
 export LANTERN_FIELD_STATUS
+LANTERN_PLAN_USAGE=$(helper_native_path "$plugin_root/bin/plan_usage.py")
+export LANTERN_PLAN_USAGE
 LANTERN_HOME_PANE_ID=${HERDR_PANE_ID:-}
 export LANTERN_HOME_PANE_ID
 (umask 077; mkdir -p "$herd_state_dir") ||
@@ -222,13 +224,32 @@ Runtime (injected by launch.sh; do not ignore):
 - Field Status executable: $LANTERN_FIELD_STATUS
   (environment: LANTERN_FIELD_STATUS). Run with the detected Python 3 command.
   For a Field Status request, invoke \`pane\` to open or reuse the compact
-  right-side view. The pane runs \`watch\` and redraws on meaningful changes.
+  Field Status pane. It runs \`watch\` and redraws on meaningful changes.
   Reconcile unfinished pack records and review evidence before opening it.
   Use \`note needs-you set/clear\` for exact user actions and
   \`note important set/clear\` for noteworthy status or gates needing no user action.
   Use \`note keep set/clear\` only for a user-requested Keep entry and
   \`note done set/clear\` for a verified task outcome. Do not
   paste Ran command transcripts into the chat. Keep Lantern Home open.
+
+- Plan Usage executable: $LANTERN_PLAN_USAGE
+  (environment: LANTERN_PLAN_USAGE). Chat, Field Status, and Plan Usage open
+  beside chat in one tab at startup. Chat is on the left. Field Status uses the
+  top two thirds of the right column. Usage uses the bottom third. For a usage request, invoke \`pane\` with
+  the detected Python 3 command to restore its pane. Use \`refresh\` to read
+  the cache. The view shows one table row per service with open agent tabs across workspaces.
+  Show session and weekly percentages left, plus weekly reset times in local time.
+  Omit agents, tab counts, account IDs, model IDs, plan names, credits, and source details.
+  Each period shows its lowest remaining percentage across service limits and login profiles.
+  The weekly reset belongs to that limiting value. Claude uses its total weekly reset
+  when total and model limits have the same percentage. Other tied limits with different reset times
+  show Varies. Missing or expired reset times show --. Narrow panes ask for more width.
+  Never add separate limits. Google uses its zero-turn native usage
+  command. Grok uses the saved OAuth plan. Fugu uses the configured profile quota API.
+  Idle and Done tabs count. Account unknown has no measured allowance.
+  Align percentages to the right. Unreadable extra tabs do not add warnings when
+  that service has measured limits. Keep stale, failed-update, and sign-in warnings.
+  Do not prompt an agent or answer its approval to collect usage.
 
 $session_capture_note
 
@@ -355,8 +376,8 @@ $onboard_note
   plan. Run it only after the user confirms that exact plan.
 - Field Status uses $LANTERN_FIELD_STATUS. On light-up, use \`--plain refresh\`
   for the initial readout. For "Field Status", "what’s going on", or any field
-  question, use the detected Python 3 command with \`pane\` to open or reuse one
-  right-side pane beside Lantern Home; \`watch\` keeps the display current.
+  question, use the detected Python 3 command with \`pane\` to restore or reuse
+  the top right pane in the chat tab; \`watch\` keeps the display current.
   Join \`herdr tab list\`, \`herdr agent list\`, and \`herdr workspace list\`
   by ID. Keep every open tab, including quiet/idle tabs and Lantern Home.
   Show human-readable workspace names in yellow, never internal agent
@@ -532,6 +553,8 @@ else
         "the real herdr binary was not found from this pane"
 fi
 helper_python=$(helper_detect_python) || helper_python=
+helper_setup_views "$plugin_root" "$state_dir" "${HERDR_WORKSPACE_ID:-}" \
+    "$LANTERN_HOME_PANE_ID" "$workdir" "$real_herdr" || true
 if [ -n "$helper_python" ]; then
     # $helper_python is split on purpose: the Windows launcher is `py -3`.
     if [ -n "$real_herdr" ]; then

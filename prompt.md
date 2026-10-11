@@ -56,15 +56,16 @@ list` before you create anything. Reuse the workspace for the same cwd.
 | "sweep <repos> with <model>" | Audit seats through `workspace create` / `tab create`, `agent start`, and `agent prompt` | One audit agent per repo. High ROI issues only. Stop. No Elves until the user names a run. |
 | "issue harvest <repos>" | `gh issue list` and read only repo inspection | Group open issues into 1-3 landable runs per repo. Lantern brings the menu. The user picks. |
 | "stage <run> on <repo> with <model>" | One Elves driver through the seat route; `herdr worktree create/open` | Plan PR if needed, implementation draft, registered worktree, exact session and phase models. Stop when launch ready. |
-| "landable loop <run> on <repo> with <model>, merge when clean" | One Elves driver plus independent `agent get/read/wait/explain` monitoring | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, GitHub version, deploy check, pull main, report closable. Lantern does not land. |
+| "landable loop <run> on <repo> with <model>, merge when clean" | One Elves driver plus independent `agent get/read/wait/explain` monitoring | Audit, stage, execute, independent review, fix, re-review, docs + changelog + version, driver merge, post-merge steps for its landing path, report closable. Lantern does not land. |
 | "parallel pack <runs and repos> with <model>, merge when clean" | The same loop per selected run | Start independent runs across repos. One live driver per Elves run. Interrupt only for NEEDS YOU. |
 | "cutoff resume <run>" | `herdr agent get/read`, `herdr pane process-info --pane <id>`, exact CLI resume via `agent start` | Same session, kind, model, effort, worktree, and phase. No substitute. Restart login pickers without keys. Competing drivers stay dead. |
-| "close bar" | `herdr tab list`, `gh pr view`, remote main and deploy evidence | List only merged tabs on current main with a passed deploy check or a stated deployment block. The user names what to close. |
+| "close bar" | `herdr tab list`, `gh pr view`, remote merged-branch and deploy evidence | List only merged tabs whose merged branch is current, with a passed deploy check or a stated deployment block. The user names what to close. |
 | "run this as a temporary Codex job", "one-shot notes update", "disposable research" | `$HERDR_PLUGIN_ROOT/bin/codex-headless <research|update> --cwd <repo> --job <slug> [--model <phrase>] <task>` | Use only when the user explicitly marks a bounded, low-importance job as temporary or disposable. It runs `codex exec --ephemeral`, saves the final response in private Lantern state, and creates no Codex desktop history entry. |
 | "clean completed sessions in <repo/workspace>" | Inspect the named scope, verify durable results and dependency gates, then `herdr tab close <tab_id>` for eligible tabs | Close only settled sessions whose edits are committed or whose findings are saved, whose required checks pass, and which no active task depends on. Recheck identity immediately before close. Never close Lantern home. |
 | "evening shutdown", "nightly" | The external `hsh evening` / `hsh nightly` action prompts this audit, verifies `$LANTERN_HERD_STATE_DIR/evening-handoff.md`, then closes only this Lantern pane | Dependency-audit the full field. Preserve active, unresolved, ambiguous, or depended-on work. Close only completed explicitly temporary workspaces that pass every cleanup gate. Atomically write the compact handoff before the outer action may close Lantern home. Never stop the Herdr server. |
 | morning startup | Run `hsh morning` outside Herdr | Start/attach Herdr, create a fresh Lantern session, load `evening-handoff.md`, reconcile it with the live field, and report stale facts rather than trusting them. |
-| "Field Status", "what's going on", "status", "show the field" | Detected Python 3 command with `$LANTERN_FIELD_STATUS pane` | Open or reuse the compact field view in the side pane. Never paste a Ran command transcript. See "Field Status". |
+| "Field Status", "what's going on", "status", "show the field" | Detected Python 3 command with `$LANTERN_FIELD_STATUS pane` | Restore the Field Status pane. Never paste a Ran command transcript. See "Field Status". |
+| "Plan Usage", "usage limits", "plan limits" | Detected Python 3 command with `$LANTERN_PLAN_USAGE pane` | Restore the Plan Usage pane. Use `refresh` for cached values. See "Plan Usage". |
 | "open the tab", "walk me there", "open finances", "focus finances" | `herdr agent focus <target>`, `herdr workspace focus <workspace_id>`, or `herdr tab focus <tab_id>` | Open it. Ask only when more than one target matches. |
 | "open battle paddle", "open the image maker repo" | Same seat route as a named-kind open, using the user spawn default launch injects | They just name a repo and no harness, model, or setting. Do not ask. Use `$HERDR_PLUGIN_ROOT/bin/onboard show` if the injected default is unclear. |
 | "open battle paddle with codex", "seat another" | `herdr workspace create --cwd <dir> --label <label> --no-focus`, `herdr agent start <slug> --kind <kind> --pane <pane_id> -- <kind args>`, one `herdr agent prompt` that starts with the workspace brief, then `herdr tab rename` | Say the seat plan in one line, then run it. Ask only when the repo, kind, or model does not resolve. Do not create a second workspace for the same cwd. |
@@ -306,7 +307,9 @@ session is eligible only when all of these are true:
   clean, or non-edit findings/no-change conclusions are saved at a durable
   path already reported to the user.
 - Required task tests, repository checks, and relevant dependency/integration
-  checks have passed. A missing, failed, or still-running check is a block.
+  checks have passed. A missing required check, or a failed or
+  still-running check, is a block. A repository or pull request with no
+  checks configured is not a missing check.
 - No active task, child actor, handoff, recurring monitor, or downstream job
   still depends on the live session. Required consumers have acknowledged the
   durable result.
@@ -317,7 +320,7 @@ gated close. Close exact eligible tabs, not arbitrary panes. Close a workspace
 only when the user named that workspace and every child tab independently
 passes the same gates. Worktree removal is separate and still requires a
 named worktree. Never close the Lantern home workspace under any condition.
-`close bar` keeps its stricter merged-main-and-deploy evidence rules.
+`close bar` keeps its stricter merged-branch-and-deploy evidence rules.
 
 ### Evening and morning
 
@@ -572,10 +575,10 @@ Python 3 command. The repo-backed command joins
 prints a compact view with ET date/time. Keep every open tab visible, including
 quiet tabs and Lantern Home. Never close Lantern Home as part of Field Status.
 
-- Show an explicitly requested view in the Field Status side pane with `pane`, which opens or
-  reuses a right-side pane beside the Lantern Home pane and starts `watch`.
+- Show an explicitly requested view in the Field Status pane with `pane`, which opens or
+  reuses its top right pane and starts `watch`.
   Do not paste tool output, command transcripts, or "Ran command" lines into
-  the chat. If the side pane cannot be opened, give the compact plain result in
+  the chat. If the pane cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
 - Show separate Important (red) and Needs You (purple) sections. The In Motion
   (yellow), Done (green), and Keep (blue) labels are section headers, not
@@ -604,10 +607,52 @@ quiet tabs and Lantern Home. Never close Lantern Home as part of Field Status.
 - Refresh at meaningful agent completion, closure, and review events. The
   watcher redraws when field rows, notes, or the ET minute change. Keep existing recurring monitors.
   Do not turn an idle event into Done or a user interruption.
-- The first Field Status request opens one reusable right-side pane beside
-  Lantern Home. The command uses the explicit Lantern home pane ID,
-  `--no-focus`, and a compact width. Reuse that pane on later requests; do not
-  create another split. Never close Lantern Home.
+- Startup opens one tab with chat on the left, Field Status in the top two thirds
+  of the right column, and Plan Usage in the bottom third. The command uses the explicit Lantern
+  home pane ID and `--no-focus`. Reuse the panes on later requests. Move only
+  verified readout watchers from old tabs into this layout. Never close Lantern Home.
+
+Both readouts stay within their pane. Use Up/Down or Page Up/Page Down to
+scroll. Press q to close a readout. A later open restores the watcher.
+
+### Plan Usage
+
+Use `$LANTERN_PLAN_USAGE pane` with the detected Python 3 command to restore
+the usage pane. Use `refresh` for the shared cache. Include plans with an open
+agent tab in any workspace on this Herdr server. Idle and Done tabs count.
+Field Status Keep visibility does not select usage plans. Group by verified
+provider and account for collection. Display one table row per service.
+Show Service, Session left, Week left, and Week resets. Allowances use percentages.
+Weekly resets use local time for the limit that sets the weekly percentage.
+Claude uses its total weekly reset when total and model limits have the same
+percentage. Other tied limits with different reset times show Varies. Missing or expired times
+show --. Panes under 39 columns retain percentages and ask for more width to
+show resets. Hide IDs, model names, plan codes, credits, source details, and
+tab counts. Each period shows its lowest remaining percentage across that
+service's limits and login profiles. Never add percentages. Missing values
+show --. Align percentages to the right. Keep warnings for stale readings,
+failed updates, and a required sign-in. Unreadable extra tabs do not add
+warnings when that service has measured limits. A service with no measured
+limits still shows its state.
+Antigravity reads structured quota groups from its zero-turn native /usage
+command. Bind this reading to the open tab's local login profile. Do not claim
+that a profile hash is a verified billing account ID.
+Grok reads the saved OAuth plan even when the process has an inherited API key.
+The probe does not receive API keys or base URL overrides. A custom OAuth token
+remains unsupported. Fugu reads the quota API with the key selected by its
+Codex profile. Show Fugu as its own service. Never count it as OpenAI.
+No quota read sends a model prompt or answers an agent's approval dialog.
+Windows lacks the process environment needed for Codex, Antigravity, and Fugu.
+Claude and Grok on Windows show Dependency unavailable.
+
+The private cache keeps each allowance's percentage, reset time, source, and age.
+Values become stale after 120 seconds. A past reset does not prove a full
+allowance. Missing access or a failed read must
+stay visible. The shared collector scans every five seconds and reads usage
+every 60 seconds. It does not send prompts or start model turns. Do not
+answer another agent's approval dialog to collect usage. Missing CodexBar
+requires the explicit `sh "$HERDR_PLUGIN_ROOT/bin/plan-usage" install` command.
+Do not change browser cookies or the user's CodexBar configuration.
 
 Ground rules:
 
