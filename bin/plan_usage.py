@@ -289,7 +289,12 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         heading.append("Week resets")
     elif not full_labels:
         lines.append("Percent left.")
-    lines.append(style(gap.join(t.ljust(w) for t, w in zip(heading, widths)).rstrip(), "1"))
+    def align(text: str, index: int, size: int) -> str:
+        if index in (1, 2):
+            return text.rjust(size)
+        return text if index == len(widths) - 1 else text.ljust(size)
+
+    lines.append(style(gap.join(align(t, i, w) for i, (t, w) in enumerate(zip(heading, widths))).rstrip(), "1"))
     lines.append(style(gap.join("-" * w for w in widths), "2"))
     notes = [] if show_resets else ["Widen pane for weekly reset times."]
 
@@ -297,8 +302,8 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         parts = [textwrap.wrap(field.clean(cell, 500), width=w) or [""] for cell, w in zip(cells, widths)]
         for index in range(max(map(len, parts))):
             values = [part[index] if index < len(part) else "" for part in parts]
-            lines.append(gap.join(style(value.ljust(w) if i < len(widths) - 1 else value, (codes or [""] * len(widths))[i])
-                                    if (codes or [""] * len(widths))[i] else (value.ljust(w) if i < len(widths) - 1 else value)
+            lines.append(gap.join(style(align(value, i, w), (codes or [""] * len(widths))[i])
+                                    if (codes or [""] * len(widths))[i] else align(value, i, w)
                                     for i, (value, w) in enumerate(zip(values, widths))).rstrip())
 
     def period(value: dict) -> str | None:
@@ -346,6 +351,13 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             row_stale = age >= 120 or snapshot.get("scan_failed") or row.get("state") != "Measured"
             for label in ("session", "week"):
                 candidates = [value for value in row["windows"] if period(value) == label]
+                if row["provider"] == "claude" and label == "week" and candidates:
+                    # Select this account's total reset when model windows tie it.
+                    # The ID fallback also handles snapshots from older readers.
+                    lowest = min(value["remaining"] for value in candidates)
+                    total = [value for value in candidates if value["remaining"] == lowest
+                             and (value.get("scope") == "service" or value.get("id") == "secondary")]
+                    candidates = total or candidates
                 for value in candidates:
                     reset = value.get("reset_at")
                     outdated = row_stale or bool(reset and reset <= now)
@@ -363,14 +375,17 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             codes.append(code)
         if show_resets:
             values.append(reset_time(selected.get("week", (None, False, set()))[2]))
-            codes.append("2")
+            codes.append("" if values[-1] not in ("--", "Varies") else "2")
         add(values, codes)
         if stale:
             notes.append(f"{name}: * Waiting for fresh limits.")
         if not selected:
             notes.append(f"{name}: {', '.join(sorted(notices)) or 'Limits unavailable'}.")
-        elif notices:
-            notes.append(f"{name}: some limits are unavailable.")
+        else:
+            # Unreadable or unsupported extra tabs do not invalidate measured plans.
+            errors = notices - {"Account unknown", "Limits unavailable", "Dependency unavailable", "Reading usage"}
+            if errors:
+                notes.append(f"{name}: {', '.join(sorted(errors))}.")
     if notes:
         lines.append("")
         for note in dict.fromkeys(notes):

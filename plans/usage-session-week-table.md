@@ -1,5 +1,12 @@
 # Session and weekly usage table
 
+Version 0.17.5 aligns percentage columns to the right and uses normal text
+contrast for weekly resets. Claude uses its total weekly reset when total
+and model limits have the same percentage. A lower model allowance still
+sets the weekly percentage and reset. Unreadable extra tabs do not add
+warnings when the service has measured limits. Stale readings, failed updates,
+required sign-ins, and services with no measured limits keep their states.
+
 The 0.17.1 table mixed percentages with IDs, plan codes, credits, source
 labels, and update age. Version 0.17.2 shows the values needed for the next
 work session: Service, Session, Session reset, Week, and Week reset.

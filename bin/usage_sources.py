@@ -434,10 +434,14 @@ def parse_codexbar(payload: object, provider: str, observed: float, auth: dict |
                 label = labels.get(position) or cadence(value.get("windowMinutes"), position)
                 parsed = window(value, label, position)
                 if parsed:
+                    if provider == "claude":
+                        parsed["scope"] = "model" if position == "tertiary" else "service"
                     windows.append(parsed)
     for extra in extras:
         parsed = window(extra.get("window"), extra.get("title") or "Allowance", extra.get("id") or "extra")
         if parsed:
+            if provider == "claude":
+                parsed["scope"] = "model"
             windows.append(parsed)
     if not windows:
         raise SourceError("Limits unavailable")
