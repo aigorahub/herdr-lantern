@@ -197,7 +197,7 @@ def claude_cost_usage(result: str) -> bool:
     }
     seen = set()
     models = set()
-    model_usage = r"([A-Za-z0-9._/\[\]-]+):\s*" + usage + r"(?:\s*\(\$\d+(?:\.\d+)?\))?"
+    model_usage = r"(\S+):\s*" + usage + r"(?:\s*\(\$\d+(?:\.\d+)?\))?"
     for line in result.splitlines():
         if not line.strip():
             continue

@@ -450,6 +450,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                             "claude-sonnet-4-6: 1.2k input, 5.3k output, 940.0k cache read, 50.0k cache write ($0.55)"))
         self.assertTrue(preflight.claude_cost_usage(result))
         self.assertTrue(preflight.claude_cost_usage(result + "\nclaude-opus-5: 20 input, 30 output ($0.01)"))
+        self.assertTrue(preflight.claude_cost_usage(result + "\nus.anthropic.claude-opus-v1:0: 20 input, 30 output ($0.01)"))
         with patch.object(preflight, "claude_capabilities", return_value=({"opus": ("claude-opus-5", {"high"})}, "CLAUDE_CODE_OAUTH_TOKEN")), \
                 patch.object(preflight, "run", return_value=json.dumps({"result": result, "subtype": "success", "is_error": False})):
             code, payload = self.check("claude", "opus", "high")
