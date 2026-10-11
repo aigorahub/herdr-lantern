@@ -434,11 +434,32 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                             "Total duration (wall): 4s", "Total code changes:    0 lines added, 0 lines removed",
                             "Usage:                 0 input, 0 output, 0 cache read, 0 cache write"))
         self.assertTrue(preflight.claude_cost_usage(result))
+        self.assertTrue(preflight.claude_cost_usage(result.replace("$0.0000", "$0.0000 at your organization's configured rates")))
         for invalid in ("", "Total cost: $0.00", "Usage: 0 input, 0 output", "Failed to retrieve usage",
                         result + "\nAPI Error: authentication failed",
                         "Authentication failed: token expired\n" + result,
                         result + ", malformed data", result + "\nUsage: 0 input, 0 output",
                         result.replace("Total duration (API):  0s", "Total duration (API): error")):
+            self.assertFalse(preflight.claude_cost_usage(invalid))
+
+    def test_claude_cost_view_supports_documented_model_breakdown(self):
+        # Claude Code costs guide: https://code.claude.com/docs/en/costs
+        result = "\n".join(("Total cost: $0.55", "Total duration (API): 6m 20s",
+                            "Total duration (wall): 6h 33m 10s",
+                            "Total code changes: 0 lines added, 0 lines removed", "Usage by model:",
+                            "claude-sonnet-4-6: 1.2k input, 5.3k output, 940.0k cache read, 50.0k cache write ($0.55)"))
+        self.assertTrue(preflight.claude_cost_usage(result))
+        self.assertTrue(preflight.claude_cost_usage(result + "\nclaude-opus-5: 20 input, 30 output ($0.01)"))
+        with patch.object(preflight, "claude_capabilities", return_value=({"opus": ("claude-opus-5", {"high"})}, "CLAUDE_CODE_OAUTH_TOKEN")), \
+                patch.object(preflight, "run", return_value=json.dumps({"result": result, "subtype": "success", "is_error": False})):
+            code, payload = self.check("claude", "opus", "high")
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["quota"], "unknown")
+        for invalid in ("Authentication failed: token expired\n" + result,
+                        result + ", malformed data", result + "\nUsage by model:",
+                        result + "\n" + result.splitlines()[-1],
+                        "\n".join(result.splitlines()[:-1]), result + "\nUsage: 0 input, 0 output",
+                        result.replace("1.2k input", "bad input")):
             self.assertFalse(preflight.claude_cost_usage(invalid))
 
 if __name__ == "__main__":

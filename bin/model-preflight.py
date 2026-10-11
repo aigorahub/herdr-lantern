@@ -185,22 +185,33 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
 def claude_cost_usage(result: str) -> bool:
     """Recognize the complete successful cost view for token logins."""
     duration = r"(?:\d+(?:\.\d+)?(?:ms|s|m|h|d)\s*)+"
+    count = r"\d+(?:\.\d+)?[kKmMbB]?"
+    usage = count + r" input,\s*" + count + r" output(?:,\s*" + count + r" cache read,\s*" + count + r" cache write)?"
     patterns = {
-        "cost": r"Total cost:\s*\$\d+(?:\.\d+)?",
+        "cost": r"Total cost:\s*\$\d+(?:\.\d+)?(?:\s+at your organization's configured rates|\s+\(at your organization's configured rates\))?",
         "api": r"Total duration \(API\):\s*" + duration,
         "wall": r"Total duration \(wall\):\s*" + duration,
         "changes": r"Total code changes:\s*\d+ lines added,\s*\d+ lines removed",
-        "usage": r"Usage:\s*\d+ input,\s*\d+ output(?:,\s*\d+ cache read,\s*\d+ cache write)?",
+        "usage": r"Usage:\s*" + usage,
+        "models": r"Usage by model:",
     }
     seen = set()
+    models = set()
+    model_usage = r"([A-Za-z0-9._/\[\]-]+):\s*" + usage + r"(?:\s*\(\$\d+(?:\.\d+)?\))?"
     for line in result.splitlines():
         if not line.strip():
             continue
         key = next((key for key, pattern in patterns.items() if re.fullmatch(pattern, line.strip())), None)
-        if key is None or key in seen:
+        if key is None:
+            model = re.fullmatch(model_usage, line.strip()) if "models" in seen else None
+            if model is None or model[1] in models:
+                return False
+            models.add(model[1])
+            continue
+        if key in seen or key == "models" and "usage" in seen or key == "usage" and "models" in seen:
             return False
         seen.add(key)
-    return {"cost", "usage"} <= seen
+    return "cost" in seen and ("usage" in seen or "models" in seen and bool(models))
 
 
 def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | None:
