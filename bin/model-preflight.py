@@ -184,13 +184,17 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
 
 def claude_cost_usage(result: str) -> bool:
     """Recognize the complete successful cost view for token logins."""
+    if re.search(r"\b(?:API Error|Authentication failed|Not logged in|Failed to retrieve usage)\b", result, re.IGNORECASE):
+        return False
     duration = r"(?:\d+(?:\.\d+)?(?:ms|s|m|h|d)\s*)+"
     count = r"\d+(?:\.\d+)?[kKmMbB]?"
     usage = count + r" input,\s*" + count + r" output(?:,\s*" + count + r" cache read,\s*" + count + r" cache write)?"
     cache = (r"Prompt cache \(main\):\s*\d+ requests?\s*·\s*\d+(?:\.\d+)?% of input tokens from cache"
-             r"\s*·\s*\d+ miss(?:es)?(?:\s*\([^()\r\n]+\))?"
-             r"(?:\s*·\s*\d+ expected rebuilds?(?:\s*\([^()\r\n]+\))?)?"
-             r"\s*·\s*(?:(?:warm|cold)\s*\([^()\r\n]+\)|no prompt caching reported by the API)")
+             r"\s*·\s*\d+ miss(?:es)?(?:\s*\(last\s*" + duration + r"ago,\s*" + count
+             + r" tokens re-cached(?:,\s*likely cause:\s*[^()\r\n·]+)?\))?"
+             r"(?:\s*·\s*\d+ expected rebuilds?(?:\s*\((?:compaction|tool-result clearing|compaction or tool-result clearing)\))?)?"
+             r"\s*·\s*(?:(?:warm|cold)\s*\(" + duration + r"TTL,\s*last activity\s*" + duration
+             + r"ago\)|no prompt caching reported by the API)")
     patterns = {
         "cost": r"Total cost:\s*\$\d+(?:\.\d+)?(?:\s+at your organization's configured rates|\s+\(at your organization's configured rates\))?",
         "api": r"Total duration \(API\):\s*" + duration,
