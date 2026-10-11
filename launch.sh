@@ -238,6 +238,8 @@ Runtime (injected by launch.sh; do not ignore):
   top two thirds of the right column. Usage uses the bottom third. For a usage request, invoke \`pane\` with
   the detected Python 3 command to restore its pane. Use \`refresh\` to read
   the cache. The view shows one table row per service with open agent tabs across workspaces.
+  The configured local fugu profile also stays visible after short review commands end.
+  Its key stays in memory. Changed keys or profile files hide prior values.
   Show session and weekly percentages left, plus weekly reset times in local time.
   Omit agents, tab counts, account IDs, model IDs, plan names, credits, and source details.
   Each period shows its lowest remaining percentage across service limits and login profiles.
