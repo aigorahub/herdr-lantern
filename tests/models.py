@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -349,15 +350,148 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                 self.assertEqual(result["substitute"]["model"], "opus")
             self.assertEqual(self.check("claude", "opus", "high")[0], 0)
 
-    def test_fable_51_available_and_unreadable_usage(self):
-        for usage in ("Current session: 0% used", "unparseable"):
-            with patch.object(preflight, "run", side_effect=[CLAUDE_HELP, CLAUDE_CATALOG, json.dumps({"result": usage})]):
-                if usage == "unparseable":
-                    with self.assertRaises(preflight.CheckError):
-                        self.check("claude", "claude-fable-5-1", "high")
+    def test_claude_login_and_usage_preflight(self):
+        cases = (
+            ("oauth-token", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 0, "unknown"),
+            ("none", json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
+            ("login-source", json.dumps({"result": "Current session: 0% used"}), 0, None),
+            ("login-source", json.dumps({"result": "Current session: 100% used"}), 3, "100% used"),
+            (None, json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
+            ("", json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
+            ("   ", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (True, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (7, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (["token"], json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            ({"status": "logged-out"}, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            (" NONE ", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Failed to retrieve usage"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "unparseable"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": ""}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": True}), 2, "reported an error"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": "false"}), 2, "error flag is not boolean"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "error_during_execution"}), 2, "unsuccessful result"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Authentication failed: token expired\nTotal cost: $0.00\nUsage: 0 input, 0 output"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output, malformed data"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "success", "is_error": False}), 0, "unknown"),
+            (None, json.dumps({"result": "Current session: 0% used"}), 0, None),
+            ("oauth-token", "unparseable", 2, "unparseable usage JSON"),
+            ("oauth-token", json.dumps({"result": None}), 2, "usage result is not text"),
+        )
+        for token_source, usage, expected_code, expected in cases:
+            with self.subTest(token_source=token_source, usage=usage):
+                catalog = json.loads(CLAUDE_CATALOG)
+                if token_source is None:
+                    catalog["response"]["response"].pop("account", None)
                 else:
-                    self.assertEqual(self.check("claude", "claude-fable-5-1", "high")[0], 0)
+                    catalog["response"]["response"]["account"] = {"tokenSource": token_source}
 
+                def run(command, *, input_text=None, catalog=catalog, usage=usage):
+                    if command == ["claude", "--help"]:
+                        return CLAUDE_HELP
+                    if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                        return usage
+                    if command == ["agent", "--list-models"]:
+                        return "gpt-5.6-sol-high-fast - GPT Sol\n"
+                    return json.dumps(catalog)
+
+                with patch.object(preflight, "run", side_effect=run):
+                    if expected_code == 2:
+                        with self.assertRaises(preflight.CheckError) as raised:
+                            self.check("claude", "opus", "high")
+                        self.assertIn(expected, str(raised.exception))
+                        continue
+                    code, payload = self.check("claude", "opus", "high")
+                    self.assertEqual(code, expected_code)
+                    if expected_code == 3:
+                        self.assertIn(expected, payload["reason"])
+                    elif expected is None:
+                        self.assertTrue(payload["available"])
+                        self.assertNotIn("quota", payload)
+                    else:
+                        self.assertTrue(payload["available"])
+                        self.assertEqual(payload["quota"], expected)
+                        self.assertEqual(self.check("claude", "sonnet", "max")[0], 3)
+                        self.assertEqual(self.check("claude", "invented", "high")[0], 3)
+
+    def test_claude_catalog_keeps_optional_account_metadata_optional(self):
+        for account in (None, {}, {"tokenSource": None}, {"tokenSource": True}, "invalid"):
+            with self.subTest(account=account):
+                catalog = json.loads(CLAUDE_CATALOG)
+                catalog["response"]["response"]["account"] = account
+                def run(command, *, input_text=None):
+                    if command == ["claude", "--help"]:
+                        return CLAUDE_HELP
+                    if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                        return json.dumps({"result": "Current session: 0% used"})
+                    return json.dumps(catalog)
+                self.assertIn("opus", route.claude_model_catalog(run))
+                with patch.object(preflight, "run", side_effect=run):
+                    self.assertEqual(preflight.claude_capabilities()[1], None)
+                    self.assertEqual(self.check("claude", "opus", "high")[0], 0)
+
+    def test_claude_cost_view_requires_successful_structured_text(self):
+        result = "\n".join(("Total cost:            $0.0000", "Total duration (API):  0s",
+                            "Total duration (wall): 4s", "Total code changes:    0 lines added, 0 lines removed",
+                            "Usage:                 0 input, 0 output, 0 cache read, 0 cache write"))
+        self.assertTrue(preflight.claude_cost_usage(result))
+        self.assertTrue(preflight.claude_cost_usage(result.replace("$0.0000", "$0.0000 at your organization's configured rates")))
+        for invalid in ("", "Total cost: $0.00", "Usage: 0 input, 0 output", "Failed to retrieve usage",
+                        result + "\nAPI Error: authentication failed",
+                        "Authentication failed: token expired\n" + result,
+                        result + ", malformed data", result + "\nUsage: 0 input, 0 output",
+                        result.replace("Total duration (API):  0s", "Total duration (API): error")):
+            self.assertFalse(preflight.claude_cost_usage(invalid))
+
+    def test_claude_cost_view_supports_documented_model_breakdown(self):
+        # Claude Code costs guide: https://code.claude.com/docs/en/costs
+        result = "\n".join(("Total cost: $0.55", "Total duration (API): 6m 20s",
+                            "Total duration (wall): 6h 33m 10s",
+                            "Total code changes: 0 lines added, 0 lines removed", "Usage by model:",
+                            "claude-sonnet-4-6: 1.2k input, 5.3k output, 940.0k cache read, 50.0k cache write ($0.55)"))
+        self.assertTrue(preflight.claude_cost_usage(result))
+        self.assertTrue(preflight.claude_cost_usage(result + "\nclaude-opus-5: 20 input, 30 output ($0.01)"))
+        self.assertTrue(preflight.claude_cost_usage(result + "\nus.anthropic.claude-opus-v1:0: 20 input, 30 output ($0.01)"))
+        with patch.object(preflight, "claude_capabilities", return_value=({"opus": ("claude-opus-5", {"high"})}, "CLAUDE_CODE_OAUTH_TOKEN")), \
+                patch.object(preflight, "run", return_value=json.dumps({"result": result, "subtype": "success", "is_error": False})):
+            code, payload = self.check("claude", "opus", "high")
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["quota"], "unknown")
+        for invalid in ("Authentication failed: token expired\n" + result,
+                        result + ", malformed data", result + "\nUsage by model:",
+                        result + "\n" + result.splitlines()[-1],
+                        "\n".join(result.splitlines()[:-1]), result + "\nUsage: 0 input, 0 output",
+                        result.replace("1.2k input", "bad input")):
+            self.assertFalse(preflight.claude_cost_usage(invalid))
+        for index in (0, 1, 2, 3):
+            incomplete = "\n".join(line for i, line in enumerate(result.splitlines()) if i != index)
+            self.assertFalse(preflight.claude_cost_usage(incomplete))
+
+    def test_claude_cost_view_supports_optional_prompt_cache_summary(self):
+        result = "\n".join(("Total cost: $0.55", "Total duration (API): 6m 20s",
+                            "Total duration (wall): 6h 33m 10s",
+                            "Total code changes: 0 lines added, 0 lines removed", "Usage by model:",
+                            "claude-sonnet-4-6: 1.2k input, 5.3k output, 940.0k cache read, 50.0k cache write ($0.55)"))
+        cache = "Prompt cache (main): 14 requests · 91% of input tokens from cache · 2 misses (last 6m 10s ago, 310.2k tokens re-cached) · warm (1h TTL, last activity 40s ago)"
+        for line in (cache, cache.replace(" · warm", " · 1 expected rebuild (compaction or tool-result clearing) · warm"),
+                     cache.replace(" · warm", "\n· warm"),
+                     cache.replace("tokens re-cached)", "tokens re-cached, likely cause: tool definitions changed)"),
+                     cache.replace("2 misses (last 6m 10s ago, 310.2k tokens re-cached)", "no misses"),
+                     cache.replace("last 6m 10s ago,", "last 6m 10s ago \u2014 likely cause: tool definitions changed (+3/-0),"),
+                     cache.replace("warm (1h TTL, last activity 40s ago)", "cold \u2014 idle 2h 40s, next turn re-caches ~310.2k tokens"),
+                     cache.replace("warm (1h TTL, last activity 40s ago)", "cold \u2014 idle 2h 40s, next turn re-caches the compacted prompt"),
+                     "Prompt cache (main): 0 requests · 0% of input tokens from cache · 0 misses · no prompt caching reported by the API"):
+            self.assertTrue(preflight.claude_cost_usage(result + "\n" + line))
+        for line in ("Prompt cache (main): Authentication failed", cache + " malformed data", cache + "\n" + cache,
+                     cache.replace("40s ago)", "40s ago, API Error: authentication failed)"),
+                     cache.replace("40s ago)", "40s ago, malformed data)"),
+                     cache.replace("last 6m 10s ago", "last bad time"),
+                     cache.replace("last 6m 10s ago, 310.2k tokens re-cached", "last 6m 10s ago \u2014 likely cause: tool definitions changed (+3/-0), 310.2k tokens re-cached, likely cause: session compaction"),
+                     cache.replace("last 6m 10s ago, 310.2k tokens re-cached", "last 6m 10s ago \u2014 likely cause: tool definitions changed, 99 tokens re-cached, 310.2k tokens re-cached"),
+                     cache.replace("tokens re-cached)", "tokens re-cached, API Error: authentication failed)"),
+                     cache.replace(" · warm", " · 1 expected rebuild (Authentication failed) · warm")):
+            self.assertFalse(preflight.claude_cost_usage(result + "\n" + line))
+        empty = "Prompt cache (main): 0 requests · 0% of input tokens from cache · no misses · no prompt caching reported by the API"
+        self.assertTrue(preflight.claude_cost_usage(result + "\n" + empty))
 
 if __name__ == "__main__":
     unittest.main()

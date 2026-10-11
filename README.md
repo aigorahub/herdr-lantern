@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.5** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.6** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -239,6 +239,10 @@ seats anything. It stops on a failed check or a model it knows
 will not work, and names one live substitute. A usage line with no reset
 time is still valid. Missing quota info on a harness that has no usage
 command is not a failed check.
+Claude token logins can return costs without quota buckets. Preflight checks
+the login, model, and effort, then reports `quota: unknown`. It does not claim
+remaining quota. Logged-out sessions, missing login evidence, malformed
+usage, failed usage commands, and exhausted quotas still fail.
 
 "There is a PR on battle-paddle, get a Codex review" is a review route.
 Lantern resolves the repository and pull request with Git and `gh`. It checks

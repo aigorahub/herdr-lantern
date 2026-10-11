@@ -2,6 +2,18 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.6] - 2026-10-11
+
+### Fixed
+
+- Claude model preflight accepts token logins whose usage output has costs
+  without quota buckets. It reports `quota: unknown` after model and effort
+  checks pass. Logged-out sessions and missing login evidence still fail.
+  Failed usage commands, malformed usage, and exhausted quotas still fail.
+- The unknown-quota path requires a text token source and a recognized
+  successful cost view. Error responses and malformed login metadata fail.
+  Missing or null account metadata does not break model-catalog callers.
+
 ## [0.17.5] - 2026-10-11
 
 ### Fixed
