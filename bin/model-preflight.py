@@ -187,6 +187,10 @@ def claude_cost_usage(result: str) -> bool:
     duration = r"(?:\d+(?:\.\d+)?(?:ms|s|m|h|d)\s*)+"
     count = r"\d+(?:\.\d+)?[kKmMbB]?"
     usage = count + r" input,\s*" + count + r" output(?:,\s*" + count + r" cache read,\s*" + count + r" cache write)?"
+    cache = (r"Prompt cache \(main\):\s*\d+ requests?\s*·\s*\d+(?:\.\d+)?% of input tokens from cache"
+             r"\s*·\s*\d+ miss(?:es)?(?:\s*\([^()\r\n]+\))?"
+             r"(?:\s*·\s*\d+ expected rebuilds?(?:\s*\([^()\r\n]+\))?)?"
+             r"\s*·\s*(?:(?:warm|cold)\s*\([^()\r\n]+\)|no prompt caching reported by the API)")
     patterns = {
         "cost": r"Total cost:\s*\$\d+(?:\.\d+)?(?:\s+at your organization's configured rates|\s+\(at your organization's configured rates\))?",
         "api": r"Total duration \(API\):\s*" + duration,
@@ -194,11 +198,18 @@ def claude_cost_usage(result: str) -> bool:
         "changes": r"Total code changes:\s*\d+ lines added,\s*\d+ lines removed",
         "usage": r"Usage:\s*" + usage,
         "models": r"Usage by model:",
+        "cache": cache,
     }
     seen = set()
     models = set()
     model_usage = r"(\S+):\s*" + usage + r"(?:\s*\(\$\d+(?:\.\d+)?\))?"
+    lines = []
     for line in result.splitlines():
+        if line.strip().startswith("·") and lines and lines[-1].startswith("Prompt cache (main):"):
+            lines[-1] += " " + line.strip()
+        else:
+            lines.append(line.strip())
+    for line in lines:
         if not line.strip():
             continue
         key = next((key for key, pattern in patterns.items() if re.fullmatch(pattern, line.strip())), None)
@@ -211,7 +222,9 @@ def claude_cost_usage(result: str) -> bool:
         if key in seen or key == "models" and "usage" in seen or key == "usage" and "models" in seen:
             return False
         seen.add(key)
-    return "cost" in seen and ("usage" in seen or "models" in seen and bool(models))
+    if "usage" in seen:
+        return "cost" in seen
+    return {"cost", "api", "wall", "changes", "models"} <= seen and bool(models)
 
 
 def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | None:

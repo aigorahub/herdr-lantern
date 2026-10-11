@@ -462,6 +462,22 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                         "\n".join(result.splitlines()[:-1]), result + "\nUsage: 0 input, 0 output",
                         result.replace("1.2k input", "bad input")):
             self.assertFalse(preflight.claude_cost_usage(invalid))
+        for index in (0, 1, 2, 3):
+            incomplete = "\n".join(line for i, line in enumerate(result.splitlines()) if i != index)
+            self.assertFalse(preflight.claude_cost_usage(incomplete))
+
+    def test_claude_cost_view_supports_optional_prompt_cache_summary(self):
+        result = "\n".join(("Total cost: $0.55", "Total duration (API): 6m 20s",
+                            "Total duration (wall): 6h 33m 10s",
+                            "Total code changes: 0 lines added, 0 lines removed", "Usage by model:",
+                            "claude-sonnet-4-6: 1.2k input, 5.3k output, 940.0k cache read, 50.0k cache write ($0.55)"))
+        cache = "Prompt cache (main): 14 requests · 91% of input tokens from cache · 2 misses (last 6m 10s ago, 310.2k tokens re-cached) · warm (1h TTL, last activity 40s ago)"
+        for line in (cache, cache.replace(" · warm", " · 1 expected rebuild (compaction or tool-result clearing) · warm"),
+                     cache.replace(" · warm", "\n· warm"),
+                     "Prompt cache (main): 0 requests · 0% of input tokens from cache · 0 misses · no prompt caching reported by the API"):
+            self.assertTrue(preflight.claude_cost_usage(result + "\n" + line))
+        for line in ("Prompt cache (main): Authentication failed", cache + " malformed data", cache + "\n" + cache):
+            self.assertFalse(preflight.claude_cost_usage(result + "\n" + line))
 
 if __name__ == "__main__":
     unittest.main()
