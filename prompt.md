@@ -371,6 +371,11 @@ Composer 2.5 as a default.
 
 ### Availability preflight
 
+Claude token logins can return costs without quota buckets. A successful
+preflight then reports `quota: unknown`. This confirms the login and model
+route, but does not measure remaining quota. Missing login evidence and
+failed or malformed usage still fail the check.
+
 Run `$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]` after
 model resolution and before you state the seat plan and run it. Do not
 create a workspace, create a tab, or start an agent before this check

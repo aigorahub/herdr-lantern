@@ -431,7 +431,10 @@ $onboard_note
   before you seat anything. Do not create, start, or prompt
   when it fails. A missing command, timeout, or unparseable check stops the
   route. A usage line with no reset time is still valid. A harness with no
-  quota command is not a failed check. If the model is unavailable, report
+  quota command is not a failed check. Claude token logins with no usage buckets
+  can report quota: unknown after login, model, and effort checks pass. This does
+  not measure remaining quota. Missing login evidence and failed or malformed
+  usage still fail the check. If the model is unavailable, report
   its bucket and reset time when known. Name the one live substitute from
   the result and ask the user to confirm it. Never switch models in silence.
   The route wrappers do not cover Pi: skip both for \`--kind pi\` and pass
