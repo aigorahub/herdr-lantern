@@ -165,6 +165,8 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
         fail("availability check failed: Claude usage error flag is not boolean")
     if is_error:
         fail("availability check failed: Claude usage command reported an error")
+    if "subtype" in payload and payload["subtype"] != "success":
+        fail("availability check failed: Claude usage returned an unsuccessful result")
     buckets = []
     limit = re.search(r"hit your\s+(.+?)\s+limit(?:[^\n]*?resets\s+([^\n]+))?", result, re.IGNORECASE)
     if limit:
@@ -181,13 +183,24 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
 
 
 def claude_cost_usage(result: str) -> bool:
-    """Recognize the successful cost view returned by token-only logins."""
-    return bool(
-        re.search(r"^\s*Total cost:\s*\$\d+(?:\.\d+)?\s*$", result, re.MULTILINE)
-        and re.search(r"^\s*Usage:\s*\d+ input,\s*\d+ output(?:,|\s*$)", result, re.MULTILINE)
-        and not re.search(r"^\s*(?:API Error\b|Error\b|Failed\b|Unable\b)", result,
-                          re.MULTILINE | re.IGNORECASE)
-    )
+    """Recognize the complete successful cost view for token logins."""
+    duration = r"(?:\d+(?:\.\d+)?(?:ms|s|m|h|d)\s*)+"
+    patterns = {
+        "cost": r"Total cost:\s*\$\d+(?:\.\d+)?",
+        "api": r"Total duration \(API\):\s*" + duration,
+        "wall": r"Total duration \(wall\):\s*" + duration,
+        "changes": r"Total code changes:\s*\d+ lines added,\s*\d+ lines removed",
+        "usage": r"Usage:\s*\d+ input,\s*\d+ output(?:,\s*\d+ cache read,\s*\d+ cache write)?",
+    }
+    seen = set()
+    for line in result.splitlines():
+        if not line.strip():
+            continue
+        key = next((key for key, pattern in patterns.items() if re.fullmatch(pattern, line.strip())), None)
+        if key is None or key in seen:
+            return False
+        seen.add(key)
+    return {"cost", "usage"} <= seen
 
 
 def exhausted_bucket(model: str, buckets: list[UsageBucket]) -> UsageBucket | None:

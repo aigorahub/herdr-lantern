@@ -369,6 +369,10 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": ""}), 2, "unrecognized usage text"),
             ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": True}), 2, "reported an error"),
             ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": "false"}), 2, "error flag is not boolean"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "error_during_execution"}), 2, "unsuccessful result"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Authentication failed: token expired\nTotal cost: $0.00\nUsage: 0 input, 0 output"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output, malformed data"}), 2, "unrecognized usage text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "success", "is_error": False}), 0, "unknown"),
             (None, json.dumps({"result": "Current session: 0% used"}), 0, None),
             ("oauth-token", "unparseable", 2, "unparseable usage JSON"),
             ("oauth-token", json.dumps({"result": None}), 2, "usage result is not text"),
@@ -431,7 +435,10 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                             "Usage:                 0 input, 0 output, 0 cache read, 0 cache write"))
         self.assertTrue(preflight.claude_cost_usage(result))
         for invalid in ("", "Total cost: $0.00", "Usage: 0 input, 0 output", "Failed to retrieve usage",
-                        result + "\nAPI Error: authentication failed"):
+                        result + "\nAPI Error: authentication failed",
+                        "Authentication failed: token expired\n" + result,
+                        result + ", malformed data", result + "\nUsage: 0 input, 0 output",
+                        result.replace("Total duration (API):  0s", "Total duration (API): error")):
             self.assertFalse(preflight.claude_cost_usage(invalid))
 
 if __name__ == "__main__":
