@@ -2,6 +2,19 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.8] - 2026-10-11
+
+### Fixed
+
+- Plan Usage keeps the configured Fugu plan visible after short review commands
+  end. It shows session and weekly percentages left, plus the weekly reset.
+- The reader uses the local fugu profile and its configured key from the
+  environment or private .env store. It makes no model calls. Keys never enter
+  the shared cache. Changed keys or profile files hide prior values.
+- Standalone modern Fugu profile files work without a main Codex config file.
+- The background version check replaces its file in one step. Readers no longer
+  see an empty file during the write.
+
 ## [0.17.7] - 2026-10-11
 
 ### Removed

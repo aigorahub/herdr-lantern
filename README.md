@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.7** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.8** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -145,6 +145,7 @@ Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
 
 Plan Usage includes plans with an open agent tab anywhere on this Herdr
 server. Idle and Done tabs count. Tabs hidden from Field Status still count.
+The configured Fugu plan also stays visible after a short review command ends.
 The table shows one row per service: Claude, OpenAI, Grok, Google, Fugu,
 and other open services. Its columns are Service, Session left, Week left,
 and Week resets. Allowances use percentages. Weekly resets use local time,
@@ -175,13 +176,19 @@ billing account ID from the installation ID.
 Grok reads the saved OAuth subscription with cookies off. An inherited API
 key or base URL does not block that plan reading. Those values never enter
 the quota probe. A custom OAuth token remains unsupported.
-Fugu reads Sakana's `/v1/usage` API with the key selected by the open Codex
-profile. Both modern profile files and legacy profiles work. The reader
-converts used percentages to percentages left. It makes no model calls.
-The API key stays in memory and never enters the shared cache.
+Fugu reads Sakana's `/v1/usage` API. Open Codex profiles use their selected key.
+The local `fugu` profile also supplies limits when no Fugu agent tab is open.
+It uses Lantern's HOME and CODEX_HOME. Both modern profile files and legacy
+profiles work. The local reader uses the configured key from its environment
+or the private `CODEX_HOME/.env` store. It never runs the store as shell code.
+Changed keys or profile files hide prior values. The reader converts used
+percentages to percentages left and shows the weekly reset in local time.
+It makes no model calls. The API key never enters the shared cache.
 
-Native Codex, Antigravity, and Fugu require a readable process environment.
-They remain unmeasured on Windows. Claude and Grok on Windows show
+Native Codex, Antigravity, and open Fugu tabs require a readable process
+environment. Those tab readings remain unmeasured on Windows. The configured
+Fugu profile read does not require a process environment and works on Windows.
+Claude and Grok on Windows show
 Dependency unavailable because CodexBar has no Windows release asset.
 Unsupported agent kinds show Limits unavailable. API credentials and custom
 provider settings can prevent Codex or Claude subscription readings.

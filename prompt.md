@@ -645,9 +645,14 @@ that a profile hash is a verified billing account ID.
 Grok reads the saved OAuth plan even when the process has an inherited API key.
 The probe does not receive API keys or base URL overrides. A custom OAuth token
 remains unsupported. Fugu reads the quota API with the key selected by its
-Codex profile. Show Fugu as its own service. Never count it as OpenAI.
+Codex profile. The configured local fugu profile also stays visible after a
+short review command ends. It uses the reader's HOME and CODEX_HOME. The key
+comes from its environment or private .env store. No shell code runs from
+that store. Changed keys or profile files hide prior values. Show Fugu as
+its own service. Never count it as OpenAI.
 No quota read sends a model prompt or answers an agent's approval dialog.
-Windows lacks the process environment needed for Codex, Antigravity, and Fugu.
+Windows lacks the process environment needed for open Codex, Antigravity,
+and Fugu tabs. The configured Fugu profile read works without process inspection.
 Claude and Grok on Windows show Dependency unavailable.
 
 The private cache keeps each allowance's percentage, reset time, source, and age.

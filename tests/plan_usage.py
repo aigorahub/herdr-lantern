@@ -37,7 +37,203 @@ def measured(account="account-one"):
     return sources.parse_codex({"type": "chatgpt", "planType": "pro"}, limits(account), 1800000000)
 
 
+class ConfiguredFuguTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.root = self.home / ".codex"
+        self.root.mkdir()
+        self.env = {"HOME": str(self.home), "SAKANA_API_KEY": "private-key"}
+        self.provider = ('[model_providers.sakana]\nbase_url = "https://api.sakana.ai/v1"\n'
+                         'env_key = "SAKANA_API_KEY"\n')
+        (self.root / "config.toml").write_text(self.provider)
+        (self.root / "fugu.config.toml").write_text('model_provider = "sakana"\n')
+
+    def store(self, text):
+        path = self.root / ".env"
+        path.write_text(text)
+        path.chmod(0o600)
+        return path
+
+    def test_configured_profile_needs_no_open_agent_or_executable(self):
+        with patch.object(runtime, "capture") as command:
+            scope = sources.configured_fugu_scope(self.env)
+        command.assert_not_called()
+        self.assertEqual(scope["provider"], "fugu")
+        self.assertEqual(scope["api_key"], "private-key")
+        self.assertNotIn("executable", scope)
+        self.assertNotIn("private-key", json.dumps(scope["env"]))
+        process = {"argv": ["codex", "-p", "fugu"], "executable": str(self.home / "codex")}
+        Path(process["executable"]).touch(); Path(process["executable"]).chmod(0o700)
+        opened = sources.scope_for("codex", process, self.env)
+        self.assertEqual(scope["key"], opened["key"])
+
+    def test_standalone_modern_and_legacy_profiles_use_the_same_settings(self):
+        modern = self.root / "fugu.config.toml"
+        modern.write_text('model_provider = "sakana"\n' + self.provider)
+        (self.root / "config.toml").unlink()
+        self.assertEqual(sources.configured_fugu_scope(self.env)["provider"], "fugu")
+        modern.unlink()
+        (self.root / "config.toml").write_text(self.provider + '\n[profiles.fugu]\nmodel_provider = "sakana"\n')
+        self.assertEqual(sources.configured_fugu_scope(self.env)["provider"], "fugu")
+
+    def test_home_selector_is_exact_and_invalid_selectors_do_not_read_default(self):
+        self.assertIsNone(sources.configured_fugu_scope({}))
+        self.assertIsNone(sources.configured_fugu_scope(dict(self.env, CODEX_HOME="relative")))
+        self.assertIsNone(sources.configured_fugu_scope(dict(self.env, CODEX_HOME="")))
+        self.assertIsNone(sources.configured_fugu_scope(dict(self.env, CODEX_HOME=str(self.home / "other"))))
+        self.assertEqual(sources.configured_fugu_scope(dict(self.env, CODEX_HOME=str(self.root)))["provider"], "fugu")
+        if os.name == "nt":
+            self.assertEqual(sources.configured_fugu_scope({"USERPROFILE": str(self.home),
+                "SAKANA_API_KEY": "private-key"})["provider"], "fugu")
+
+    def test_no_installed_profile_does_not_add_a_service(self):
+        (self.root / "fugu.config.toml").unlink()
+        for text in (self.provider, "", "[broken", 'model_providers = "wrong"'):
+            with self.subTest(text=text):
+                (self.root / "config.toml").write_text(text)
+                self.assertIsNone(sources.configured_fugu_scope(self.env))
+        (self.root / "config.toml").unlink()
+        self.assertIsNone(sources.configured_fugu_scope(self.env))
+
+    def test_key_store_reads_only_selected_key_without_shell_execution(self):
+        marker = self.home / "should-not-exist"
+        store = self.store(f'OTHER_KEY=$(touch {marker})\nexport SAKANA_API_KEY="stored-key" # saved\n')
+        scope = sources.configured_fugu_scope({"HOME": str(self.home)})
+        self.assertEqual(scope["api_key"], "stored-key")
+        self.assertIn(str(store), scope["files"])
+        self.assertFalse(marker.exists())
+        scope = sources.configured_fugu_scope(self.env)
+        self.assertEqual(scope["api_key"], "private-key")
+        self.assertNotIn(str(store), scope["files"])
+
+    def test_key_rotation_changes_binding_and_missing_key_hides_old_values(self):
+        env = {"HOME": str(self.home)}
+        store = self.store('SAKANA_API_KEY=first-key\n')
+        first = sources.configured_fugu_scope(env)
+        store.write_text('SAKANA_API_KEY=second-key\n')
+        second = sources.configured_fugu_scope(env)
+        self.assertNotEqual(first["key"], second["key"])
+        self.assertNotEqual(first["stamp"], sources.current_stamp(first))
+        store.write_text('OTHER_KEY=hidden\n')
+        with self.assertRaisesRegex(sources.SourceError, "Sign in required"):
+            sources.configured_fugu_scope(env)
+
+    def test_changed_store_or_profile_during_read_is_not_bound(self):
+        env = {"HOME": str(self.home)}
+        store = self.store('SAKANA_API_KEY=first-key\n')
+        def change_key(*args):
+            store.write_text('SAKANA_API_KEY=second-key\n')
+            return "first-key"
+        with patch.object(sources, "stored_fugu_key", side_effect=change_key), \
+                self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+            sources.configured_fugu_scope(env)
+        original = sources.codex_settings
+        def change_profile(*args, **kwargs):
+            result = original(*args, **kwargs)
+            (self.root / "fugu.config.toml").write_text('model_provider = "other"\n')
+            return result
+        with patch.object(sources, "codex_settings", side_effect=change_profile), \
+                self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+            sources.configured_fugu_scope(self.env)
+
+    def test_invalid_store_is_not_sourced_or_sent(self):
+        env = {"HOME": str(self.home)}
+        for text in ('SAKANA_API_KEY="unterminated\n', 'SAKANA_API_KEY=one two\n', 'x' * 65537):
+            with self.subTest(text=text[:30]):
+                self.store(text)
+                with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.configured_fugu_scope(env)
+        store = self.store('SAKANA_API_KEY=stored-key\n')
+        if os.name != "nt":
+            store.chmod(0o644)
+            with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                sources.configured_fugu_scope(env)
+            store.chmod(0o600)
+            store.rename(self.root / "actual.env")
+            store.symlink_to(self.root / "actual.env")
+            with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                sources.configured_fugu_scope(env)
+            store.unlink()
+            os.mkfifo(store)
+            with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                sources.configured_fugu_scope(env)
+
+    def test_configured_plan_rejects_other_endpoints_and_malformed_profiles(self):
+        for provider in (self.provider.replace("api.sakana.ai", "other.invalid"),
+                         self.provider.replace('"https://api.sakana.ai/v1"', '123'),
+                         self.provider.replace('"SAKANA_API_KEY"', '"INVALID-KEY"'), "[broken"):
+            with self.subTest(provider=provider):
+                (self.root / "config.toml").write_text(provider)
+                with self.assertRaises(sources.SourceError) as failure:
+                    sources.configured_fugu_scope(self.env)
+                self.assertEqual(failure.exception.provider, "fugu")
+
+
 class UsageTests(unittest.TestCase):
+    def setUp(self):
+        # Collector fixtures do not use the machine's installed Fugu account.
+        configured = patch.object(sources, "configured_fugu_scope", return_value=None)
+        configured.start()
+        self.addCleanup(configured.stop)
+
+    def test_configured_fugu_stays_visible_after_agent_exit_and_deduplicates_open_tab(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); server = {"key": "server", "lifetime": "one"}
+            collector = usage.Collector(root / "state", root / "shared", "herdr", server)
+            scope = {"key": "fugu-key", "provider": "fugu", "stamp": "stamp"}
+            result = sources.parse_fugu({"window_seconds": 18000,
+                "window_usage": {"usage_percent": 20},
+                "weekly_usage": {"usage_percent": 35, "reset_at": 1800000600}}, "private-key", 1800000000)
+            try:
+                with patch.object(runtime, "server_identity", return_value=server), \
+                        patch.object(field, "snapshot", return_value=([{"tab_id": "a"}], [
+                            {"agent": "codex", "tab_id": "a", "pane_id": "p", "agent_status": "done"}], [])), \
+                        patch.object(usage, "verified_scope", return_value=scope), \
+                        patch.object(sources, "configured_fugu_scope", return_value=scope):
+                    collector.scan()
+                    self.assertEqual(len(collector.bindings), 1)
+                    collector.cache["fugu-key"] = {"result": result, "state": "Measured"}
+                    with patch.object(field, "snapshot", return_value=([], [], [])):
+                        collector.scan()
+                    snapshot = collector.write()
+                self.assertEqual(len(snapshot["rows"]), 1)
+                self.assertEqual(snapshot["rows"][0]["tabs"], 0)
+                output = usage.render(snapshot, now=1800000030, width=61, zone=timezone.utc)
+                self.assertIn("Fugu", output)
+                self.assertIn("80%", output)
+                self.assertIn("65%", output)
+                self.assertNotIn("--", output.splitlines()[2])
+                self.assertNotIn("private-key", (root / "shared/snapshot.json").read_text())
+                with patch.object(runtime, "server_identity", return_value=server), \
+                        patch.object(field, "snapshot", return_value=([], [], [])):
+                    collector.scan()
+                self.assertEqual(collector.write()["rows"], [])
+                self.assertEqual(collector.cache, {})
+            finally:
+                collector.close()
+
+    def test_configured_fugu_failure_and_rotation_hide_prior_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); server = {"key": "server", "lifetime": "one"}
+            collector = usage.Collector(root / "state", root / "shared", "herdr", server)
+            try:
+                with patch.object(runtime, "server_identity", return_value=server), \
+                        patch.object(field, "snapshot", return_value=([], [], [])), \
+                        patch.object(sources, "configured_fugu_scope", return_value={"key": "first", "provider": "fugu"}):
+                    collector.scan()
+                    collector.cache["first"] = {"result": {"account": "old-account", "windows": []}, "state": "Measured"}
+                    with patch.object(sources, "configured_fugu_scope", return_value={"key": "second", "provider": "fugu"}):
+                        collector.scan()
+                    self.assertEqual(collector.cache, {})
+                    self.assertEqual(collector.write()["rows"], [{"provider": "fugu", "state": "Reading usage", "tabs": 0}])
+                    with patch.object(sources, "configured_fugu_scope", side_effect=sources.SourceError("Sign in required")):
+                        collector.scan()
+                    self.assertEqual(collector.write()["rows"], [{"provider": "fugu", "state": "Sign in required", "tabs": 0}])
+            finally:
+                collector.close()
+
     def test_agy_structured_quota_uses_remaining_fraction_without_model_turns(self):
         payload = {"status": "SUCCESS", "num_turns": 0, "command": {"name": "usage", "data": {"groups": [
             {"name": "Gemini Models", "buckets": [

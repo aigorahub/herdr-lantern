@@ -6,7 +6,9 @@ import math
 import os
 import queue
 import re
+import shlex
 import shutil
+import stat
 import threading
 import time
 import urllib.error
@@ -98,6 +100,118 @@ def scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
         raise SourceError("Account unknown", provider=hint) from None
 
 
+def codex_settings(root: Path, profile: list[str], optional: bool = False) -> tuple | None:
+    config = root / "config.toml"
+    files = [root / "auth.json", config]
+    if not config.exists() and not (profile and (root / f"{profile[0]}.config.toml").is_file()):
+        if optional:
+            return None
+        if profile:
+            raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
+        return {}, {}, {}, files
+    import tomllib
+    try:
+        data = tomllib.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
+    except ValueError:
+        if optional and not (root / "fugu.config.toml").exists():
+            return None
+        raise
+    selected = data
+    extra = {}
+    if profile:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", profile[0]):
+            raise SourceError("Account unknown")
+        profiles = data.get("profiles") or {}
+        modern = root / f"{profile[0]}.config.toml"
+        if optional and not modern.is_file() and (not isinstance(profiles, dict)
+                                                  or not isinstance(profiles.get(profile[0]), dict)):
+            return None
+        if not isinstance(profiles, dict):
+            raise SourceError("Account unknown")
+        if modern.is_file():
+            profile_data = tomllib.loads(modern.read_text(encoding="utf-8"))
+            files.append(modern)
+        elif isinstance(profiles.get(profile[0]), dict):
+            profile_data = profiles[profile[0]]
+        elif optional:
+            return None
+        else:
+            raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
+        selected = dict(data, **profile_data)
+        extra = profile_data.get("model_providers") or {}
+        if not isinstance(extra, dict):
+            raise SourceError("Account unknown")
+    providers = data.get("model_providers") or {}
+    if not isinstance(providers, dict):
+        raise SourceError("Account unknown")
+    providers = dict(providers, **extra)
+    return data, selected, providers, files
+
+
+def stored_fugu_key(path: Path, key_name: str) -> str:
+    """Read one key from the installer's private dotenv store. Never source it."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except FileNotFoundError:
+        return ""
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or path.is_symlink() or info.st_size > 65536
+                or os.name != "nt" and (info.st_uid != os.geteuid() or info.st_mode & 0o077)):
+            raise SourceError("Account unknown", provider="fugu")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(65537)
+        if len(raw) > 65536:
+            raise SourceError("Account unknown", provider="fugu")
+        credential = ""
+        for line in raw.decode("utf-8").splitlines():
+            match = re.fullmatch(r"\s*(?:export\s+)?" + re.escape(key_name) + r"\s*=\s*(.*)", line)
+            if match:
+                values = shlex.split(match[1], comments=True)
+                if len(values) > 1:
+                    raise SourceError("Account unknown", provider="fugu")
+                credential = values[0] if values else ""
+        return credential
+    finally:
+        os.close(fd)
+
+
+def configured_fugu_scope(env: dict[str, str]) -> dict | None:
+    """Keep the local Fugu plan visible when short review commands have exited."""
+    home = env.get("HOME") or (env.get("USERPROFILE", "") if os.name == "nt" else "")
+    root_value = env.get("CODEX_HOME", str(Path(home) / ".codex"))
+    if not home or not Path(home).is_absolute() or not root_value or not Path(root_value).is_absolute():
+        return None
+    root = Path(root_value)
+    try:
+        before = {path: stamp(path) for path in (root / "auth.json", root / "config.toml",
+                                                root / "fugu.config.toml", root / ".env")}
+        settings = codex_settings(root, ["fugu"], optional=True)
+        if settings is None:
+            return None
+        _, selected, providers, files = settings
+        provider = providers.get(selected.get("model_provider", "openai")) or {}
+        if not isinstance(provider, dict) or provider.get("base_url", "").rstrip("/") != "https://api.sakana.ai/v1":
+            raise SourceError("Limits unavailable", provider="fugu")
+        key_name = provider.get("env_key")
+        if not isinstance(key_name, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key_name):
+            raise SourceError("Account unknown", provider="fugu")
+        credentials = {key_name: env.get(key_name, "")}
+        if not credentials[key_name]:
+            store = root / ".env"
+            credentials[key_name] = stored_fugu_key(store, key_name)
+            files.append(store)
+        scope = fugu_scope({"HOME": home, "CODEX_HOME": str(root)}, credentials, root, files, provider)
+        if scope["stamp"] != runtime.digest([before[path] for path in files]):
+            raise SourceError("Account unknown", provider="fugu")
+        return scope
+    except SourceError as exc:
+        exc.provider = "fugu"
+        raise
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, ImportError):
+        raise SourceError("Account unknown", provider="fugu") from None
+
+
 def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     home = env.get("HOME", "")
     argv = process.get("argv")
@@ -144,46 +258,20 @@ def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
                     raise SourceError("Account unknown")
             elif str(value).startswith("--config="):
                 raise SourceError("Account unknown")
-        config = root / "config.toml"
-        files = [root / "auth.json", config]
-        data = {}
-        if config.exists():
-            try:
-                import tomllib
-                data = tomllib.loads(config.read_text(encoding="utf-8"))
-            except (ImportError, ValueError):
-                raise SourceError("Account unknown")
-            providers = data.get("model_providers") or {}
-            if not isinstance(providers, dict):
-                raise SourceError("Account unknown")
-            selected = data
-            if profile:
-                profiles = data.get("profiles") or {}
-                modern = root / f"{profile[0]}.config.toml"
-                if not re.fullmatch(r"[A-Za-z0-9_-]+", profile[0]) or not isinstance(profiles, dict):
-                    raise SourceError("Account unknown")
-                if modern.is_file():
-                    try:
-                        profile_data = tomllib.loads(modern.read_text(encoding="utf-8"))
-                    except ValueError:
-                        raise SourceError("Account unknown") from None
-                    files.append(modern)
-                elif isinstance(profiles.get(profile[0]), dict):
-                    profile_data = profiles[profile[0]]
-                else:
-                    raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
-                selected = dict(data, **profile_data)
-                providers = dict(providers, **(profile_data.get("model_providers") or {}))
-            provider_config = providers.get(selected.get("model_provider", "openai")) or {}
-            if not isinstance(provider_config, dict):
-                raise SourceError("Account unknown")
-            base_url = provider_config.get("base_url")
-            if isinstance(base_url, str) and base_url.rstrip("/") == "https://api.sakana.ai/v1":
-                return fugu_scope(native, env, root, files, provider_config)
-            if (data.get("model_provider", "openai") != "openai"
-                    or data.get("chatgpt_base_url")
-                    or providers.get("openai")):
-                raise SourceError("Limits unavailable")
+        try:
+            data, selected, providers, files = codex_settings(root, profile)
+        except (ImportError, ValueError):
+            raise SourceError("Account unknown") from None
+        provider_config = providers.get(selected.get("model_provider", "openai")) or {}
+        if not isinstance(provider_config, dict):
+            raise SourceError("Account unknown")
+        base_url = provider_config.get("base_url")
+        if isinstance(base_url, str) and base_url.rstrip("/") == "https://api.sakana.ai/v1":
+            return fugu_scope(native, env, root, files, provider_config)
+        if (data.get("model_provider", "openai") != "openai"
+                or data.get("chatgpt_base_url")
+                or providers.get("openai")):
+            raise SourceError("Limits unavailable")
         if profile or any("codex-fugu" in str(value).lower() for value in argv):
             raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
         if any(env.get(key) for key in OVERRIDES[provider]):

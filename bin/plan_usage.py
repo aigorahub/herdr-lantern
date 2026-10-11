@@ -145,6 +145,12 @@ class Collector:
                     continue
                 entry = bindings.setdefault(scope["key"], {"scope": scope, "tabs": set()})
                 entry["tabs"].add(agent["tab_id"])
+        try:
+            configured = sources.configured_fugu_scope(os.environ)
+            if configured:
+                bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
+        except sources.SourceError as exc:
+            notices.setdefault(("fugu", exc.state), set())
         self.bindings, self.notices = bindings, notices
         self.cache = {key: self.cache[key] for key in bindings if key in self.cache}
         self.validated, self.scan_error = True, False
