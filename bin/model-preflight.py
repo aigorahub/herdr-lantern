@@ -189,12 +189,17 @@ def claude_cost_usage(result: str) -> bool:
     duration = r"(?:\d+(?:\.\d+)?(?:ms|s|m|h|d)\s*)+"
     count = r"\d+(?:\.\d+)?[kKmMbB]?"
     usage = count + r" input,\s*" + count + r" output(?:,\s*" + count + r" cache read,\s*" + count + r" cache write)?"
+    cause = r"[^·\r\n]+?"
+    miss_detail = (r"\(last\s*" + duration + r"ago(?:\s*\u2014\s*likely cause:\s*" + cause + r")?,\s*"
+                   + count + r" tokens re-cached(?:,\s*likely cause:\s*" + cause + r")?\)")
+    temperature = (r"(?:(?:warm|cold)\s*\(" + duration + r"TTL,\s*last activity\s*" + duration + r"ago\)"
+                   r"|cold\s*\u2014\s*idle\s*" + duration
+                   + r",\s*next turn re-caches (?:~" + count + r" tokens|the compacted prompt)"
+                   r"|no prompt caching reported by the API)")
     cache = (r"Prompt cache \(main\):\s*\d+ requests?\s*·\s*\d+(?:\.\d+)?% of input tokens from cache"
-             r"\s*·\s*\d+ miss(?:es)?(?:\s*\(last\s*" + duration + r"ago,\s*" + count
-             + r" tokens re-cached(?:,\s*likely cause:\s*[^()\r\n·]+)?\))?"
+             r"\s*·\s*(?:no misses|\d+ miss(?:es)?(?:\s*" + miss_detail + r")?)"
              r"(?:\s*·\s*\d+ expected rebuilds?(?:\s*\((?:compaction|tool-result clearing|compaction or tool-result clearing)\))?)?"
-             r"\s*·\s*(?:(?:warm|cold)\s*\(" + duration + r"TTL,\s*last activity\s*" + duration
-             + r"ago\)|no prompt caching reported by the API)")
+             r"\s*·\s*" + temperature)
     patterns = {
         "cost": r"Total cost:\s*\$\d+(?:\.\d+)?(?:\s+at your organization's configured rates|\s+\(at your organization's configured rates\))?",
         "api": r"Total duration \(API\):\s*" + duration,

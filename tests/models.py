@@ -475,6 +475,10 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
         for line in (cache, cache.replace(" · warm", " · 1 expected rebuild (compaction or tool-result clearing) · warm"),
                      cache.replace(" · warm", "\n· warm"),
                      cache.replace("tokens re-cached)", "tokens re-cached, likely cause: tool definitions changed)"),
+                     cache.replace("2 misses (last 6m 10s ago, 310.2k tokens re-cached)", "no misses"),
+                     cache.replace("last 6m 10s ago,", "last 6m 10s ago \u2014 likely cause: tool definitions changed (+3/-0),"),
+                     cache.replace("warm (1h TTL, last activity 40s ago)", "cold \u2014 idle 2h 40s, next turn re-caches ~310.2k tokens"),
+                     cache.replace("warm (1h TTL, last activity 40s ago)", "cold \u2014 idle 2h 40s, next turn re-caches the compacted prompt"),
                      "Prompt cache (main): 0 requests · 0% of input tokens from cache · 0 misses · no prompt caching reported by the API"):
             self.assertTrue(preflight.claude_cost_usage(result + "\n" + line))
         for line in ("Prompt cache (main): Authentication failed", cache + " malformed data", cache + "\n" + cache,
@@ -484,6 +488,8 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                      cache.replace("tokens re-cached)", "tokens re-cached, API Error: authentication failed)"),
                      cache.replace(" · warm", " · 1 expected rebuild (Authentication failed) · warm")):
             self.assertFalse(preflight.claude_cost_usage(result + "\n" + line))
+        empty = "Prompt cache (main): 0 requests · 0% of input tokens from cache · no misses · no prompt caching reported by the API"
+        self.assertTrue(preflight.claude_cost_usage(result + "\n" + empty))
 
 if __name__ == "__main__":
     unittest.main()
