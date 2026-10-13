@@ -907,6 +907,44 @@ for line in sys.stdin:
             scope = sources.scope_for("claude", process, {"HOME": temporary, "CLAUDE_CONFIG_DIR": custom})
             self.assertEqual(scope["env"]["CLAUDE_CONFIG_DIR"], custom)
 
+    def test_claude_accepts_native_versioned_binary_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            def executable(relative):
+                path = home / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch(); path.chmod(0o700)
+                return str(path)
+            for relative in (".local/share/claude/versions/2.1.292", "bin/claude"):
+                with self.subTest(executable=relative):
+                    scope = sources.scope_for("claude", {"argv": ["claude"], "executable": executable(relative)},
+                                              {"HOME": temporary})
+                    self.assertEqual(scope["executable"], str(home / relative))
+            for provider, relative in (("claude", "tools/versions/1.2.3"),
+                                       ("claude", "claude-tools/versions/1.2.3"),
+                                       ("claude", ".local/share/claude/versions/latest"),
+                                       ("claude", ".local/share/claude/versions/2.1"),
+                                       ("claude", ".local/share/claude/builds/2.1.292"),
+                                       ("codex", ".local/share/claude/versions/2.1.292")):
+                with self.subTest(provider=provider, executable=relative), \
+                        self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.scope_for(provider, {"argv": [provider], "executable": executable(relative)},
+                                      {"HOME": temporary})
+
+    def test_native_claude_tab_is_selected_and_verified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            exe = Path(temporary) / ".local/share/claude/versions/2.1.292"
+            exe.parent.mkdir(parents=True)
+            exe.touch(); exe.chmod(0o700)
+            info = {"process_info": {"shell_pid": 1, "foreground_processes": [
+                {"pid": 2, "argv": ["claude", "--resume"], "cwd": temporary}]}}
+            with patch.object(field, "control", return_value=info), \
+                    patch.object(runtime, "process_start", return_value="started"), \
+                    patch.object(runtime, "process_environment", return_value={"HOME": temporary}), \
+                    patch.object(runtime, "process_executable", return_value=str(exe)):
+                scope = usage.verified_scope("herdr", "claude", {"pane_id": "p"})
+            self.assertEqual((scope["provider"], scope["executable"]), ("claude", str(exe)))
+
     def test_claude_ui_counters_do_not_change_auth_binding(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / ".claude.json"

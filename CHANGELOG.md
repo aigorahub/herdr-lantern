@@ -2,6 +2,16 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.9] - 2026-10-13
+
+### Fixed
+
+- Plan Usage reads Claude tabs from the native installer. Those tabs run a
+  versioned file such as `~/.local/share/claude/versions/2.1.292` and showed
+  Account unknown. Lantern accepts that file only inside a `claude/versions`
+  folder with a version number name. Other executable names still show
+  Account unknown.
+
 ## [0.17.8] - 2026-10-11
 
 ### Fixed
