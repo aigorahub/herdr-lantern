@@ -298,6 +298,19 @@ class UsageTests(unittest.TestCase):
                 with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
                     sources.fetch(scope, home / "state", threading.Event())
 
+    def test_probe_cleanup_timeout_is_a_failed_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "agy"
+            exe.touch(); exe.chmod(0o700)
+            token = home / ".gemini/antigravity-cli/antigravity-oauth-token"
+            token.parent.mkdir(parents=True); token.write_text("login")
+            scope = sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)}, {"HOME": str(home)})
+            # runtime.stop_process can time out while reaping a probe on a busy machine.
+            with patch.object(runtime, "capture", side_effect=subprocess.TimeoutExpired(["agy"], 2)):
+                with self.assertRaisesRegex(sources.SourceError, "Last update failed"):
+                    sources.fetch(scope, home / "state", threading.Event())
+
     def test_fugu_modern_and_legacy_profiles_bind_the_configured_key(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary); root = home / ".codex"; root.mkdir()
@@ -840,6 +853,44 @@ with Readout() as r:
                 after = runtime.server_identity("herdr", 1)
             self.assertEqual(before["key"], after["key"])
             self.assertNotEqual(before["lifetime"], after["lifetime"])
+
+    def test_watcher_reports_slow_herdr_status_and_recovers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "socket").touch()
+            response = subprocess.CompletedProcess([], 0, json.dumps({"server": {"running": True, "socket": str(root / "socket")}}), "")
+            calls, draws = [], []
+
+            def status(command, **kwargs):
+                calls.append(command)
+                if len(calls) == 1:
+                    raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+                return response
+
+            class Screen:
+                def __init__(self, stop):
+                    self.stop = stop
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_):
+                    pass
+
+                def draw(self, output):
+                    draws.append(output)
+
+                def wait(self, _):
+                    if len(draws) == 2:
+                        self.stop.set()
+
+            with patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "xdg")}), \
+                    patch.object(runtime.subprocess, "run", side_effect=status), \
+                    patch.object(field, "snapshot", return_value=([], [], [])), \
+                    patch.object(usage, "Readout", Screen):
+                usage.run(root / "state", "herdr", True, threading.Event(), 5)
+            self.assertEqual(draws[0], "Plan Usage\nHerdr server status unavailable\n")
+            self.assertIn("No open service plans.", draws[1])
 
     def test_codex_stdio_handshake_notifications_and_timeout(self):
         with tempfile.TemporaryDirectory() as temporary:

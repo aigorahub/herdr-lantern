@@ -75,9 +75,14 @@ class FileLock:
 
 
 def server_identity(binary: str, timeout: float) -> dict:
-    proc = subprocess.run(field.herdr_command(binary, ["status", "--json"]),
-                          env=field.herdr_environment(binary), capture_output=True,
-                          text=True, timeout=timeout, check=False)
+    try:
+        proc = subprocess.run(field.herdr_command(binary, ["status", "--json"]),
+                              env=field.herdr_environment(binary), capture_output=True,
+                              text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        # A busy machine can delay Herdr past the timeout. Report it like any
+        # other unavailable status so the watcher shows it and tries again.
+        raise RuntimeError("Herdr server status unavailable") from exc
     if proc.returncode:
         raise RuntimeError("Herdr server status unavailable")
     server = json.loads(proc.stdout).get("server", {})
