@@ -45,10 +45,10 @@ def record_watcher(state: Path, view: str) -> None:
                      {"pid": os.getpid(), "code": code_stamp(Path(__file__).resolve().parent.parent)})
 
 
-def foreground(info: dict) -> list:
-    """Identify a pane's foreground processes by PID and arguments."""
+def watcher_processes(info: dict, root: Path, state: Path, view: str) -> list:
+    """Identify a pane's watcher by PID and arguments. Its short-lived children do not count."""
     return [(proc.get("pid"), proc.get("argv")) for proc in info.get("foreground_processes") or []
-            if isinstance(proc, dict)]
+            if isinstance(proc, dict) and matches_watcher(proc, root, state, view)]
 
 
 def current_watcher(info: dict, root: Path, state: Path, view: str) -> bool:
@@ -314,14 +314,14 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
             info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
             if current_watcher(info, root, state, kind):
                 return "running"
+            watcher = watcher_processes(info, root, state, kind)
             check_context(end)
             live = call(["pane", "get", pid], end).get("pane", {})
             # Recheck immediately before the key press. Never interrupt a
             # command that replaced the watcher during the checks above.
             latest = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
-            if (live.get("agent") or live.get("tab_id") != pane.get("tab_id")
-                    or occupancy(latest, root, state, kind) != "running"
-                    or foreground(latest) != foreground(info)):
+            if (live.get("agent") or live.get("tab_id") != pane.get("tab_id") or not watcher
+                    or watcher_processes(latest, root, state, kind) != watcher):
                 raise RuntimeError("Readout identity changed before restart")
             call(["pane", "send-keys", pid, "ctrl+c"], end)
             settle = min(end, time.monotonic() + 3)

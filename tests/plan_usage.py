@@ -1412,6 +1412,30 @@ class ViewTests(unittest.TestCase):
         self.assertFalse(any(c[:2] == ["pane", "send-keys"] for c in calls))
         self.assertEqual(sum(c[:2] == ["pane", "run"] for c in calls), runs)
 
+    def test_outdated_watcher_with_a_short_lived_child_is_still_replaced(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        entry = field.read_json(self.state / "views.json", {})["views"]["usage"]
+        field.write_json(self.state / "usage-watcher.json", {"pid": 200, "code": "older release"})
+        original = field.control
+        added = []
+        def scan_child(binary, args, timeout):
+            result = original(binary, args, timeout)
+            if args == ["pane", "get", entry["pane_id"]] and not added:
+                # The watcher's own Herdr scan appears beside it in the foreground.
+                added.append(True)
+                data = self.data()
+                data["processes"][entry["pane_id"]].append(
+                    {"pid": 999, "argv": ["herdr", "pane", "process-info", "--pane", "other"]})
+                self.save(data)
+            return result
+        start = len(self.data()["calls"])
+        with patch.object(field, "control", side_effect=scan_child):
+            self.assertEqual(self.setup_views("usage")["errors"], [])
+        calls = self.data()["calls"][start:]
+        self.assertIn(["pane", "send-keys", entry["pane_id"], "ctrl+c"], calls)
+        self.assertEqual([c for c in calls if c[:2] == ["pane", "run"]],
+                         [["pane", "run", entry["pane_id"], entry["command"]]])
+
     def test_setup_splits_home_once_and_real_wrapper_stays_gated(self):
         result = self.setup_views()
         self.assertEqual(result["errors"], [])
