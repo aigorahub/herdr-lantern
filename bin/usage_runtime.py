@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import signal
+import ssl
 import subprocess
 import sys
 import threading
@@ -17,6 +18,24 @@ import field_status as field
 
 def digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+SYSTEM_CA_FILES = ("/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt")
+
+
+def tls_context() -> ssl.SSLContext:
+    """Verify HTTPS when this Python ships without CA certificates, as Homebrew Python can."""
+    context = ssl.create_default_context()
+    if context.cert_store_stats()["x509_ca"] or os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+        return context
+    for cafile in SYSTEM_CA_FILES:
+        if os.path.isfile(cafile):
+            return ssl.create_default_context(cafile=cafile)
+    try:
+        import certifi
+    except ImportError:
+        return context
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def private_dir(path: Path) -> Path:

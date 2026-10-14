@@ -14,7 +14,7 @@ import unittest
 from concurrent.futures import Future
 from datetime import timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
@@ -907,6 +907,112 @@ for line in sys.stdin:
             scope = sources.scope_for("claude", process, {"HOME": temporary, "CLAUDE_CONFIG_DIR": custom})
             self.assertEqual(scope["env"]["CLAUDE_CONFIG_DIR"], custom)
 
+    def test_claude_accepts_native_versioned_binary_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            def executable(relative):
+                path = home / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch(); path.chmod(0o700)
+                return str(path)
+            for relative in (".local/share/claude/versions/2.1.292", "bin/claude"):
+                with self.subTest(executable=relative):
+                    scope = sources.scope_for("claude", {"argv": ["claude"], "executable": executable(relative)},
+                                              {"HOME": temporary})
+                    self.assertEqual(scope["executable"], str(home / relative))
+            for provider, relative in (("claude", "tools/versions/1.2.3"),
+                                       ("claude", "claude-tools/versions/1.2.3"),
+                                       ("claude", ".local/share/claude/versions/latest"),
+                                       ("claude", ".local/share/claude/versions/2.1"),
+                                       ("claude", ".local/share/claude/builds/2.1.292"),
+                                       ("codex", ".local/share/claude/versions/2.1.292")):
+                with self.subTest(provider=provider, executable=relative), \
+                        self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.scope_for(provider, {"argv": [provider], "executable": executable(relative)},
+                                      {"HOME": temporary})
+
+    def test_native_claude_tab_is_selected_and_verified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            exe = Path(temporary) / ".local/share/claude/versions/2.1.292"
+            exe.parent.mkdir(parents=True)
+            exe.touch(); exe.chmod(0o700)
+            info = {"process_info": {"shell_pid": 1, "foreground_processes": [
+                {"pid": 2, "argv": ["claude", "--resume"], "cwd": temporary}]}}
+            with patch.object(field, "control", return_value=info), \
+                    patch.object(runtime, "process_start", return_value="started"), \
+                    patch.object(runtime, "process_environment", return_value={"HOME": temporary}), \
+                    patch.object(runtime, "process_executable", return_value=str(exe)):
+                scope = usage.verified_scope("herdr", "claude", {"pane_id": "p"})
+            self.assertEqual((scope["provider"], scope["executable"]), ("claude", str(exe)))
+
+    def test_tls_context_falls_back_when_python_has_no_certificates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "cert.pem"
+            bundle.write_text("system roots")
+            missing = str(Path(temporary) / "missing.pem")
+            certifi = Mock(where=Mock(return_value="certifi.pem"))
+            def created(cafile=None):
+                return Mock(cafile=cafile, cert_store_stats=Mock(return_value={"x509_ca": 0 if cafile is None else 1}))
+            clean = {k: v for k, v in os.environ.items() if k not in ("SSL_CERT_FILE", "SSL_CERT_DIR")}
+            for system, env, module, expected in (((missing, str(bundle)), {}, certifi, str(bundle)),
+                                                  ((missing,), {}, certifi, "certifi.pem"),
+                                                  ((missing,), {}, None, None),
+                                                  ((str(bundle),), {"SSL_CERT_FILE": "chosen.pem"}, None, None)):
+                with self.subTest(system=system, env=env, certifi=bool(module)), \
+                        patch.object(runtime.ssl, "create_default_context", side_effect=created), \
+                        patch.object(runtime, "SYSTEM_CA_FILES", system), \
+                        patch.dict(os.environ, dict(clean, **env), clear=True), \
+                        patch.dict(sys.modules, {"certifi": module}):
+                    self.assertEqual(runtime.tls_context().cafile, expected)
+            with patch.object(runtime.ssl, "create_default_context",
+                              return_value=Mock(cafile=None, cert_store_stats=Mock(return_value={"x509_ca": 3}))):
+                self.assertIsNone(runtime.tls_context().cafile)
+
+    def test_codexbar_download_and_fugu_read_verify_with_the_shared_context(self):
+        import io
+        import ssl
+        import urllib.error
+        context = ssl.create_default_context()
+        with tempfile.TemporaryDirectory() as temporary, patch.object(runtime, "tls_context", return_value=context):
+            with patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
+                    patch.object(usage.platform, "system", return_value="Darwin"), \
+                    patch.object(usage.platform, "machine", return_value="arm64"), \
+                    patch.object(usage.urllib.request, "urlopen", return_value=io.BytesIO(b"bad")) as opened:
+                with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
+                    usage.install(Path(temporary) / "herd")
+            self.assertIs(opened.call_args.kwargs["context"], context)
+            opener = Mock()
+            opener.open.side_effect = urllib.error.URLError("offline")
+            with patch.object(sources.urllib.request, "HTTPSHandler") as handler, \
+                    patch.object(sources.urllib.request, "build_opener", return_value=opener):
+                with self.assertRaisesRegex(sources.SourceError, "Last update failed"):
+                    sources.fugu_read({"api_key": "private-key"}, time.monotonic() + 5, threading.Event())
+            handler.assert_called_once_with(context=context)
+
+    def test_watchers_record_the_code_they_run(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            views.record_watcher(state, "usage")
+            self.assertEqual(field.read_json(state / "usage-watcher.json", {}),
+                             {"pid": os.getpid(), "code": views.code_stamp(ROOT)})
+            with patch.object(views, "record_watcher") as recorded, patch.object(usage, "run"), \
+                    patch.object(sys, "argv", ["plan-usage", "--state-dir", temporary, "watch"]):
+                self.assertEqual(usage.main(), 0)
+            recorded.assert_called_once_with(state, "usage")
+            screen = MagicMock()
+            screen.__enter__.side_effect = KeyboardInterrupt
+            with patch.object(views, "record_watcher") as recorded, patch.object(field, "Readout", return_value=screen), \
+                    patch.object(field, "resolve_herdr", return_value="herdr"), \
+                    patch.object(sys, "argv", ["field-status", "--state-dir", temporary, "watch"]):
+                self.assertEqual(field.main(), 0)
+            recorded.assert_called_once_with(state, "field")
+            code = state / "bin" / "plan_usage.py"
+            code.parent.mkdir()
+            code.write_text("old")
+            before = views.code_stamp(state)
+            code.write_text("new")
+            self.assertNotEqual(views.code_stamp(state), before)
+
     def test_claude_ui_counters_do_not_change_auth_binding(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / ".claude.json"
@@ -1242,6 +1348,8 @@ class ViewTests(unittest.TestCase):
             data["panes"][pane] = {"pane_id": pane, "tab_id": tab, "workspace_id": "w9"}
             data.setdefault("processes", {})[pane] = [{"pid": 200 + number, "argv": [sys.executable,
                 str(ROOT / "bin" / views.VIEWS[kind][1]), "--state-dir", str(self.state), "watch"]}]
+            field.write_json(runtime.private_dir(self.state) / f"{kind}-watcher.json",
+                             {"pid": 200 + number, "code": views.code_stamp(ROOT)})
         self.save(data)
         self.assertEqual(self.setup_views()["errors"], [])
         self.assert_layout()
@@ -1249,6 +1357,84 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(len(data["tabs"]), 1)
         self.assertEqual(sum(c[:2] == ["pane", "move"] for c in data["calls"]), 2)
         self.assertFalse(any(c[:2] in (["pane", "run"], ["pane", "close"], ["pane", "split"]) for c in data["calls"]))
+
+    def test_outdated_watcher_is_replaced_in_its_pane_after_update(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        entry = field.read_json(self.state / "views.json", {})["views"]["usage"]
+        record = self.state / "usage-watcher.json"
+        for older in ({"pid": 200, "code": "older release"}, None):
+            with self.subTest(record=older):
+                if older:
+                    field.write_json(record, older)
+                else:
+                    record.unlink()  # Releases before watcher records wrote none.
+                start = len(self.data()["calls"])
+                self.assertEqual(self.setup_views("usage")["errors"], [])
+                calls = self.data()["calls"][start:]
+                runs = [c for c in calls if c[:2] == ["pane", "run"]]
+                self.assertEqual(runs, [["pane", "run", entry["pane_id"], entry["command"]]])
+                self.assertLess(calls.index(["pane", "send-keys", entry["pane_id"], "ctrl+c"]), calls.index(runs[0]))
+                self.assertFalse(any(c[:2] in (["pane", "split"], ["pane", "close"]) for c in calls))
+                self.assertEqual(field.read_json(record, {})["code"], views.code_stamp(ROOT))
+        start = len(self.data()["calls"])
+        self.assertEqual(self.setup_views()["errors"], [])
+        self.assertFalse(any(c[:2] in (["pane", "send-keys"], ["pane", "run"]) for c in self.data()["calls"][start:]))
+        self.assert_layout()
+
+    def test_outdated_watcher_that_keeps_running_gets_no_input(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        pane = field.read_json(self.state / "views.json", {})["views"]["usage"]["pane_id"]
+        field.write_json(self.state / "usage-watcher.json", {"pid": 200, "code": "older release"})
+        data = self.data()
+        data["ignores_interrupt"] = [pane]
+        self.save(data)
+        runs = sum(c[:2] == ["pane", "run"] for c in data["calls"])
+        self.assertIn("did not stop", self.setup_views("usage")["errors"][0])
+        self.assertEqual(sum(c[:2] == ["pane", "run"] for c in self.data()["calls"]), runs)
+
+    def test_command_that_replaces_outdated_watcher_gets_no_interrupt(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        pane = field.read_json(self.state / "views.json", {})["views"]["usage"]["pane_id"]
+        field.write_json(self.state / "usage-watcher.json", {"pid": 200, "code": "older release"})
+        runs = sum(c[:2] == ["pane", "run"] for c in self.data()["calls"])
+        original = field.control
+        def takeover(binary, args, timeout):
+            result = original(binary, args, timeout)
+            if args == ["pane", "get", pane]:
+                # The watcher exits and another command starts during the identity checks.
+                data = self.data()
+                data["processes"][pane] = [{"pid": 999, "argv": ["sleep", "300"]}]
+                self.save(data)
+            return result
+        with patch.object(field, "control", side_effect=takeover):
+            self.assertIn("identity changed", self.setup_views("usage")["errors"][0])
+        calls = self.data()["calls"]
+        self.assertFalse(any(c[:2] == ["pane", "send-keys"] for c in calls))
+        self.assertEqual(sum(c[:2] == ["pane", "run"] for c in calls), runs)
+
+    def test_outdated_watcher_with_a_short_lived_child_is_still_replaced(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        entry = field.read_json(self.state / "views.json", {})["views"]["usage"]
+        field.write_json(self.state / "usage-watcher.json", {"pid": 200, "code": "older release"})
+        original = field.control
+        added = []
+        def scan_child(binary, args, timeout):
+            result = original(binary, args, timeout)
+            if args == ["pane", "get", entry["pane_id"]] and not added:
+                # The watcher's own Herdr scan appears beside it in the foreground.
+                added.append(True)
+                data = self.data()
+                data["processes"][entry["pane_id"]].append(
+                    {"pid": 999, "argv": ["herdr", "pane", "process-info", "--pane", "other"]})
+                self.save(data)
+            return result
+        start = len(self.data()["calls"])
+        with patch.object(field, "control", side_effect=scan_child):
+            self.assertEqual(self.setup_views("usage")["errors"], [])
+        calls = self.data()["calls"][start:]
+        self.assertIn(["pane", "send-keys", entry["pane_id"], "ctrl+c"], calls)
+        self.assertEqual([c for c in calls if c[:2] == ["pane", "run"]],
+                         [["pane", "run", entry["pane_id"], entry["command"]]])
 
     def test_setup_splits_home_once_and_real_wrapper_stays_gated(self):
         result = self.setup_views()

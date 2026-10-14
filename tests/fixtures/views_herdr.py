@@ -144,6 +144,17 @@ elif args[:2] == ["pane", "run"]:
     # Simulate the foreground process which Herdr reports after submission.
     data.setdefault("processes", {})[pane] = [{"pid": 200, "argv": [sys.executable,
         str(Path(os.environ["VIEWS_ROOT"]) / "bin" / view), "--state-dir", os.environ["VIEWS_STATE"], "watch"]}]
+    # A real watcher records the code it loaded as it starts.
+    sys.path.insert(0, str(Path(os.environ["VIEWS_ROOT"]) / "bin"))
+    from lantern_views import code_stamp
+    kind = "field" if view == "field_status.py" else "usage"
+    (Path(os.environ["VIEWS_STATE"]) / f"{kind}-watcher.json").write_text(
+        json.dumps({"pid": 200, "code": code_stamp(Path(os.environ["VIEWS_ROOT"]))}))
+elif args[:2] == ["pane", "send-keys"]:
+    if args[3:] == ["ctrl+c"] and args[2] not in data.get("ignores_interrupt", []):
+        data.setdefault("processes", {})[args[2]] = []
+    path.write_text(json.dumps(data))
+    sys.exit(0)  # Like the installed CLI, a key press prints no body.
 elif args[:2] == ["tab", "rename"]:
     data["tabs"][args[2]]["label"] = args[3]
 elif args[:2] == ["pane", "close"]:

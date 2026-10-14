@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import subprocess
 import sys
@@ -28,6 +29,35 @@ def watcher_command(root: Path, state: Path, view: str, shell: str | None = None
         raise RuntimeError("Unsupported readout shell")
     return (f"{field.shell_quote(Path(sys.executable))} {field.shell_quote(script)} "
             f"--state-dir {field.shell_quote(state)} watch")
+
+
+def code_stamp(root: Path) -> str:
+    """Fingerprint the readout code on disk."""
+    digest = hashlib.sha256()
+    for path in sorted((root / "bin").glob("*.py")):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def record_watcher(state: Path, view: str) -> None:
+    """Record the code a starting watcher runs, so setup can replace it after an update."""
+    field.write_json(private_dir(state) / f"{view}-watcher.json",
+                     {"pid": os.getpid(), "code": code_stamp(Path(__file__).resolve().parent.parent)})
+
+
+def watcher_processes(info: dict, root: Path, state: Path, view: str) -> list:
+    """Identify a pane's watcher by PID and arguments. Its short-lived children do not count."""
+    return [(proc.get("pid"), proc.get("argv")) for proc in info.get("foreground_processes") or []
+            if isinstance(proc, dict) and matches_watcher(proc, root, state, view)]
+
+
+def current_watcher(info: dict, root: Path, state: Path, view: str) -> bool:
+    """A running watcher is current only when it recorded the code now on disk."""
+    record = field.read_json(state / f"{view}-watcher.json", {})
+    return (record.get("code") == code_stamp(root)
+            and any(isinstance(proc, dict) and proc.get("pid") == record.get("pid")
+                    and matches_watcher(proc, root, state, view)
+                    for proc in info.get("foreground_processes") or []))
 
 
 def matches_watcher(proc: dict, root: Path, state: Path, view: str) -> bool:
@@ -277,11 +307,38 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                         pane = moved
             return pane
 
+        def stop_outdated(kind: str, pane: dict, end: float) -> str:
+            # A reinstall leaves the old watcher running its old code. Stop it
+            # like a person would, then start the new one in the same shell.
+            pid = pane["pane_id"]
+            info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
+            if current_watcher(info, root, state, kind):
+                return "running"
+            watcher = watcher_processes(info, root, state, kind)
+            check_context(end)
+            live = call(["pane", "get", pid], end).get("pane", {})
+            # Recheck immediately before the key press. Never interrupt a
+            # command that replaced the watcher during the checks above.
+            latest = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
+            if (live.get("agent") or live.get("tab_id") != pane.get("tab_id") or not watcher
+                    or watcher_processes(latest, root, state, kind) != watcher):
+                raise RuntimeError("Readout identity changed before restart")
+            call(["pane", "send-keys", pid, "ctrl+c"], end)
+            settle = min(end, time.monotonic() + 3)
+            while occupancy(info, root, state, kind) != "idle":
+                if time.monotonic() >= settle:
+                    raise RuntimeError("Outdated readout did not stop")
+                time.sleep(0.1)
+                info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
+            return "idle"
+
         for kind in requested:
             end = min(deadline, time.monotonic() + 7)
             label, _ = VIEWS[kind]
             try:
                 pane, status = find_target(kind, end)
+                if status == "running":
+                    status = stop_outdated(kind, pane, end)
                 created = pane is None
                 pane = place(kind, pane, end)
                 tab = {"tab_id": home_tab}

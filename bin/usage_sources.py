@@ -212,6 +212,13 @@ def configured_fugu_scope(env: dict[str, str]) -> dict | None:
         raise SourceError("Account unknown", provider="fugu") from None
 
 
+def native_claude(executable: str) -> bool:
+    """Claude's native installer runs claude/versions/<version> through a claude symlink."""
+    path = Path(executable)
+    return (path.parent.name == "versions" and path.parent.parent.name == "claude"
+            and re.fullmatch(r"\d+\.\d+\.\d+", path.name) is not None)
+
+
 def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     home = env.get("HOME", "")
     argv = process.get("argv")
@@ -230,7 +237,7 @@ def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     basename = Path(executable).name.lower()
     expected = {"codex": r"codex(?:\.exe)?", "claude": r"claude(?:\.exe)?", "grok": r"grok(?:[-.].*)?",
                 "agy": r"agy(?:\.exe)?"}
-    if not re.fullmatch(expected[provider], basename):
+    if not re.fullmatch(expected[provider], basename) and not (provider == "claude" and native_claude(executable)):
         raise SourceError("Account unknown")
     native = {"HOME": home, "PATH": path}
     for key in ("USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "TMP", "TEMP", "SystemRoot", "COMSPEC", "USERPROFILE", "APPDATA", "LOCALAPPDATA"):
@@ -357,7 +364,8 @@ def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
+                                         urllib.request.HTTPSHandler(context=runtime.tls_context()))
     request = urllib.request.Request("https://api.sakana.ai/v1/usage",
                                      headers={"Authorization": "Bearer " + scope["api_key"],
                                               "Accept": "application/json"})
