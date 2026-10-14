@@ -841,6 +841,44 @@ with Readout() as r:
             self.assertEqual(before["key"], after["key"])
             self.assertNotEqual(before["lifetime"], after["lifetime"])
 
+    def test_watcher_reports_slow_herdr_status_and_recovers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "socket").touch()
+            response = subprocess.CompletedProcess([], 0, json.dumps({"server": {"running": True, "socket": str(root / "socket")}}), "")
+            calls, draws = [], []
+
+            def status(command, **kwargs):
+                calls.append(command)
+                if len(calls) == 1:
+                    raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+                return response
+
+            class Screen:
+                def __init__(self, stop):
+                    self.stop = stop
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_):
+                    pass
+
+                def draw(self, output):
+                    draws.append(output)
+
+                def wait(self, _):
+                    if len(draws) == 2:
+                        self.stop.set()
+
+            with patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "xdg")}), \
+                    patch.object(runtime.subprocess, "run", side_effect=status), \
+                    patch.object(field, "snapshot", return_value=([], [], [])), \
+                    patch.object(usage, "Readout", Screen):
+                usage.run(root / "state", "herdr", True, threading.Event(), 5)
+            self.assertEqual(draws[0], "Plan Usage\nHerdr server status unavailable\n")
+            self.assertIn("No open service plans.", draws[1])
+
     def test_codex_stdio_handshake_notifications_and_timeout(self):
         with tempfile.TemporaryDirectory() as temporary:
             script = Path(temporary) / "server.py"
