@@ -2,6 +2,14 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.9] - 2026-10-14
+
+### Fixed
+
+- The Plan Usage watcher no longer exits when Herdr is slow to answer its
+  status check, as on a machine short of memory. The pane shows that Herdr
+  status is unavailable and recovers on the next pass.
+
 ## [0.17.8] - 2026-10-11
 
 ### Fixed
