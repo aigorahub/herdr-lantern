@@ -62,7 +62,8 @@ There is no `herdr plugin update`; a GitHub install refreshes by running the
 install command above again, and from inside the chat that goes through the
 same mutate gate as everything else. A linked checkout is never reinstalled
 over — the lantern says the checkout is behind and leaves the `git pull` to
-you. After an update, quit the chat and reopen the lantern; the note under
+you. After an update, quit the chat and reopen the lantern. Reopening restarts
+readouts that still run the old code. The note under
 [Open it](#open-it) about a leftover tab applies. The check is one
 background fetch of the published manifest with a few seconds' budget, so it
 never delays the light-up; offline, or before the fetch lands, the lantern
@@ -196,6 +197,7 @@ provider settings can prevent Codex or Claude subscription readings.
 Codex uses its native app server. Claude and Grok require CodexBar CLI
 0.74.0. Install the pinned CLI into private Lantern state with
 `sh bin/plan-usage install`. The installer checks the release digest.
+It uses the system's CA certificates when Python ships without any.
 It does not install the desktop app or change the user's CodexBar config.
 There is no Windows release asset for this dependency. An absent dependency
 affects only its provider row. The watcher does not download tools.
@@ -203,7 +205,8 @@ An absolute `LANTERN_CODEXBAR_BIN` can select a CLI of the same version.
 An invalid explicit path does not fall back to another tool.
 
 Use the detected Python 3 command with `$LANTERN_PLAN_USAGE pane` to restore
-the usage pane. `refresh` prints the shared cache. `collect` makes one bounded
+the usage pane. It replaces a watcher still running code from before an
+update. `refresh` prints the shared cache. `collect` makes one bounded
 collection when no watcher owns the collector. State stays outside the repo.
 The readout does not send prompts or start model turns.
 

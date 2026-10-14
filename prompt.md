@@ -618,7 +618,8 @@ quiet tabs and Lantern Home. Never close Lantern Home as part of Field Status.
   verified readout watchers from old tabs into this layout. Never close Lantern Home.
 
 Both readouts stay within their pane. Use Up/Down or Page Up/Page Down to
-scroll. Press q to close a readout. A later open restores the watcher.
+scroll. Press q to close a readout. A later open restores the watcher. It also
+replaces a watcher still running code from before an update.
 
 ### Plan Usage
 

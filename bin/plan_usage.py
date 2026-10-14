@@ -439,7 +439,7 @@ def install(state: Path) -> Path:
             archive = root / "release.tar.gz"
             url = f"https://github.com/steipete/CodexBar/releases/download/v{sources.VERSION}/CodexBarCLI-v{sources.VERSION}-{asset}.tar.gz"
             digest = hashlib.sha256()
-            with urllib.request.urlopen(url, timeout=30) as response, archive.open("wb") as stream:
+            with urllib.request.urlopen(url, timeout=30, context=runtime.tls_context()) as response, archive.open("wb") as stream:
                 total = 0
                 while chunk := response.read(65536):
                     total += len(chunk)
@@ -568,6 +568,9 @@ def main() -> int:
             server = runtime.server_identity(args.herdr, 2)
             print(render(cached_snapshot(runtime.shared_dir(server), server)), end="")
         else:
+            if args.command == "watch":
+                from lantern_views import record_watcher
+                record_watcher(state, "usage")
             run(state, args.herdr, args.command == "watch", stop, getattr(args, "interval", 5))
         return 0
     except (RuntimeError, OSError, ValueError) as exc:

@@ -127,7 +127,7 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
     command = herdr_command(binary, args)
     env = herdr_environment(binary)
     if args[:2] in (["pane", "run"], ["pane", "split"], ["pane", "move"],
-                    ["pane", "rename"], ["tab", "create"]):
+                    ["pane", "rename"], ["pane", "send-keys"], ["tab", "create"]):
         env["HERDR_HELPER_OK"] = "1"
     try:
         proc = subprocess.run(command, capture_output=True, text=True,
@@ -449,6 +449,8 @@ def main() -> int:
         if args.command == "watch":
             if args.interval <= 0:
                 parser.error("--interval must be positive")
+            from lantern_views import record_watcher
+            record_watcher(state_dir, "field")
             old_body = None
             with Readout() as screen:
                 while not screen.stop.is_set():

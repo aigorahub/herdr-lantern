@@ -364,7 +364,8 @@ def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
+                                         urllib.request.HTTPSHandler(context=runtime.tls_context()))
     request = urllib.request.Request("https://api.sakana.ai/v1/usage",
                                      headers={"Authorization": "Bearer " + scope["api_key"],
                                               "Accept": "application/json"})

@@ -11,6 +11,13 @@ All notable changes to Lantern, by Elves are documented here.
   Account unknown. Lantern accepts that file only inside a `claude/versions`
   folder with a version number name. Other executable names still show
   Account unknown.
+- `sh bin/plan-usage install` works with Homebrew Python, which ships without
+  CA certificates. Downloads and Fugu reads use the system's certificates in
+  that case, then certifi. Verification stays on, and the release digest check
+  is unchanged.
+- Reopening Lantern or running `pane` after an update replaces a Field Status
+  or Plan Usage watcher still running the old code. Before, the old watcher
+  kept running and held the usage collector.
 
 ## [0.17.8] - 2026-10-11
 
