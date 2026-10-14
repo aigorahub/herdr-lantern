@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import stat
+import subprocess
 import threading
 import time
 import urllib.error
@@ -678,5 +679,7 @@ def fetch(scope: dict, state: Path, cancel: threading.Event) -> dict:
         return result
     except SourceError:
         raise
-    except (OSError, ValueError, RuntimeError, TypeError, KeyError, AttributeError):
+    # Stopping a probe can time out on a busy machine. That is a failed read,
+    # not a reason for the watcher to exit.
+    except (OSError, ValueError, RuntimeError, TypeError, KeyError, AttributeError, subprocess.SubprocessError):
         raise SourceError("Last update failed") from None

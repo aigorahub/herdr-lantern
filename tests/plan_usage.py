@@ -298,6 +298,19 @@ class UsageTests(unittest.TestCase):
                 with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
                     sources.fetch(scope, home / "state", threading.Event())
 
+    def test_probe_cleanup_timeout_is_a_failed_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "agy"
+            exe.touch(); exe.chmod(0o700)
+            token = home / ".gemini/antigravity-cli/antigravity-oauth-token"
+            token.parent.mkdir(parents=True); token.write_text("login")
+            scope = sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)}, {"HOME": str(home)})
+            # runtime.stop_process can time out while reaping a probe on a busy machine.
+            with patch.object(runtime, "capture", side_effect=subprocess.TimeoutExpired(["agy"], 2)):
+                with self.assertRaisesRegex(sources.SourceError, "Last update failed"):
+                    sources.fetch(scope, home / "state", threading.Event())
+
     def test_fugu_modern_and_legacy_profiles_bind_the_configured_key(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary); root = home / ".codex"; root.mkdir()
