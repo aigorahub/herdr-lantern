@@ -1392,6 +1392,26 @@ class ViewTests(unittest.TestCase):
         self.assertIn("did not stop", self.setup_views("usage")["errors"][0])
         self.assertEqual(sum(c[:2] == ["pane", "run"] for c in self.data()["calls"]), runs)
 
+    def test_command_that_replaces_outdated_watcher_gets_no_interrupt(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        pane = field.read_json(self.state / "views.json", {})["views"]["usage"]["pane_id"]
+        field.write_json(self.state / "usage-watcher.json", {"pid": 200, "code": "older release"})
+        runs = sum(c[:2] == ["pane", "run"] for c in self.data()["calls"])
+        original = field.control
+        def takeover(binary, args, timeout):
+            result = original(binary, args, timeout)
+            if args == ["pane", "get", pane]:
+                # The watcher exits and another command starts during the identity checks.
+                data = self.data()
+                data["processes"][pane] = [{"pid": 999, "argv": ["sleep", "300"]}]
+                self.save(data)
+            return result
+        with patch.object(field, "control", side_effect=takeover):
+            self.assertIn("identity changed", self.setup_views("usage")["errors"][0])
+        calls = self.data()["calls"]
+        self.assertFalse(any(c[:2] == ["pane", "send-keys"] for c in calls))
+        self.assertEqual(sum(c[:2] == ["pane", "run"] for c in calls), runs)
+
     def test_setup_splits_home_once_and_real_wrapper_stays_gated(self):
         result = self.setup_views()
         self.assertEqual(result["errors"], [])

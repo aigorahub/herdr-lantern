@@ -45,6 +45,12 @@ def record_watcher(state: Path, view: str) -> None:
                      {"pid": os.getpid(), "code": code_stamp(Path(__file__).resolve().parent.parent)})
 
 
+def foreground(info: dict) -> list:
+    """Identify a pane's foreground processes by PID and arguments."""
+    return [(proc.get("pid"), proc.get("argv")) for proc in info.get("foreground_processes") or []
+            if isinstance(proc, dict)]
+
+
 def current_watcher(info: dict, root: Path, state: Path, view: str) -> bool:
     """A running watcher is current only when it recorded the code now on disk."""
     record = field.read_json(state / f"{view}-watcher.json", {})
@@ -310,8 +316,12 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                 return "running"
             check_context(end)
             live = call(["pane", "get", pid], end).get("pane", {})
+            # Recheck immediately before the key press. Never interrupt a
+            # command that replaced the watcher during the checks above.
+            latest = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
             if (live.get("agent") or live.get("tab_id") != pane.get("tab_id")
-                    or occupancy(info, root, state, kind) != "running"):
+                    or occupancy(latest, root, state, kind) != "running"
+                    or foreground(latest) != foreground(info)):
                 raise RuntimeError("Readout identity changed before restart")
             call(["pane", "send-keys", pid, "ctrl+c"], end)
             settle = min(end, time.monotonic() + 3)
