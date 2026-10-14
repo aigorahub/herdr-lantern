@@ -153,6 +153,8 @@ elif args[:2] == ["pane", "run"]:
 elif args[:2] == ["pane", "send-keys"]:
     if args[3:] == ["ctrl+c"] and args[2] not in data.get("ignores_interrupt", []):
         data.setdefault("processes", {})[args[2]] = []
+    path.write_text(json.dumps(data))
+    sys.exit(0)  # Like the installed CLI, a key press prints no body.
 elif args[:2] == ["tab", "rename"]:
     data["tabs"][args[2]]["label"] = args[3]
 elif args[:2] == ["pane", "close"]:
