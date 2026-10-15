@@ -1,6 +1,7 @@
 """Plan Usage protocol, identity, collection, locks, and startup tests."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import shlex
@@ -824,6 +825,90 @@ with Readout() as r:
                     child.kill()
                 child.wait()
                 child.stdout.close()
+
+    def test_server_status_timeout_has_safe_error(self):
+        failure = subprocess.TimeoutExpired(["herdr", "private-command-text"], 2,
+                                             output="private-output", stderr="private-stderr")
+        with patch.object(runtime.subprocess, "run", side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, "^Herdr server status timed out$") as caught:
+                runtime.server_identity("herdr", 2)
+        self.assertTrue(caught.exception.__suppress_context__)
+
+    def test_watch_recovers_after_initial_server_status_timeout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            endpoint = root / "socket"
+            endpoint.touch()
+            response = subprocess.CompletedProcess([], 0, json.dumps({
+                "server": {"running": True, "socket": str(endpoint)}}), "")
+            failure = subprocess.TimeoutExpired(["herdr", "private-command-text"], 2,
+                                                 output="private-output", stderr="private-stderr")
+            stop = threading.Event()
+            with patch.object(runtime.subprocess, "run", side_effect=[failure, response, response]), \
+                    patch.object(runtime, "shared_dir", return_value=root / "shared"), \
+                    patch.object(field, "snapshot", return_value=([], [], [])), \
+                    patch.object(usage, "Readout") as readout:
+                screen = readout.return_value
+                def wait(_interval):
+                    if screen.draw.call_count == 2:
+                        stop.set()
+                screen.wait.side_effect = wait
+                usage.run(root / "state", "herdr", True, stop, 0.1)
+            self.assertEqual(screen.draw.call_count, 2)
+            failed, recovered = [call.args[0] for call in screen.draw.call_args_list]
+            self.assertIn("Herdr server status timed out", failed)
+            self.assertIn("No open service plans.", recovered)
+            self.assertNotIn("timed out", recovered)
+            for private in ("private-command-text", "private-output", "private-stderr", "Traceback"):
+                self.assertNotIn(private, failed + recovered)
+            screen.__exit__.assert_called_once()
+            self.assertTrue((root / "shared/snapshot.json").exists())
+
+    def test_server_status_timeout_marks_collected_limits_stale_then_recovers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            endpoint = root / "socket"
+            endpoint.touch()
+            response = subprocess.CompletedProcess([], 0, json.dumps({
+                "server": {"running": True, "socket": str(endpoint)}}), "")
+            with patch.object(runtime.subprocess, "run", return_value=response):
+                server = runtime.server_identity("herdr", 2)
+            collector = usage.Collector(root / "state", root / "shared", "herdr", server)
+            collector.validated = True
+            collector.bindings["a"] = {"scope": {"key": "a", "provider": "codex"}, "tabs": {"tab"}}
+            collector.cache["a"] = {"state": "Measured", "result": measured()}
+            try:
+                failure = subprocess.TimeoutExpired(["herdr", "private-command-text"], 2)
+                with patch.object(runtime.subprocess, "run", side_effect=failure):
+                    collector.scan()
+                collector.schedule()
+                self.assertEqual(collector.pending, {})
+                stale = collector.write()
+                self.assertTrue(stale["scan_failed"])
+                self.assertIn("Herdr scan failed.", usage.render(stale, now=1800000030))
+                self.assertIn("79%*", usage.render(stale, now=1800000030))
+                with patch.object(runtime.subprocess, "run", return_value=response), \
+                        patch.object(field, "snapshot", return_value=([], [], [])):
+                    collector.scan()
+                recovered = collector.write()
+                self.assertFalse(recovered["scan_failed"])
+                self.assertEqual(recovered["rows"], [])
+                self.assertEqual(collector.cache, {})
+            finally:
+                collector.close()
+
+    def test_refresh_server_status_timeout_returns_clean_failure(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(sys, "argv", ["plan-usage", "--state-dir", temporary, "refresh"]), \
+                patch.object(usage.signal, "signal"), \
+                patch.object(runtime.subprocess, "run", side_effect=subprocess.TimeoutExpired(
+                    ["herdr", "private-command-text"], 2, output="private-output", stderr="private-stderr")), \
+                patch.object(sys, "stderr", new_callable=io.StringIO) as errors, \
+                patch.object(sys, "stdout", new_callable=io.StringIO) as output:
+            result = usage.main()
+        self.assertEqual(result, 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(errors.getvalue(), "plan-usage: Herdr server status timed out\n")
 
     def test_socket_replacement_changes_lifetime(self):
         if os.name == "nt":
