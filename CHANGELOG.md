@@ -2,6 +2,16 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.11] - 2026-10-16
+
+### Added
+
+- Plan Usage shows saved usage resets. When a service has any, Resets and
+  Expires columns show how many and when the oldest expires, in local time.
+  Codex reports its reset credits in the usage read Lantern already makes.
+  Services that don't report resets show --. Narrow panes add one line under
+  the table instead. Lantern never spends a reset.
+
 ## [0.17.10] - 2026-10-16
 
 ### Fixed

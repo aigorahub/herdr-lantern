@@ -261,6 +261,18 @@ def cached_snapshot(shared: Path, server: dict) -> dict:
     return value
 
 
+def saved_resets(rows: list[dict]) -> dict | None:
+    """A service's saved usage resets across its logins, or None when none report them."""
+    reported = [row["resets"] for row in rows if isinstance(row.get("resets"), dict)]
+    if not reported:
+        return None
+    held = [value for value in reported if value.get("count")]
+    known = all(value.get("expiry_known") for value in held)
+    dated = [value["expires_at"] for value in held if value.get("expires_at")]
+    return {"count": sum(value.get("count", 0) for value in reported), "known": known,
+            "expires_at": min(dated) if known and dated else None}
+
+
 def render(snapshot: dict, now: float | None = None, width: int | None = None,
            color: bool = False, zone: tzinfo | None = None) -> str:
     """Show percentages left and weekly resets, one row per service."""
@@ -281,8 +293,11 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         services.setdefault(name, []).append(row)
     if not services:
         return "\n".join(lines + ["No open service plans."]) + "\n"
+    saved_by_service = {name: saved_resets(rows) for name, rows in services.items()}
+    any_resets = any(saved and saved["count"] for saved in saved_by_service.values())
     show_resets = width >= 39
     full_labels = width >= (50 if show_resets else 32)
+    reset_columns = any_resets and full_labels and show_resets and width >= 69
     gap = "  " if full_labels else " "
     widths = [7, 12, 9] if full_labels else [7, width - 14, 5]
     heading = ["Service", "Session left", "Week left"] if full_labels else ["Service", "Sess", "Week"]
@@ -290,10 +305,13 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         gap = "  "
         widths = [7, 12, 9, 16] if full_labels else [7, 5, 5, 16]
         heading.append("Week resets")
+    if reset_columns:
+        widths += [6, 9]
+        heading += ["Resets", "Expires"]
     elif not full_labels:
         lines.append("Percent left.")
     def align(text: str, index: int, size: int) -> str:
-        if index in (1, 2):
+        if index in (1, 2, 4):
             return text.rjust(size)
         return text if index == len(widths) - 1 else text.ljust(size)
 
@@ -340,6 +358,27 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         except (ValueError, OverflowError, OSError):
             return "--"
 
+    def day(value: float) -> str:
+        try:
+            local = datetime.fromtimestamp(value, timezone.utc).astimezone(zone)
+        except (ValueError, OverflowError, OSError):
+            return "--"
+        return f"{local:%b} {local.day}"
+
+    def expiry(saved: dict | None) -> str:
+        if not saved or not saved["count"] or not saved["known"]:
+            return "--"
+        return day(saved["expires_at"]) if saved["expires_at"] else "No expiry"
+
+    def reset_note(name: str, saved: dict) -> str:
+        count = saved["count"]
+        text = f"{name}: {count} reset{'s' if count != 1 else ''}."
+        if saved["known"] and saved["expires_at"]:
+            return text + (" The oldest expires " if count != 1 else " It expires ") + day(saved["expires_at"]) + "."
+        if saved["known"]:
+            return text + (" They don't expire." if count != 1 else " It doesn't expire.")
+        return text
+
     order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google", "Fugu"))}
     for name in sorted(services, key=lambda key: (order.get(key, 99), key)):
         accounts = sorted(services[name], key=lambda row: not bool(row.get("windows")))
@@ -379,7 +418,13 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         if show_resets:
             values.append(reset_time(selected.get("week", (None, False, set()))[2]))
             codes.append("" if values[-1] not in ("--", "Varies") else "2")
+        saved = saved_by_service[name]
+        if reset_columns:
+            values += [str(saved["count"]) if saved else "--", expiry(saved)]
+            codes += ["" if saved else "2", "" if saved and saved["count"] else "2"]
         add(values, codes)
+        if any_resets and not reset_columns and saved and saved["count"]:
+            notes.append(reset_note(name, saved))
         if stale:
             notes.append(f"{name}: * Waiting for fresh limits.")
         if not selected:
