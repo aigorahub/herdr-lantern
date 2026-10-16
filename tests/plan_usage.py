@@ -47,7 +47,6 @@ except ImportError:
 needs_tomllib = unittest.skipIf(tomllib is None, "Codex settings need Python 3.11")
 
 
-@needs_tomllib
 class ConfiguredFuguTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -67,6 +66,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         path.chmod(0o600)
         return path
 
+    @needs_tomllib
     def test_configured_profile_needs_no_open_agent_or_executable(self):
         with patch.object(runtime, "capture") as command:
             scope = sources.configured_fugu_scope(self.env)
@@ -80,6 +80,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         opened = sources.scope_for("codex", process, self.env)
         self.assertEqual(scope["key"], opened["key"])
 
+    @needs_tomllib
     def test_standalone_modern_and_legacy_profiles_use_the_same_settings(self):
         modern = self.root / "fugu.config.toml"
         modern.write_text('model_provider = "sakana"\n' + self.provider)
@@ -89,6 +90,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         (self.root / "config.toml").write_text(self.provider + '\n[profiles.fugu]\nmodel_provider = "sakana"\n')
         self.assertEqual(sources.configured_fugu_scope(self.env)["provider"], "fugu")
 
+    @needs_tomllib
     def test_home_selector_is_exact_and_invalid_selectors_do_not_read_default(self):
         self.assertIsNone(sources.configured_fugu_scope({}))
         self.assertIsNone(sources.configured_fugu_scope(dict(self.env, CODEX_HOME="relative")))
@@ -108,6 +110,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         (self.root / "config.toml").unlink()
         self.assertIsNone(sources.configured_fugu_scope(self.env))
 
+    @needs_tomllib
     def test_key_store_reads_only_selected_key_without_shell_execution(self):
         marker = self.home / "should-not-exist"
         store = self.store(f'OTHER_KEY=$(touch {marker})\nexport SAKANA_API_KEY="stored-key" # saved\n')
@@ -119,6 +122,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         self.assertEqual(scope["api_key"], "private-key")
         self.assertNotIn(str(store), scope["files"])
 
+    @needs_tomllib
     def test_key_rotation_changes_binding_and_missing_key_hides_old_values(self):
         env = {"HOME": str(self.home)}
         store = self.store('SAKANA_API_KEY=first-key\n')
@@ -131,6 +135,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         with self.assertRaisesRegex(sources.SourceError, "^Sakana API key missing$"):
             sources.configured_fugu_scope(env)
 
+    @needs_tomllib
     def test_changed_store_or_profile_during_read_is_not_bound(self):
         env = {"HOME": str(self.home)}
         store = self.store('SAKANA_API_KEY=first-key\n')
@@ -149,6 +154,7 @@ class ConfiguredFuguTests(unittest.TestCase):
                 self.assertRaisesRegex(sources.SourceError, "Account unknown"):
             sources.configured_fugu_scope(self.env)
 
+    @needs_tomllib
     def test_invalid_store_is_not_sourced_or_sent(self):
         env = {"HOME": str(self.home)}
         for text in ('SAKANA_API_KEY="unterminated\n', 'SAKANA_API_KEY=one two\n', 'x' * 65537):
@@ -470,7 +476,6 @@ class UsageTests(unittest.TestCase):
                 with self.assertRaisesRegex(sources.SourceError, state):
                     sources.auth_status(scope, time.monotonic() + 1, threading.Event())
 
-    @needs_tomllib
     def test_scope_rejects_ambient_account_and_overrides(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
@@ -485,6 +490,15 @@ class UsageTests(unittest.TestCase):
             self.assertNotIn("secret", json.dumps(scope))
             with self.assertRaisesRegex(sources.SourceError, "Limits unavailable"):
                 sources.scope_for("codex", dict(process, argv=["codex", "-p", "fugu"]), {"HOME": str(home)})
+
+    @needs_tomllib
+    def test_codex_settings_for_another_provider_are_not_openai(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "codex"
+            exe.touch()
+            exe.chmod(0o700)
+            process = {"argv": ["codex", "-m", "gpt-6-astra"], "executable": str(exe)}
             (home / ".codex").mkdir()
             (home / ".codex/config.toml").write_text('model_provider = "fugu"')
             with self.assertRaisesRegex(sources.SourceError, "Limits unavailable"):
@@ -1015,26 +1029,83 @@ for line in sys.stdin:
                     self.assertRaisesRegex(sources.SourceError, "^LANTERN_CODEXBAR_BIN is not CodexBar 0.74.0$"):
                 sources.resolve_codexbar(Path("state"), time.monotonic() + 1, threading.Event())
 
+    @unittest.skipIf(os.name == "nt", "CodexBar has no Windows build")
     def test_missing_codexbar_is_installed_once_per_watcher(self):
-        for outcome, expected in (("installed", None),
-                                  (OSError("offline"), "^CodexBar 0.74.0 not found. Ask Lantern to install it$"),
-                                  (OSError("offline"), "^CodexBar 0.74.0 not found. Ask Lantern to install it$")):
-            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as temporary, \
-                    patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
-                    patch.object(sources, "codexbar_asset", return_value="macos-arm64"), \
-                    patch.object(sources.shutil, "which", return_value=None):
-                os.environ.pop("LANTERN_CODEXBAR_BIN", None)
-                tool = Path(temporary) / "CodexBarCLI"
-                effect = {"return_value": tool} if outcome == "installed" else {"side_effect": outcome}
-                with patch.object(sources, "install", **effect) as install:
+        import http.client
+        missing = "^CodexBar 0.74.0 not found. Ask Lantern to install it$"
+
+        def resolve(state, cancel=None):
+            return sources.resolve_codexbar(state, time.monotonic() + 5, cancel or threading.Event())
+
+        def fake_install(state, cancel=None):
+            tool = sources.tools_dir(state) / "CodexBarCLI"
+            tool.parent.mkdir(parents=True)
+            tool.write_text("#!/bin/sh\necho 'CodexBar 0.74.0'\n")
+            tool.chmod(0o700)
+            return tool
+
+        def machine(temporary):
+            os.environ.pop("LANTERN_CODEXBAR_BIN", None)
+            return (patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}),
+                    patch.object(sources, "codexbar_asset", return_value="macos-arm64"),
+                    patch.object(sources.shutil, "which", return_value=None))
+
+        # Installed once, then found without another install.
+        with tempfile.TemporaryDirectory() as temporary:
+            first, second, third = machine(temporary)
+            with first, second, third, patch.object(sources, "install", side_effect=fake_install) as install:
+                state = Path(temporary) / "herd"
+                tool = str(sources.tools_dir(state) / "CodexBarCLI")
+                self.assertEqual([resolve(state), resolve(state)], [tool, tool])
+                install.assert_called_once()
+        # Any failed install, including a garbled HTTP reply, leaves the hint and is not retried.
+        for failure in (OSError("offline"), http.client.BadStatusLine("garbage")):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                first, second, third = machine(temporary)
+                with first, second, third, patch.object(sources, "install", side_effect=failure) as install:
                     for _ in range(2):
-                        if expected is None:
-                            # The installed CLI is found from then on without another install.
-                            found = sources.resolve_codexbar(Path(temporary) / "herd", time.monotonic() + 1, threading.Event())
-                            self.assertEqual(found, str(tool))
-                            break
-                        with self.assertRaisesRegex(sources.SourceError, expected):
-                            sources.resolve_codexbar(Path(temporary) / "herd", time.monotonic() + 1, threading.Event())
+                        with self.assertRaisesRegex(sources.SourceError, missing):
+                            resolve(Path(temporary) / "herd")
+                    install.assert_called_once()
+        # A try the watcher stopped doesn't count.
+        with tempfile.TemporaryDirectory() as temporary:
+            stopped = threading.Event()
+            stopped.set()
+            first, second, third = machine(temporary)
+            outcomes = [RuntimeError("stopped")]
+
+            def stopped_once(state, cancel=None):
+                if outcomes:
+                    raise outcomes.pop()
+                return fake_install(state)
+
+            with first, second, third, patch.object(sources, "install", side_effect=stopped_once) as install:
+                state = Path(temporary) / "herd"
+                with self.assertRaisesRegex(sources.SourceError, missing):
+                    resolve(state, stopped)
+                self.assertEqual(resolve(state), str(sources.tools_dir(state) / "CodexBarCLI"))
+                self.assertEqual(install.call_count, 2)
+        # A second row waits for the install in progress and then uses it.
+        with tempfile.TemporaryDirectory() as temporary:
+            started, release, found = threading.Event(), threading.Event(), []
+
+            def slow_install(state, cancel=None):
+                started.set()
+                release.wait(5)
+                return fake_install(state)
+
+            first, second, third = machine(temporary)
+            with first, second, third, patch.object(sources, "install", side_effect=slow_install) as install:
+                state = Path(temporary) / "herd"
+                rows = [threading.Thread(target=lambda: found.append(resolve(state))) for _ in range(2)]
+                rows[0].start()
+                started.wait(5)
+                rows[1].start()
+                time.sleep(.2)
+                release.set()
+                for row in rows:
+                    row.join(5)
+                self.assertEqual(found, [str(sources.tools_dir(state) / "CodexBarCLI")] * 2)
                 install.assert_called_once()
         # No release for this system: every read says so, and nothing is downloaded.
         with tempfile.TemporaryDirectory() as temporary, \
@@ -1045,7 +1116,7 @@ for line in sys.stdin:
             os.environ.pop("LANTERN_CODEXBAR_BIN", None)
             for _ in range(2):
                 with self.assertRaisesRegex(sources.SourceError, "^CodexBar has no build for this system$"):
-                    sources.resolve_codexbar(Path(temporary) / "herd", time.monotonic() + 1, threading.Event())
+                    resolve(Path(temporary) / "herd")
 
     def test_dependency_notes_say_what_is_missing_and_what_to_do(self):
         rows = [{"provider": "claude", "state": sources.CODEXBAR_MISSING},
@@ -1138,6 +1209,9 @@ for line in sys.stdin:
                 # Like Claude's updater removing a version that a tab still runs.
                 program.unlink()
                 self.assertEqual(runtime.process_executable(child.pid), expected)
+                # Both systems report the old path again once a new file is there.
+                program.write_text("replacement")
+                self.assertEqual(runtime.process_executable(child.pid), expected)
             finally:
                 child.kill()
                 child.wait()
@@ -1213,7 +1287,6 @@ for line in sys.stdin:
                 self.assertIsNone(runtime.tls_context().cafile)
 
     def test_codexbar_download_and_fugu_read_verify_with_the_shared_context(self):
-        import io
         import ssl
         import urllib.error
         context = ssl.create_default_context()
@@ -1378,7 +1451,6 @@ for line in sys.stdin:
 
     def test_installer_rejects_bad_digest_and_archive_escape(self):
         import hashlib
-        import io
         import tarfile
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary) / "herd"
@@ -1403,7 +1475,6 @@ for line in sys.stdin:
             self.assertFalse((Path(temporary) / "tools/codexbar/escape").exists())
 
     def test_installer_stops_when_the_watcher_stops(self):
-        import io
         with tempfile.TemporaryDirectory() as temporary:
             stop = threading.Event()
             stop.set()

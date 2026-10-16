@@ -202,8 +202,8 @@ Unsupported agent kinds show Limits unavailable. API credentials and custom
 provider settings can prevent Codex or Claude subscription readings.
 
 Codex uses its native app server. Claude and Grok require CodexBar CLI
-0.74.0. The first time a Claude or Grok row needs it, the watcher installs
-the pinned CLI into private Lantern state, once per watcher, the same way
+0.74.0. The first time a Claude or Grok row needs it, Plan Usage installs
+the pinned CLI into private Lantern state, once per run, the same way
 `sh bin/plan-usage install` does. The installer checks the release digest.
 It uses the system's CA certificates when Python ships without any.
 It does not install the desktop app or change the user's CodexBar config.

@@ -22,13 +22,13 @@ All notable changes to Lantern, by Elves are documented here.
   "Sign in required".
 - Model routing and seating run on Apple's Python 3.9 again. The OpenAI and
   Fugu usage rows say they need Python 3.11 there instead of showing Account
-  unknown, and a profile-less Fugu row no longer appears. The README lists
+  unknown, and a false Fugu row no longer appears. The README lists
   what Lantern needs, and CI runs the test suites on Python 3.9.
 - The Plan Usage watcher no longer exits when Herdr is slow to answer its
   status check, as on a machine short of memory. The pane says the Herdr
-  status check timed out and recovers on the next pass. Cached limits show
-  as waiting for fresh values until then, and `refresh` exits with a short
-  error instead of a traceback.
+  status check timed out and recovers on the next pass. When a scan's own
+  status check times out, cached limits show as waiting for fresh values.
+  `refresh` exits with a short error instead of a traceback.
 - A usage read whose cleanup times out now counts as a failed read and is
   retried later. Before, it also ended the watcher.
 

@@ -665,27 +665,43 @@ def resolve_codexbar(state: Path, deadline: float, cancel: threading.Event) -> s
     explicit = os.environ.get("LANTERN_CODEXBAR_BIN")
     candidates = [explicit] if explicit is not None else [str(tools_dir(state) / "CodexBarCLI"), shutil.which("codexbar")]
     for candidate in candidates:
-        if not candidate or not Path(candidate).is_absolute() or not os.access(candidate, os.X_OK):
-            continue
-        code, output = runtime.capture([candidate, "--version"], {"PATH": os.environ.get("PATH", "")},
-                                       min(deadline, time.monotonic() + 3), cancel)
-        if code == 0 and re.search(rb'\bCodexBar 0\.74\.0\b', output):
+        if usable_codexbar(candidate, deadline, cancel):
             return candidate
     if explicit is not None:
         raise SourceError(CODEXBAR_SETTING)
     codexbar_asset()
-    # A new machine has no CodexBar yet. Install the pinned, digest-checked
-    # release the way `plan-usage install` does, once per watcher. After a
-    # failed try the note asks for the explicit install, which shows the error.
+    return auto_install(state, deadline, cancel)
+
+
+def usable_codexbar(candidate: str | None, deadline: float, cancel: threading.Event) -> bool:
+    if not candidate or not Path(candidate).is_absolute() or not os.access(candidate, os.X_OK):
+        return False
+    code, output = runtime.capture([candidate, "--version"], {"PATH": os.environ.get("PATH", "")},
+                                   min(deadline, time.monotonic() + 3), cancel)
+    return code == 0 and re.search(rb'\bCodexBar 0\.74\.0\b', output) is not None
+
+
+def auto_install(state: Path, deadline: float, cancel: threading.Event) -> str:
+    """Install the pinned CodexBar once per run, the way `plan-usage install` does.
+
+    A new machine has no CodexBar yet. One read installs it while the others
+    wait and then use it. After a failed try the note asks for the explicit
+    install, which shows the error.
+    """
+    tool = str(tools_dir(state) / "CodexBarCLI")
     with AUTO_INSTALL_LOCK:
-        first = str(tools_dir(state)) not in AUTO_INSTALL_TRIED
-        AUTO_INSTALL_TRIED.add(str(tools_dir(state)))
-    if first:
+        if usable_codexbar(tool, deadline, cancel):
+            return tool
+        if tool in AUTO_INSTALL_TRIED:
+            raise SourceError(CODEXBAR_MISSING)
+        AUTO_INSTALL_TRIED.add(tool)
         try:
             return str(install(state, cancel))
-        except (OSError, RuntimeError, ValueError, tarfile.TarError):
-            pass
-    raise SourceError(CODEXBAR_MISSING)
+        except Exception:
+            # Any failure leaves CodexBar missing. A stopped watcher's try doesn't count.
+            if cancel.is_set():
+                AUTO_INSTALL_TRIED.discard(tool)
+            raise SourceError(CODEXBAR_MISSING) from None
 
 
 ASSETS = {
