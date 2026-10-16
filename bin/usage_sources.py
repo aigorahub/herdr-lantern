@@ -1,15 +1,19 @@
 """Read plan limits from the login profile of an open agent. No model turns."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import platform
 import queue
 import re
 import shlex
 import shutil
 import stat
 import subprocess
+import tarfile
+import tempfile
 import threading
 import time
 import urllib.error
@@ -21,6 +25,16 @@ import field_status as field
 import usage_runtime as runtime
 
 VERSION = "0.74.0"
+# Plan Usage notes say what is missing and what to do about it.
+CODEXBAR_MISSING = f"CodexBar {VERSION} not found. Ask Lantern to install it"
+CODEXBAR_SETTING = f"LANTERN_CODEXBAR_BIN is not CodexBar {VERSION}"
+CODEXBAR_WINDOWS = "CodexBar has no Windows build"
+CODEXBAR_PLATFORM = "CodexBar has no build for this system"
+DEPENDENCY_STATES = (CODEXBAR_MISSING, CODEXBAR_SETTING, CODEXBAR_WINDOWS, CODEXBAR_PLATFORM)
+FUGU_KEY_MISSING = "Sakana API key missing"
+NEEDS_PYTHON = "Needs Python 3.11 or newer"
+AUTO_INSTALL_LOCK = threading.Lock()
+AUTO_INSTALL_TRIED: set[str] = set()
 SUPPORTED = {"codex", "claude", "grok", "agy", "fugu"}
 SELECTORS = {"codex": ["CODEX_HOME"], "claude": ["CLAUDE_CONFIG_DIR"], "grok": ["GROK_HOME"], "agy": []}
 OVERRIDES = {
@@ -110,7 +124,14 @@ def codex_settings(root: Path, profile: list[str], optional: bool = False) -> tu
         if profile:
             raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
         return {}, {}, {}, files
-    import tomllib
+    try:
+        import tomllib
+    except ImportError:
+        # Codex settings are TOML, which Python reads from 3.11 on. Without
+        # them a configured Fugu profile is only known from its own file.
+        if optional and not (profile and (root / f"{profile[0]}.config.toml").is_file()):
+            return None
+        raise SourceError(NEEDS_PYTHON) from None
     try:
         data = tomllib.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
     except ValueError:
@@ -350,7 +371,7 @@ def fugu_scope(native: dict, env: dict, root: Path, files: list[Path], provider_
         raise SourceError("Account unknown", provider="fugu")
     credential = env.get(key_name)
     if not credential:
-        raise SourceError("Sign in required", provider="fugu")
+        raise SourceError(FUGU_KEY_MISSING, provider="fugu")
     scope = {"provider": "fugu", "env": native, "api_key": credential,
              "files": [str(path) for path in files]}
     scope["stamp"] = current_stamp(scope)
@@ -640,7 +661,7 @@ def tools_dir(state: Path) -> Path:
 
 def resolve_codexbar(state: Path, deadline: float, cancel: threading.Event) -> str:
     if os.name == "nt":
-        raise SourceError("Dependency unavailable")
+        raise SourceError(CODEXBAR_WINDOWS)
     explicit = os.environ.get("LANTERN_CODEXBAR_BIN")
     candidates = [explicit] if explicit is not None else [str(tools_dir(state) / "CodexBarCLI"), shutil.which("codexbar")]
     for candidate in candidates:
@@ -650,7 +671,107 @@ def resolve_codexbar(state: Path, deadline: float, cancel: threading.Event) -> s
                                        min(deadline, time.monotonic() + 3), cancel)
         if code == 0 and re.search(rb'\bCodexBar 0\.74\.0\b', output):
             return candidate
-    raise SourceError("Dependency unavailable")
+    if explicit is not None:
+        raise SourceError(CODEXBAR_SETTING)
+    codexbar_asset()
+    # A new machine has no CodexBar yet. Install the pinned, digest-checked
+    # release the way `plan-usage install` does, once per watcher. After a
+    # failed try the note asks for the explicit install, which shows the error.
+    with AUTO_INSTALL_LOCK:
+        first = str(tools_dir(state)) not in AUTO_INSTALL_TRIED
+        AUTO_INSTALL_TRIED.add(str(tools_dir(state)))
+    if first:
+        try:
+            return str(install(state, cancel))
+        except (OSError, RuntimeError, ValueError, tarfile.TarError):
+            pass
+    raise SourceError(CODEXBAR_MISSING)
+
+
+ASSETS = {
+    "macos-arm64": "9aab1b9229f5d1d77de21b99aa887a60a47921bfd9b66e4b941a0e8a9d6e38e8",
+    "macos-x86_64": "4d239b7412683f1eb529d55b851fe922bb462527850b767d6c9b89ba14be3fdb",
+    "linux-aarch64": "46dc3b259b1df48b3fd6f337c754dd60dbece6772d7840cdc9514ab4977a0007",
+    "linux-x86_64": "fac8b2c474e4e37a2b067224437cb182693411ebf639441cd0facbb57bf086b1",
+    "linux-musl-aarch64": "9dab39f1197d9ccc501d1f678234cf15f94e8b84aa7349ba87103a5866dd793b",
+    "linux-musl-x86_64": "e7b0bdc6d6931a4e6fd5ce4037e1125a073ec6cf38cd72f1b3bd8aeecfde51f5",
+}
+
+
+def codexbar_asset() -> str:
+    """The CodexBar release asset for this system."""
+    system, machine = platform.system(), platform.machine().lower()
+    arch = {"arm64": "aarch64", "aarch64": "aarch64", "amd64": "x86_64", "x86_64": "x86_64"}.get(machine)
+    if system == "Darwin" and arch:
+        return "macos-" + ("arm64" if arch == "aarch64" else arch)
+    if system == "Linux" and arch:
+        musl = bool(list(Path("/lib").glob("ld-musl-*.so.1"))) or platform.libc_ver()[0] == "musl"
+        return ("linux-musl-" if musl else "linux-") + arch
+    raise SourceError(CODEXBAR_PLATFORM)
+
+
+def install(state: Path, cancel: threading.Event | None = None) -> Path:
+    """Install the pinned CodexBar CLI into private Lantern state and return its path."""
+    asset = codexbar_asset()
+    target = tools_dir(state)
+    runtime.private_dir(target.parent)
+    lock = runtime.FileLock(target.parent / "install.lock")
+    try:
+        if not lock.acquire():
+            raise RuntimeError("CodexBar install is in progress")
+        if target.exists():
+            if target.is_symlink():
+                raise RuntimeError("CodexBar install path is a symlink")
+            tool = target / "CodexBarCLI"
+            code, output = runtime.capture([str(tool), "--version"], {"PATH": os.environ.get("PATH", "")},
+                                           time.monotonic() + 3)
+            if code == 0 and b"CodexBar 0.74.0" in output:
+                return tool
+            raise RuntimeError("Private CodexBar install has the wrong version")
+        with tempfile.TemporaryDirectory(prefix=".install-", dir=target.parent) as temporary:
+            root = Path(temporary)
+            archive = root / "release.tar.gz"
+            url = f"https://github.com/steipete/CodexBar/releases/download/v{VERSION}/CodexBarCLI-v{VERSION}-{asset}.tar.gz"
+            digest = hashlib.sha256()
+            with urllib.request.urlopen(url, timeout=30, context=runtime.tls_context()) as response, archive.open("wb") as stream:
+                total = 0
+                while chunk := response.read(65536):
+                    if cancel and cancel.is_set():
+                        raise RuntimeError("CodexBar install was stopped")
+                    total += len(chunk)
+                    if total > 100 * 1024 * 1024:
+                        raise RuntimeError("CodexBar release is too large")
+                    digest.update(chunk)
+                    stream.write(chunk)
+            if digest.hexdigest() != ASSETS[asset]:
+                raise RuntimeError("CodexBar release digest mismatch")
+            unpacked = runtime.private_dir(root / "files")
+            with tarfile.open(archive) as tar:
+                total = 0
+                for member in tar.getmembers():
+                    path = unpacked / member.name
+                    if not path.resolve().is_relative_to(unpacked.resolve()):
+                        raise RuntimeError("CodexBar archive path is invalid")
+                    if member.isdir():
+                        path.mkdir(parents=True, exist_ok=True)
+                    elif member.isfile():
+                        total += member.size
+                        if total > 200 * 1024 * 1024:
+                            raise RuntimeError("CodexBar archive is too large")
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        with tar.extractfile(member) as source, path.open("wb") as output:
+                            shutil.copyfileobj(source, output)
+                        path.chmod(0o700 if member.mode & 0o111 else 0o600)
+                    elif not member.issym() and not member.islnk():
+                        raise RuntimeError("CodexBar archive entry is invalid")
+            cli = unpacked / "CodexBarCLI"
+            code, output = runtime.capture([str(cli), "--version"], {"PATH": os.environ.get("PATH", "")}, time.monotonic() + 3)
+            if code or b"CodexBar 0.74.0" not in output:
+                raise RuntimeError("CodexBar release version mismatch")
+            os.replace(unpacked, target)
+            return target / "CodexBarCLI"
+    finally:
+        lock.close()
 
 
 def auth_status(scope: dict, deadline: float, cancel: threading.Event) -> dict:

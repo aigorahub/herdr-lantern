@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.9** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.17.10** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -19,9 +19,17 @@ It opens as a chat tab in its own Herdr workspace and starts the helper CLI
 you already use (Cursor `agent`, Devin, Claude Code, Codex, or Grok). That
 CLI drives `herdr`.
 
-Requires Herdr **0.7.5+** and Python 3 on macOS, Linux, or Windows. Model
-routing accepts `python3`, `python`, or the Windows `py -3` launcher. Windows
-also needs Git for Windows. See [Windows](#windows).
+Requires Herdr **0.7.5+** and Python 3.9 or newer on macOS, Linux, or
+Windows. Model routing accepts `python3`, `python`, or the Windows `py -3`
+launcher. Windows also needs Git for Windows. See [Windows](#windows).
+
+| Lantern needs | For | When it's missing |
+| --- | --- | --- |
+| Herdr 0.7.5+ | everything | The install stops. |
+| Python 3.9+ (3.11+ for two usage rows) | everything | Lantern's tools say Python 3 was not found. Below 3.11, the OpenAI and Fugu usage rows say they need Python 3.11, which reads Codex's settings files. |
+| The CLI you chat with | the chat tab | Lantern says the agent program is not on `PATH`. |
+| CodexBar CLI 0.74.0 | Claude and Grok usage rows | Plan Usage installs it once by itself. If that fails, the row says to ask Lantern to install it. |
+| The Fugu profile's API key | the Fugu usage row | The row says the Sakana API key is missing. |
 
 ## Install the plugin
 
@@ -189,20 +197,27 @@ It makes no model calls. The API key never enters the shared cache.
 Native Codex, Antigravity, and open Fugu tabs require a readable process
 environment. Those tab readings remain unmeasured on Windows. The configured
 Fugu profile read does not require a process environment and works on Windows.
-Claude and Grok on Windows show
-Dependency unavailable because CodexBar has no Windows release asset.
+Claude and Grok on Windows say that CodexBar has no Windows build.
 Unsupported agent kinds show Limits unavailable. API credentials and custom
 provider settings can prevent Codex or Claude subscription readings.
 
 Codex uses its native app server. Claude and Grok require CodexBar CLI
-0.74.0. Install the pinned CLI into private Lantern state with
-`sh bin/plan-usage install`. The installer checks the release digest.
+0.74.0. The first time a Claude or Grok row needs it, the watcher installs
+the pinned CLI into private Lantern state, once per watcher, the same way
+`sh bin/plan-usage install` does. The installer checks the release digest.
 It uses the system's CA certificates when Python ships without any.
 It does not install the desktop app or change the user's CodexBar config.
-There is no Windows release asset for this dependency. An absent dependency
-affects only its provider row. The watcher does not download tools.
-An absolute `LANTERN_CODEXBAR_BIN` can select a CLI of the same version.
-An invalid explicit path does not fall back to another tool.
+If the install fails, the row says to ask Lantern to install it, and
+`sh bin/plan-usage install` shows the error. There is no Windows release
+asset for this dependency. An absent dependency affects only its provider row.
+An absolute `LANTERN_CODEXBAR_BIN` can select a CLI of the same version, and
+then nothing is installed. An invalid explicit path does not fall back to
+another tool, and the row says so.
+
+Claude's updater deletes old versions while tabs still run them. A Claude
+tab keeps its reading: Lantern uses the version that `~/.local/bin/claude`
+starts now, and only from the same `claude/versions` folder. Lantern's own
+chat tab, which runs Claude in place of a shell, counts like any other tab.
 
 Use the detected Python 3 command with `$LANTERN_PLAN_USAGE pane` to restore
 the usage pane. It replaces a watcher still running code from before an

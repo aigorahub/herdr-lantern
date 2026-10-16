@@ -654,15 +654,17 @@ its own service. Never count it as OpenAI.
 No quota read sends a model prompt or answers an agent's approval dialog.
 Windows lacks the process environment needed for open Codex, Antigravity,
 and Fugu tabs. The configured Fugu profile read works without process inspection.
-Claude and Grok on Windows show Dependency unavailable.
+Claude and Grok on Windows say CodexBar has no Windows build.
 
 The private cache keeps each allowance's percentage, reset time, source, and age.
 Values become stale after 120 seconds. A past reset does not prove a full
 allowance. Missing access or a failed read must
 stay visible. The shared collector scans every five seconds and reads usage
 every 60 seconds. It does not send prompts or start model turns. Do not
-answer another agent's approval dialog to collect usage. Missing CodexBar
-requires the explicit `sh "$HERDR_PLUGIN_ROOT/bin/plan-usage" install` command.
+answer another agent's approval dialog to collect usage. The watcher
+installs the pinned CodexBar once by itself. When a row says to ask Lantern to
+install CodexBar, run `sh "$HERDR_PLUGIN_ROOT/bin/plan-usage" install` and
+report its output.
 Do not change browser cookies or the user's CodexBar configuration.
 
 Ground rules:
