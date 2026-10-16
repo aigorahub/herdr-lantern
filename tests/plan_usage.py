@@ -1027,8 +1027,10 @@ for line in sys.stdin:
 
     def test_explicit_invalid_codexbar_never_falls_back(self):
         with patch.dict(os.environ, {"LANTERN_CODEXBAR_BIN": "/absent/tool"}), patch.object(sources.shutil, "which", side_effect=AssertionError("no fallback")):
+            # Windows has no CodexBar build, so it says that before it looks at the setting.
+            expected = sources.CODEXBAR_WINDOWS if os.name == "nt" else sources.CODEXBAR_SETTING
             with patch.object(sources, "install", side_effect=AssertionError("no install")), \
-                    self.assertRaisesRegex(sources.SourceError, "^LANTERN_CODEXBAR_BIN is not CodexBar 0.74.0$"):
+                    self.assertRaisesRegex(sources.SourceError, f"^{expected}$"):
                 sources.resolve_codexbar(Path("state"), time.monotonic() + 1, threading.Event())
 
     @unittest.skipIf(os.name == "nt", "CodexBar has no Windows build")
