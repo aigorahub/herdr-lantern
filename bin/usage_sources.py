@@ -510,8 +510,10 @@ def parse_reset_credits(summary: object) -> dict | None:
     available = ([credit for credit in listed if isinstance(credit, dict) and credit.get("status") == "available"]
                  if isinstance(listed, list) else [])
     known = len(available) >= count
-    expiries = [number(credit.get("expiresAt")) for credit in available] if known else []
-    dated = [value for value in expiries if value is not None]
+    raw = [credit.get("expiresAt") for credit in available] if known else []
+    dated = [epoch(value) for value in raw if value is not None]
+    if None in dated:
+        known, dated = False, []
     return {"count": count, "expiry_known": known, "expires_at": min(dated) if dated else None}
 
 

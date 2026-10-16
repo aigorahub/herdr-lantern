@@ -730,6 +730,11 @@ class UsageTests(unittest.TestCase):
                 ({"availableCount": 2, "credits": [credit(1800100000)]}, {"count": 2, "expiry_known": False, "expires_at": None}),
                 ({"availableCount": 1, "credits": [credit(None)]}, {"count": 1, "expiry_known": True, "expires_at": None}),
                 ({"availableCount": 0, "credits": []}, {"count": 0, "expiry_known": True, "expires_at": None}),
+                # An expiry that can't be read is unknown, never "no expiry".
+                ({"availableCount": 1, "credits": [credit("soon")]}, {"count": 1, "expiry_known": False, "expires_at": None}),
+                ({"availableCount": 1, "credits": [credit(0)]}, {"count": 1, "expiry_known": False, "expires_at": None}),
+                ({"availableCount": 1, "credits": [credit("2027-01-15T08:00:00Z")]},
+                 {"count": 1, "expiry_known": True, "expires_at": 1800000000.0}),
                 (None, None), ({"availableCount": True}, None), ({"availableCount": -1}, None)):
             with self.subTest(summary=summary):
                 self.assertEqual(sources.parse_reset_credits(summary), expected)
@@ -756,7 +761,10 @@ class UsageTests(unittest.TestCase):
         self.assertRegex(next(line for line in lines if line.startswith("Claude")), r"\s--  --$")
         for rows, cells in (([codex(1, None)], r"\s1  No expiry$"), ([codex(2, None, False)], r"\s2  --$"),
                             ([codex(1, now + 9 * 86400), codex(2, now + 6 * 86400, account="two")], r"\s3  Jan 21$"),
-                            ([codex(1, now + 9 * 86400), codex(1, None, False, account="two")], r"\s2  --$")):
+                            ([codex(1, now + 9 * 86400), codex(1, None, False, account="two")], r"\s2  --$"),
+                            # A date already past, or a login that didn't report resets, leaves it unknown.
+                            ([codex(2, now - 60)], r"\s2  --$"),
+                            ([codex(1, now + 9 * 86400), dict(measured("two"), state="Measured", observed_at=now)], r"\s1  --$")):
             with self.subTest(rows=len(rows), cells=cells):
                 table = usage.render({"rows": rows}, now=now, width=88, zone=timezone.utc).splitlines()
                 self.assertRegex(next(line for line in table if line.startswith("OpenAI")), cells)
@@ -765,9 +773,33 @@ class UsageTests(unittest.TestCase):
         self.assertNotIn("Resets", heading(narrow))
         self.assertIn("OpenAI: 2 resets. The oldest expires Jan 21.", narrow)
         self.assertIn("OpenAI: 1 reset. It doesn't expire.", usage.render({"rows": [codex(1, None)]}, now=now, width=40))
-        for width in range(20, 101):
-            for line in usage.render({"rows": [claude, codex(2)]}, now=now, width=width, zone=timezone.utc).splitlines():
-                self.assertLessEqual(len(line), width, (width, line))
+        self.assertIn("OpenAI: 2 resets.\n", usage.render({"rows": [codex(2, None, False)]}, now=now, width=40))
+        # The note is information, so it isn't drawn in the warning color.
+        self.assertIn("\nOpenAI: 2 resets. The oldest", usage.render({"rows": [codex(2)]}, now=now, width=60, color=True, zone=timezone.utc))
+        for width in range(20, 121):
+            for rows in ([claude], [claude, codex(2)]):
+                output = usage.render({"rows": rows}, now=now, width=width, zone=timezone.utc)
+                # The reset columns leave the rest of the layout as it was.
+                self.assertEqual("Percent left." in output, width < 32, (width, output))
+                for line in output.splitlines():
+                    self.assertLessEqual(len(line), width, (width, line))
+
+    def test_a_newer_reading_without_resets_drops_the_older_resets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            collector = usage.Collector(root / "state", root / "shared", "herdr", {"key": "server", "lifetime": "one"})
+            try:
+                collector.validated = True
+                older = dict(measured(), observed_at=1800000000, resets={"count": 2, "expiry_known": True, "expires_at": 1800100000})
+                newer = dict(measured(), observed_at=1800000060)
+                for key, result in (("a", older), ("b", newer)):
+                    collector.bindings[key] = {"scope": {"key": key, "provider": "codex"}, "tabs": {key}}
+                    collector.cache[key] = {"result": result, "state": "Measured"}
+                rows = collector.write()["rows"]
+                self.assertEqual(len(rows), 1)
+                self.assertNotIn("resets", rows[0])
+            finally:
+                collector.close()
 
     def test_partial_unreadable_tabs_do_not_warn_when_plan_is_measured(self):
         row = dict(measured(), state="Measured")
