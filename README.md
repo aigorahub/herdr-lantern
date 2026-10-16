@@ -167,10 +167,11 @@ source details, and tab counts.
 When a service has saved usage resets, two more columns appear: Resets (how
 many) and Expires (the local date the oldest one expires). Codex reports its
 reset credits in the usage read Lantern already makes. Services that don't
-report resets show --, and a service with none shows 0. Expires shows --
-when Codex doesn't list every reset or a date can't be read or has passed, so
-the oldest is never guessed, and No expiry when they don't expire. Panes under 69 columns keep the table as it
-is and add one line, such as "OpenAI: 2 resets. The oldest expires Oct 22."
+report resets show --, and a service with none shows 0. Expires shows -- when
+Codex doesn't list every reset, a date can't be read or has passed, or another
+login of that service doesn't report resets, so the oldest is never guessed,
+and No expiry when they don't expire. Panes under 69 columns keep the table as
+it is and add one line, such as "OpenAI: 2 resets. The oldest expires Oct 22."
 Lantern never spends a reset.
 Each period shows its lowest remaining percentage across that service's
 limits and login profiles. It never adds percentages. This is a conservative
