@@ -628,7 +628,9 @@ the usage pane. Use `refresh` for the shared cache. Include plans with an open
 agent tab in any workspace on this Herdr server. Idle and Done tabs count.
 Field Status Keep visibility does not select usage plans. Group by verified
 provider and account for collection. Display one table row per service.
-Show Service, Session left, Week left, and Week resets. Allowances use percentages.
+Show Service, Session left, Week left, and Week resets. When a service has saved
+usage resets, Resets and Expires columns appear (a note in narrow panes). Never
+spend a reset. Allowances use percentages.
 Weekly resets use local time for the limit that sets the weekly percentage.
 Claude uses its total weekly reset when total and model limits have the same
 percentage. Other tied limits with different reset times show Varies. Missing or expired times

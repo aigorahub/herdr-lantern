@@ -719,6 +719,88 @@ class UsageTests(unittest.TestCase):
         self.assertIn("80%", output)
         self.assertIn("Varies", output)
 
+    def test_codex_reset_credits_give_the_count_and_the_oldest_expiry(self):
+        def credit(expires, status="available"):
+            return {"id": "private-id", "grantedAt": 1, "resetType": "codexRateLimits", "status": status, "expiresAt": expires}
+        for summary, expected in (
+                ({"availableCount": 2, "credits": [credit(1800500000), credit(1800100000), credit(1, "redeemed")]},
+                 {"count": 2, "expiry_known": True, "expires_at": 1800100000}),
+                # Only the count came back, or the list was capped: the oldest isn't guessed.
+                ({"availableCount": 2, "credits": None}, {"count": 2, "expiry_known": False, "expires_at": None}),
+                ({"availableCount": 2, "credits": [credit(1800100000)]}, {"count": 2, "expiry_known": False, "expires_at": None}),
+                ({"availableCount": 1, "credits": [credit(None)]}, {"count": 1, "expiry_known": True, "expires_at": None}),
+                ({"availableCount": 0, "credits": []}, {"count": 0, "expiry_known": True, "expires_at": None}),
+                # An expiry that can't be read is unknown, never "no expiry".
+                ({"availableCount": 1, "credits": [credit("soon")]}, {"count": 1, "expiry_known": False, "expires_at": None}),
+                ({"availableCount": 1, "credits": [credit(0)]}, {"count": 1, "expiry_known": False, "expires_at": None}),
+                ({"availableCount": 1, "credits": [credit("2027-01-15T08:00:00Z")]},
+                 {"count": 1, "expiry_known": True, "expires_at": 1800000000.0}),
+                (None, None), ({"availableCount": True}, None), ({"availableCount": -1}, None)):
+            with self.subTest(summary=summary):
+                self.assertEqual(sources.parse_reset_credits(summary), expected)
+        data = dict(limits(), rateLimitResetCredits={"availableCount": 1, "credits": [credit(1800100000)]})
+        result = sources.parse_codex({"type": "chatgpt"}, data, 1800000000)
+        self.assertEqual(result["resets"], {"count": 1, "expiry_known": True, "expires_at": 1800100000})
+        self.assertNotIn("private-id", json.dumps(result))
+        self.assertNotIn("resets", measured())
+
+    def test_reset_columns_appear_only_when_a_service_has_a_reset(self):
+        now = 1800000000
+        def codex(count, expires=now + 6 * 86400, known=True, account="one"):
+            return dict(measured(account), state="Measured", observed_at=now,
+                        resets={"count": count, "expiry_known": known, "expires_at": expires})
+        claude = {"provider": "claude", "state": "Measured", "observed_at": now, "account": "c",
+                  "windows": [{"id": "secondary", "minutes": 10080, "remaining": 55, "reset_at": now + 3600, "scope": "service"}]}
+        heading = lambda output: output.splitlines()[0]
+        for rows in ([claude], [claude, codex(0)]):
+            self.assertNotIn("Resets", usage.render({"rows": rows}, now=now, width=88, zone=timezone.utc))
+        output = usage.render({"rows": [claude, codex(2)]}, now=now, width=88, zone=timezone.utc)
+        self.assertTrue(heading(output).endswith("Week resets       Resets  Expires"))
+        lines = output.splitlines()
+        self.assertRegex(next(line for line in lines if line.startswith("OpenAI")), r"\s2  Jan 21$")
+        self.assertRegex(next(line for line in lines if line.startswith("Claude")), r"\s--  --$")
+        for rows, cells in (([codex(1, None)], r"\s1  No expiry$"), ([codex(2, None, False)], r"\s2  --$"),
+                            ([codex(1, now + 9 * 86400), codex(2, now + 6 * 86400, account="two")], r"\s3  Jan 21$"),
+                            ([codex(1, now + 9 * 86400), codex(1, None, False, account="two")], r"\s2  --$"),
+                            # A date already past, or a login that didn't report resets, leaves it unknown.
+                            ([codex(2, now - 60)], r"\s2  --$"),
+                            ([codex(1, now + 9 * 86400), dict(measured("two"), state="Measured", observed_at=now)], r"\s1  --$")):
+            with self.subTest(rows=len(rows), cells=cells):
+                table = usage.render({"rows": rows}, now=now, width=88, zone=timezone.utc).splitlines()
+                self.assertRegex(next(line for line in table if line.startswith("OpenAI")), cells)
+        # Too narrow for the two columns: the table stays as it is, with one line under it.
+        narrow = usage.render({"rows": [claude, codex(2)]}, now=now, width=68, zone=timezone.utc)
+        self.assertNotIn("Resets", heading(narrow))
+        self.assertIn("OpenAI: 2 resets. The oldest expires Jan 21.", narrow)
+        self.assertIn("OpenAI: 1 reset. It doesn't expire.", usage.render({"rows": [codex(1, None)]}, now=now, width=40))
+        self.assertIn("OpenAI: 2 resets.\n", usage.render({"rows": [codex(2, None, False)]}, now=now, width=40))
+        # The note is information, so it isn't drawn in the warning color.
+        self.assertIn("\nOpenAI: 2 resets. The oldest", usage.render({"rows": [codex(2)]}, now=now, width=60, color=True, zone=timezone.utc))
+        for width in range(20, 121):
+            for rows in ([claude], [claude, codex(2)]):
+                output = usage.render({"rows": rows}, now=now, width=width, zone=timezone.utc)
+                # The reset columns leave the rest of the layout as it was.
+                self.assertEqual("Percent left." in output, width < 32, (width, output))
+                for line in output.splitlines():
+                    self.assertLessEqual(len(line), width, (width, line))
+
+    def test_a_newer_reading_without_resets_drops_the_older_resets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            collector = usage.Collector(root / "state", root / "shared", "herdr", {"key": "server", "lifetime": "one"})
+            try:
+                collector.validated = True
+                older = dict(measured(), observed_at=1800000000, resets={"count": 2, "expiry_known": True, "expires_at": 1800100000})
+                newer = dict(measured(), observed_at=1800000060)
+                for key, result in (("a", older), ("b", newer)):
+                    collector.bindings[key] = {"scope": {"key": key, "provider": "codex"}, "tabs": {key}}
+                    collector.cache[key] = {"result": result, "state": "Measured"}
+                rows = collector.write()["rows"]
+                self.assertEqual(len(rows), 1)
+                self.assertNotIn("resets", rows[0])
+            finally:
+                collector.close()
+
     def test_partial_unreadable_tabs_do_not_warn_when_plan_is_measured(self):
         row = dict(measured(), state="Measured")
         for state in ("Account unknown", "Limits unavailable", "Reading usage", *sources.DEPENDENCY_STATES):

@@ -495,6 +495,28 @@ def cadence(minutes: object, fallback: str) -> str:
     return {300: "5 hours", 10080: "Weekly", 43200: "Monthly"}.get(number(minutes), fallback)
 
 
+def parse_reset_credits(summary: object) -> dict | None:
+    """Codex's saved usage resets: how many, and when the oldest expires.
+
+    The credit list can be left out or capped, so the oldest expiry is known
+    only when every available credit is listed. Never spends a reset.
+    """
+    if not isinstance(summary, dict):
+        return None
+    count = summary.get("availableCount")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        return None
+    listed = summary.get("credits")
+    available = ([credit for credit in listed if isinstance(credit, dict) and credit.get("status") == "available"]
+                 if isinstance(listed, list) else [])
+    known = len(available) >= count
+    raw = [credit.get("expiresAt") for credit in available] if known else []
+    dated = [epoch(value) for value in raw if value is not None]
+    if None in dated:
+        known, dated = False, []
+    return {"count": count, "expiry_known": known, "expires_at": min(dated) if dated else None}
+
+
 def parse_codex(account: dict, limits: dict, observed: float) -> dict:
     identity = limits.get("accountId")
     if account.get("type") != "chatgpt" or not isinstance(identity, str) or not identity.strip():
@@ -523,8 +545,12 @@ def parse_codex(account: dict, limits: dict, observed: float) -> dict:
             credits.append({"label": f"{pool_id} credits", "balance": balance, "unit": "credits"})
     if not windows:
         raise SourceError("Limits unavailable")
-    return {"account": runtime.digest(["codex", identity]), "provider": "codex", "plan": field.clean(plan or "Plan unknown"),
-            "windows": windows, "credits": credits, "observed_at": observed, "source": "account/rateLimits/read"}
+    result = {"account": runtime.digest(["codex", identity]), "provider": "codex", "plan": field.clean(plan or "Plan unknown"),
+              "windows": windows, "credits": credits, "observed_at": observed, "source": "account/rateLimits/read"}
+    resets = parse_reset_credits(limits.get("rateLimitResetCredits"))
+    if resets is not None:
+        result["resets"] = resets
+    return result
 
 
 def parse_codexbar(payload: object, provider: str, observed: float, auth: dict | None = None) -> dict:
