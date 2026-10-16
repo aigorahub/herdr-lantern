@@ -1,6 +1,7 @@
 """Plan Usage protocol, identity, collection, locks, and startup tests."""
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -177,6 +178,7 @@ class ConfiguredFuguTests(unittest.TestCase):
             with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
                 sources.configured_fugu_scope(env)
 
+    @needs_tomllib
     def test_configured_plan_rejects_other_endpoints_and_malformed_profiles(self):
         for provider in (self.provider.replace("api.sakana.ai", "other.invalid"),
                          self.provider.replace('"https://api.sakana.ai/v1"', '123'),
@@ -1044,16 +1046,17 @@ for line in sys.stdin:
             tool.chmod(0o700)
             return tool
 
+        @contextlib.contextmanager
         def machine(temporary):
-            os.environ.pop("LANTERN_CODEXBAR_BIN", None)
-            return (patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}),
-                    patch.object(sources, "codexbar_asset", return_value="macos-arm64"),
-                    patch.object(sources.shutil, "which", return_value=None))
+            with patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
+                    patch.object(sources, "codexbar_asset", return_value="macos-arm64"), \
+                    patch.object(sources.shutil, "which", return_value=None):
+                os.environ.pop("LANTERN_CODEXBAR_BIN", None)
+                yield
 
         # Installed once, then found without another install.
         with tempfile.TemporaryDirectory() as temporary:
-            first, second, third = machine(temporary)
-            with first, second, third, patch.object(sources, "install", side_effect=fake_install) as install:
+            with machine(temporary), patch.object(sources, "install", side_effect=fake_install) as install:
                 state = Path(temporary) / "herd"
                 tool = str(sources.tools_dir(state) / "CodexBarCLI")
                 self.assertEqual([resolve(state), resolve(state)], [tool, tool])
@@ -1061,28 +1064,28 @@ for line in sys.stdin:
         # Any failed install, including a garbled HTTP reply, leaves the hint and is not retried.
         for failure in (OSError("offline"), http.client.BadStatusLine("garbage")):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
-                first, second, third = machine(temporary)
-                with first, second, third, patch.object(sources, "install", side_effect=failure) as install:
+                with machine(temporary), patch.object(sources, "install", side_effect=failure) as install:
                     for _ in range(2):
                         with self.assertRaisesRegex(sources.SourceError, missing):
                             resolve(Path(temporary) / "herd")
                     install.assert_called_once()
-        # A try the watcher stopped doesn't count.
+        # A watcher that stops mid-download leaves the try for the next one. A read
+        # whose watcher has already stopped starts no download.
         with tempfile.TemporaryDirectory() as temporary:
             stopped = threading.Event()
-            stopped.set()
-            first, second, third = machine(temporary)
-            outcomes = [RuntimeError("stopped")]
 
             def stopped_once(state, cancel=None):
-                if outcomes:
-                    raise outcomes.pop()
+                if not stopped.is_set():
+                    stopped.set()
+                    raise RuntimeError("CodexBar install was stopped")
                 return fake_install(state)
 
-            with first, second, third, patch.object(sources, "install", side_effect=stopped_once) as install:
+            with machine(temporary), patch.object(sources, "install", side_effect=stopped_once) as install:
                 state = Path(temporary) / "herd"
-                with self.assertRaisesRegex(sources.SourceError, missing):
-                    resolve(state, stopped)
+                for _ in range(2):
+                    with self.assertRaisesRegex(sources.SourceError, missing):
+                        resolve(state, stopped)
+                self.assertEqual(install.call_count, 1)
                 self.assertEqual(resolve(state), str(sources.tools_dir(state) / "CodexBarCLI"))
                 self.assertEqual(install.call_count, 2)
         # A second row waits for the install in progress and then uses it.
@@ -1093,9 +1096,7 @@ for line in sys.stdin:
                 started.set()
                 release.wait(5)
                 return fake_install(state)
-
-            first, second, third = machine(temporary)
-            with first, second, third, patch.object(sources, "install", side_effect=slow_install) as install:
+            with machine(temporary), patch.object(sources, "install", side_effect=slow_install) as install:
                 state = Path(temporary) / "herd"
                 rows = [threading.Thread(target=lambda: found.append(resolve(state))) for _ in range(2)]
                 rows[0].start()

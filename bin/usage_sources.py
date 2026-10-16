@@ -690,6 +690,9 @@ def auto_install(state: Path, deadline: float, cancel: threading.Event) -> str:
     """
     tool = str(tools_dir(state) / "CodexBarCLI")
     with AUTO_INSTALL_LOCK:
+        # A read that waited while the watcher stopped starts no download.
+        if cancel.is_set():
+            raise SourceError(CODEXBAR_MISSING)
         if usable_codexbar(tool, deadline, cancel):
             return tool
         if tool in AUTO_INSTALL_TRIED:
