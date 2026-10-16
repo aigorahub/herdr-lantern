@@ -41,10 +41,12 @@ def eligible(tabs: list[dict], agents: list[dict]) -> dict[str, list[dict]]:
 def verified_scope(binary: str, provider: str, agent: dict) -> dict:
     pane = agent["pane_id"]
     before = field.control(binary, ["pane", "process-info", "--pane", pane], 2).get("process_info", {})
-    candidates = [p for p in before.get("foreground_processes", []) if isinstance(p, dict)
-                  and isinstance(p.get("pid"), int) and p.get("pid") != before.get("shell_pid")
-                  and isinstance(p.get("argv"), list) and p["argv"]
-                  and provider in Path(str(p["argv"][0])).name.lower()]
+    matching = [p for p in before.get("foreground_processes", []) if isinstance(p, dict)
+                and isinstance(p.get("pid"), int) and isinstance(p.get("argv"), list) and p["argv"]
+                and provider in Path(str(p["argv"][0])).name.lower()]
+    # Lantern's own tab starts its agent in place of a shell. Prefer a
+    # foreground agent, and read the pane's first process when it is the agent.
+    candidates = [p for p in matching if p["pid"] != before.get("shell_pid")] or matching
     if len(candidates) != 1:
         raise sources.SourceError("Account unknown")
     process = candidates[0]

@@ -1045,6 +1045,70 @@ for line in sys.stdin:
                 scope = usage.verified_scope("herdr", "claude", {"pane_id": "p"})
             self.assertEqual((scope["provider"], scope["executable"]), ("claude", str(exe)))
 
+    @unittest.skipIf(os.name == "nt" or not shutil.which("cc"), "needs a C compiler on macOS or Linux")
+    def test_program_path_survives_its_file_being_deleted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, program = Path(temporary) / "wait.c", Path(temporary) / "wait"
+            source.write_text("#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n")
+            subprocess.run(["cc", "-o", str(program), str(source)], check=True)
+            child = subprocess.Popen([str(program)])
+            try:
+                expected = os.path.realpath(program)
+                self.assertEqual(runtime.process_executable(child.pid), expected)
+                # Like Claude's updater removing a version that a tab still runs.
+                program.unlink()
+                self.assertEqual(runtime.process_executable(child.pid), expected)
+            finally:
+                child.kill()
+                child.wait()
+
+    def test_claude_tab_on_a_deleted_version_reads_through_the_current_version(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            versions = home / ".local/share/claude/versions"
+            elsewhere = home / "other/claude/versions"
+            for folder in (versions, elsewhere, home / ".local/bin"):
+                folder.mkdir(parents=True)
+            for path in (versions / "2.1.301", versions / "helper", elsewhere / "2.1.302"):
+                path.touch(); path.chmod(0o700)
+            launcher = home / ".local/bin/claude"
+            deleted = str(versions / "2.1.300")
+            launcher.symlink_to(versions / "2.1.301")
+            scope = sources.scope_for("claude", {"argv": ["claude"], "executable": deleted}, {"HOME": str(home)})
+            self.assertEqual(scope["executable"], str(versions / "2.1.301"))
+            for target in (elsewhere / "2.1.302", versions / "helper", None):
+                launcher.unlink()
+                if target:
+                    launcher.symlink_to(target)
+                with self.subTest(launcher=target), self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.scope_for("claude", {"argv": ["claude"], "executable": deleted}, {"HOME": str(home)})
+            launcher.symlink_to(versions / "2.1.301")
+            for provider, executable in (("claude", str(versions / "latest")), ("claude", str(home / "gone/claude")),
+                                         ("codex", deleted)):
+                with self.subTest(provider=provider, executable=executable), \
+                        self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.scope_for(provider, {"argv": [provider], "executable": executable}, {"HOME": str(home)})
+
+    def test_agent_started_in_place_of_the_pane_shell_is_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            exe = Path(temporary) / "claude"
+            exe.touch(); exe.chmod(0o700)
+            for processes, expected in (([{"pid": 2, "argv": ["claude"]}], 2),
+                                        ([{"pid": 2, "argv": ["claude"]}, {"pid": 3, "argv": ["claude", "-p"]}], 3),
+                                        ([{"pid": 2, "argv": ["-zsh"]}], None)):
+                info = {"process_info": {"shell_pid": 2, "foreground_processes": [dict(p, cwd=temporary) for p in processes]}}
+                read = []
+                with self.subTest(processes=processes), patch.object(field, "control", return_value=info), \
+                        patch.object(runtime, "process_start", return_value="started"), \
+                        patch.object(runtime, "process_environment", return_value={"HOME": temporary}), \
+                        patch.object(runtime, "process_executable", side_effect=lambda pid: read.append(pid) or str(exe)):
+                    if expected is None:
+                        with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                            usage.verified_scope("herdr", "claude", {"pane_id": "p"})
+                    else:
+                        self.assertEqual(usage.verified_scope("herdr", "claude", {"pane_id": "p"})["provider"], "claude")
+                        self.assertEqual(set(read), {expected})
+
     def test_tls_context_falls_back_when_python_has_no_certificates(self):
         with tempfile.TemporaryDirectory() as temporary:
             bundle = Path(temporary) / "cert.pem"

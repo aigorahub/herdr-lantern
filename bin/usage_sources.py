@@ -220,6 +220,23 @@ def native_claude(executable: str) -> bool:
             and re.fullmatch(r"\d+\.\d+\.\d+", path.name) is not None)
 
 
+def current_native_claude(home: str, deleted: str) -> str:
+    """The version Claude's launcher starts now, for a tab whose version was deleted.
+
+    Claude's updater removes old versions while tabs still run them. Lantern
+    runs the tab's Claude to read usage, so it uses the version the launcher
+    link in the tab's home points to, and only from the same versions folder.
+    """
+    try:
+        current = (Path(home) / ".local" / "bin" / "claude").resolve(strict=True)
+        folder = Path(deleted).parent.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise SourceError("Account unknown") from None
+    if current.parent != folder or not native_claude(str(current)):
+        raise SourceError("Account unknown")
+    return str(current)
+
+
 def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     home = env.get("HOME", "")
     argv = process.get("argv")
@@ -232,6 +249,9 @@ def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     # Keep only absolute executable search paths. Never use a shell alias.
     path = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep) if Path(p).is_absolute() and p)
     executable = process.get("executable")
+    if (provider == "claude" and executable and Path(executable).is_absolute()
+            and native_claude(executable) and not os.path.exists(executable)):
+        executable = current_native_claude(home, executable)
     if (not executable or not Path(executable).is_absolute()
             or (provider != "grok" and not os.access(executable, os.X_OK))):
         raise SourceError("Account unknown")

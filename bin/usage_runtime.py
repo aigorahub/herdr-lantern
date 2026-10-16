@@ -168,14 +168,48 @@ def process_start(pid: int) -> str:
 
 
 def process_executable(pid: int) -> str:
+    """Path of the program a process runs, even after an updater deleted it.
+
+    Callers check that the file still exists before they run it.
+    """
     if sys.platform.startswith("linux"):
-        return os.readlink(Path("/proc") / str(pid) / "exe")
+        target = os.readlink(Path("/proc") / str(pid) / "exe")
+        if target.endswith(" (deleted)") and not os.path.exists(target):
+            target = target[:-len(" (deleted)")]
+        return target
     if sys.platform == "darwin":
         lib = ctypes.CDLL("/usr/lib/libproc.dylib")
         lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
         buffer = ctypes.create_string_buffer(4096)
         if lib.proc_pidpath(pid, buffer, len(buffer)) > 0:
             return buffer.value.decode("utf-8", "strict")
+        return darwin_deleted_program(lib, pid)
+    raise RuntimeError("Account unknown")
+
+
+def darwin_deleted_program(lib: ctypes.CDLL, pid: int) -> str:
+    # proc_pidpath fails once the program's file is deleted. The program's own
+    # mapping still names it: it is the lowest file-backed memory region.
+    # sys/proc_info.h: PROC_PIDREGIONPATHINFO=8, proc_regionwithpathinfo is
+    # 1272 bytes. Region address and size are uint64 fields at offsets 80/88,
+    # and the mapped file's path starts at offset 248.
+    lib.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    buffer = ctypes.create_string_buffer(1272)
+    address = 0
+    for _ in range(4096):
+        if lib.proc_pidinfo(pid, 8, address, buffer, len(buffer)) != len(buffer):
+            break
+        path = buffer.raw[248:].split(b"\0", 1)[0]
+        if path:
+            path = path.decode("utf-8", "strict")
+            # A program file that still exists would have come from proc_pidpath.
+            if not os.path.exists(path):
+                return path
+            break
+        size = int.from_bytes(buffer.raw[88:96], sys.byteorder)
+        if not size:
+            break
+        address = int.from_bytes(buffer.raw[80:88], sys.byteorder) + size
     raise RuntimeError("Account unknown")
 
 
