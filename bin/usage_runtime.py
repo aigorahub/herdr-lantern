@@ -98,10 +98,11 @@ def server_identity(binary: str, timeout: float) -> dict:
         proc = subprocess.run(field.herdr_command(binary, ["status", "--json"]),
                               env=field.herdr_environment(binary), capture_output=True,
                               text=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired as exc:
+    except subprocess.TimeoutExpired:
         # A busy machine can delay Herdr past the timeout. Report it like any
-        # other unavailable status so the watcher shows it and tries again.
-        raise RuntimeError("Herdr server status unavailable") from exc
+        # other failed status so the watcher shows it and tries again. The
+        # timeout's command and output stay out of the message.
+        raise RuntimeError("Herdr server status timed out") from None
     if proc.returncode:
         raise RuntimeError("Herdr server status unavailable")
     server = json.loads(proc.stdout).get("server", {})

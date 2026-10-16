@@ -7,8 +7,10 @@ All notable changes to Lantern, by Elves are documented here.
 ### Fixed
 
 - The Plan Usage watcher no longer exits when Herdr is slow to answer its
-  status check, as on a machine short of memory. The pane shows that Herdr
-  status is unavailable and recovers on the next pass.
+  status check, as on a machine short of memory. The pane says the Herdr
+  status check timed out and recovers on the next pass. Cached limits show
+  as waiting for fresh values until then, and `refresh` exits with a short
+  error instead of a traceback.
 - A usage read whose cleanup times out now counts as a failed read and is
   retried later. Before, it also ended the watcher.
 
