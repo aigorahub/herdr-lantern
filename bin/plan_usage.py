@@ -269,9 +269,11 @@ def saved_resets(rows: list[dict], now: float) -> dict | None:
         return None
     held = [value for value in reported if value.get("count")]
     dated = [value["expires_at"] for value in held if value.get("expires_at")]
-    # A login that didn't report resets, or a date already past, makes the oldest unknown.
-    known = (all(value.get("expiry_known") for value in held) and all(when > now for when in dated)
-             and not any(row.get("windows") and not isinstance(row.get("resets"), dict) for row in rows))
+    # Any other login could hold an older reset, including one still reading or
+    # unreadable, so a login without a report or a date already past makes the
+    # oldest unknown.
+    known = (len(reported) == len(rows) and all(value.get("expiry_known") for value in held)
+             and all(when > now for when in dated))
     return {"count": sum(value.get("count", 0) for value in reported), "known": known,
             "expires_at": min(dated) if known and dated else None}
 

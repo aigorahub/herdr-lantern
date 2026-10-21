@@ -764,7 +764,8 @@ class UsageTests(unittest.TestCase):
                             ([codex(1, now + 9 * 86400), codex(1, None, False, account="two")], r"\s2  --$"),
                             # A date already past, or a login that didn't report resets, leaves it unknown.
                             ([codex(2, now - 60)], r"\s2  --$"),
-                            ([codex(1, now + 9 * 86400), dict(measured("two"), state="Measured", observed_at=now)], r"\s1  --$")):
+                            ([codex(1, now + 9 * 86400), dict(measured("two"), state="Measured", observed_at=now)], r"\s1  --$"),
+                            ([codex(1, now + 9 * 86400), {"provider": "codex", "state": "Reading usage", "tabs": 1}], r"\s1  --$")):
             with self.subTest(rows=len(rows), cells=cells):
                 table = usage.render({"rows": rows}, now=now, width=88, zone=timezone.utc).splitlines()
                 self.assertRegex(next(line for line in table if line.startswith("OpenAI")), cells)
