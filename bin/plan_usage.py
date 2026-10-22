@@ -230,6 +230,7 @@ class Collector:
                 group_key = (provider, result["account"])
                 group = grouped.setdefault(group_key, dict(result, state=cached.get("state", "Measured"), tabs=set()))
                 if result["observed_at"] > group["observed_at"]:
+                    group.pop("resets", None)
                     group.update(result, state=cached.get("state", "Measured"))
             group["tabs"].update(entry["tabs"])
         for (provider, state), tabs in self.notices.items():
@@ -261,6 +262,22 @@ def cached_snapshot(shared: Path, server: dict) -> dict:
     return value
 
 
+def saved_resets(rows: list[dict], now: float) -> dict | None:
+    """A service's saved usage resets across its logins, or None when none report them."""
+    reported = [row["resets"] for row in rows if isinstance(row.get("resets"), dict)]
+    if not reported:
+        return None
+    held = [value for value in reported if value.get("count")]
+    dated = [value["expires_at"] for value in held if value.get("expires_at")]
+    # Any other login could hold an older reset, including one still reading or
+    # unreadable, so a login without a report or a date already past makes the
+    # oldest unknown.
+    known = (len(reported) == len(rows) and all(value.get("expiry_known") for value in held)
+             and all(when > now for when in dated))
+    return {"count": sum(value.get("count", 0) for value in reported), "known": known,
+            "expires_at": min(dated) if known and dated else None}
+
+
 def render(snapshot: dict, now: float | None = None, width: int | None = None,
            color: bool = False, zone: tzinfo | None = None) -> str:
     """Show percentages left and weekly resets, one row per service."""
@@ -281,8 +298,11 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         services.setdefault(name, []).append(row)
     if not services:
         return "\n".join(lines + ["No open service plans."]) + "\n"
+    saved_by_service = {name: saved_resets(rows, now) for name, rows in services.items()}
+    any_resets = any(saved and saved["count"] for saved in saved_by_service.values())
     show_resets = width >= 39
     full_labels = width >= (50 if show_resets else 32)
+    reset_columns = any_resets and full_labels and show_resets and width >= 69
     gap = "  " if full_labels else " "
     widths = [7, 12, 9] if full_labels else [7, width - 14, 5]
     heading = ["Service", "Session left", "Week left"] if full_labels else ["Service", "Sess", "Week"]
@@ -292,14 +312,18 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         heading.append("Week resets")
     elif not full_labels:
         lines.append("Percent left.")
+    if reset_columns:
+        widths += [6, 9]
+        heading += ["Resets", "Expires"]
     def align(text: str, index: int, size: int) -> str:
-        if index in (1, 2):
+        if index in (1, 2, 4):
             return text.rjust(size)
         return text if index == len(widths) - 1 else text.ljust(size)
 
     lines.append(style(gap.join(align(t, i, w) for i, (t, w) in enumerate(zip(heading, widths))).rstrip(), "1"))
     lines.append(style(gap.join("-" * w for w in widths), "2"))
     notes = [] if show_resets else ["Widen pane for weekly reset times."]
+    infos = []
 
     def add(cells: list[str], codes: list[str] | None = None):
         parts = [textwrap.wrap(field.clean(cell, 500), width=w) or [""] for cell, w in zip(cells, widths)]
@@ -340,6 +364,27 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         except (ValueError, OverflowError, OSError):
             return "--"
 
+    def day(value: float) -> str:
+        try:
+            local = datetime.fromtimestamp(value, timezone.utc).astimezone(zone)
+        except (ValueError, OverflowError, OSError):
+            return "--"
+        return f"{local:%b} {local.day}"
+
+    def expiry(saved: dict | None) -> str:
+        if not saved or not saved["count"] or not saved["known"]:
+            return "--"
+        return day(saved["expires_at"]) if saved["expires_at"] else "No expiry"
+
+    def reset_note(name: str, saved: dict) -> str:
+        count = saved["count"]
+        text = f"{name}: {count} reset{'s' if count != 1 else ''}."
+        if saved["known"] and saved["expires_at"]:
+            return text + (" The oldest expires " if count != 1 else " It expires ") + day(saved["expires_at"]) + "."
+        if saved["known"]:
+            return text + (" They don't expire." if count != 1 else " It doesn't expire.")
+        return text
+
     order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google", "Fugu"))}
     for name in sorted(services, key=lambda key: (order.get(key, 99), key)):
         accounts = sorted(services[name], key=lambda row: not bool(row.get("windows")))
@@ -379,7 +424,13 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         if show_resets:
             values.append(reset_time(selected.get("week", (None, False, set()))[2]))
             codes.append("" if values[-1] not in ("--", "Varies") else "2")
+        saved = saved_by_service[name]
+        if reset_columns:
+            values += [str(saved["count"]) if saved else "--", expiry(saved)]
+            codes += ["" if saved else "2", "2" if values[-1] == "--" else ""]
         add(values, codes)
+        if any_resets and not reset_columns and saved and saved["count"]:
+            infos.append(reset_note(name, saved))
         if stale:
             notes.append(f"{name}: * Waiting for fresh limits.")
         if not selected:
@@ -389,8 +440,10 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             errors = notices - {"Account unknown", "Limits unavailable", "Reading usage", *sources.DEPENDENCY_STATES}
             if errors:
                 notes.append(f"{name}: {', '.join(sorted(errors))}.")
-    if notes:
+    if notes or infos:
         lines.append("")
+        for info in infos:
+            lines.extend(textwrap.wrap(info, width))
         for note in dict.fromkeys(notes):
             lines.extend(style(line, "33") for line in textwrap.wrap(note, width))
     return "\n".join(lines).rstrip() + "\n"
