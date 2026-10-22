@@ -1,6 +1,8 @@
 """Plan Usage protocol, identity, collection, locks, and startup tests."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shlex
@@ -37,6 +39,15 @@ def measured(account="account-one"):
     return sources.parse_codex({"type": "chatgpt", "planType": "pro"}, limits(account), 1800000000)
 
 
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
+# Codex and Fugu settings are TOML, which Python reads from 3.11 on.
+# OldPythonTests covers what older Python shows instead.
+needs_tomllib = unittest.skipIf(tomllib is None, "Codex settings need Python 3.11")
+
+
 class ConfiguredFuguTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -56,6 +67,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         path.chmod(0o600)
         return path
 
+    @needs_tomllib
     def test_configured_profile_needs_no_open_agent_or_executable(self):
         with patch.object(runtime, "capture") as command:
             scope = sources.configured_fugu_scope(self.env)
@@ -69,6 +81,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         opened = sources.scope_for("codex", process, self.env)
         self.assertEqual(scope["key"], opened["key"])
 
+    @needs_tomllib
     def test_standalone_modern_and_legacy_profiles_use_the_same_settings(self):
         modern = self.root / "fugu.config.toml"
         modern.write_text('model_provider = "sakana"\n' + self.provider)
@@ -78,6 +91,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         (self.root / "config.toml").write_text(self.provider + '\n[profiles.fugu]\nmodel_provider = "sakana"\n')
         self.assertEqual(sources.configured_fugu_scope(self.env)["provider"], "fugu")
 
+    @needs_tomllib
     def test_home_selector_is_exact_and_invalid_selectors_do_not_read_default(self):
         self.assertIsNone(sources.configured_fugu_scope({}))
         self.assertIsNone(sources.configured_fugu_scope(dict(self.env, CODEX_HOME="relative")))
@@ -97,6 +111,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         (self.root / "config.toml").unlink()
         self.assertIsNone(sources.configured_fugu_scope(self.env))
 
+    @needs_tomllib
     def test_key_store_reads_only_selected_key_without_shell_execution(self):
         marker = self.home / "should-not-exist"
         store = self.store(f'OTHER_KEY=$(touch {marker})\nexport SAKANA_API_KEY="stored-key" # saved\n')
@@ -108,6 +123,7 @@ class ConfiguredFuguTests(unittest.TestCase):
         self.assertEqual(scope["api_key"], "private-key")
         self.assertNotIn(str(store), scope["files"])
 
+    @needs_tomllib
     def test_key_rotation_changes_binding_and_missing_key_hides_old_values(self):
         env = {"HOME": str(self.home)}
         store = self.store('SAKANA_API_KEY=first-key\n')
@@ -117,9 +133,10 @@ class ConfiguredFuguTests(unittest.TestCase):
         self.assertNotEqual(first["key"], second["key"])
         self.assertNotEqual(first["stamp"], sources.current_stamp(first))
         store.write_text('OTHER_KEY=hidden\n')
-        with self.assertRaisesRegex(sources.SourceError, "Sign in required"):
+        with self.assertRaisesRegex(sources.SourceError, "^Sakana API key missing$"):
             sources.configured_fugu_scope(env)
 
+    @needs_tomllib
     def test_changed_store_or_profile_during_read_is_not_bound(self):
         env = {"HOME": str(self.home)}
         store = self.store('SAKANA_API_KEY=first-key\n')
@@ -138,6 +155,7 @@ class ConfiguredFuguTests(unittest.TestCase):
                 self.assertRaisesRegex(sources.SourceError, "Account unknown"):
             sources.configured_fugu_scope(self.env)
 
+    @needs_tomllib
     def test_invalid_store_is_not_sourced_or_sent(self):
         env = {"HOME": str(self.home)}
         for text in ('SAKANA_API_KEY="unterminated\n', 'SAKANA_API_KEY=one two\n', 'x' * 65537):
@@ -160,6 +178,7 @@ class ConfiguredFuguTests(unittest.TestCase):
             with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
                 sources.configured_fugu_scope(env)
 
+    @needs_tomllib
     def test_configured_plan_rejects_other_endpoints_and_malformed_profiles(self):
         for provider in (self.provider.replace("api.sakana.ai", "other.invalid"),
                          self.provider.replace('"https://api.sakana.ai/v1"', '123'),
@@ -169,6 +188,27 @@ class ConfiguredFuguTests(unittest.TestCase):
                 with self.assertRaises(sources.SourceError) as failure:
                     sources.configured_fugu_scope(self.env)
                 self.assertEqual(failure.exception.provider, "fugu")
+
+
+class OldPythonTests(unittest.TestCase):
+    """Python 3.10 and older have no tomllib, so Codex settings can't be read."""
+
+    def test_codex_and_fugu_say_they_need_python_3_11(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(sys.modules, {"tomllib": None}):
+            home = Path(temporary)
+            root = home / ".codex"
+            root.mkdir()
+            (root / "config.toml").write_text("")
+            exe = home / "codex"
+            exe.touch(); exe.chmod(0o700)
+            with self.assertRaisesRegex(sources.SourceError, "^Needs Python 3.11 or newer$"):
+                sources.scope_for("codex", {"argv": ["codex"], "executable": str(exe)}, {"HOME": str(home)})
+            # Codex's own settings can't show a Fugu profile, so there is no Fugu row.
+            self.assertIsNone(sources.configured_fugu_scope({"HOME": str(home)}))
+            (root / "fugu.config.toml").write_text('model_provider = "sakana"\n')
+            with self.assertRaisesRegex(sources.SourceError, "^Needs Python 3.11 or newer$") as caught:
+                sources.configured_fugu_scope({"HOME": str(home)})
+            self.assertEqual(caught.exception.provider, "fugu")
 
 
 class UsageTests(unittest.TestCase):
@@ -298,6 +338,20 @@ class UsageTests(unittest.TestCase):
                 with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
                     sources.fetch(scope, home / "state", threading.Event())
 
+    def test_probe_cleanup_timeout_is_a_failed_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "agy"
+            exe.touch(); exe.chmod(0o700)
+            token = home / ".gemini/antigravity-cli/antigravity-oauth-token"
+            token.parent.mkdir(parents=True); token.write_text("login")
+            scope = sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)}, {"HOME": str(home)})
+            # runtime.stop_process can time out while reaping a probe on a busy machine.
+            with patch.object(runtime, "capture", side_effect=subprocess.TimeoutExpired(["agy"], 2)):
+                with self.assertRaisesRegex(sources.SourceError, "Last update failed"):
+                    sources.fetch(scope, home / "state", threading.Event())
+
+    @needs_tomllib
     def test_fugu_modern_and_legacy_profiles_bind_the_configured_key(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary); root = home / ".codex"; root.mkdir()
@@ -316,7 +370,7 @@ class UsageTests(unittest.TestCase):
             legacy = sources.scope_for("codex", process, env)
             self.assertEqual(legacy["provider"], "fugu")
             self.assertNotEqual(scope["key"], legacy["key"])
-            with self.assertRaisesRegex(sources.SourceError, "Sign in required") as missing:
+            with self.assertRaisesRegex(sources.SourceError, "^Sakana API key missing$") as missing:
                 sources.scope_for("codex", process, {"HOME": str(home)})
             self.assertEqual(missing.exception.provider, "fugu")
             (root / "config.toml").write_text(provider.replace("api.sakana.ai", "other.invalid") +
@@ -438,6 +492,15 @@ class UsageTests(unittest.TestCase):
             self.assertNotIn("secret", json.dumps(scope))
             with self.assertRaisesRegex(sources.SourceError, "Limits unavailable"):
                 sources.scope_for("codex", dict(process, argv=["codex", "-p", "fugu"]), {"HOME": str(home)})
+
+    @needs_tomllib
+    def test_codex_settings_for_another_provider_are_not_openai(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "codex"
+            exe.touch()
+            exe.chmod(0o700)
+            process = {"argv": ["codex", "-m", "gpt-6-astra"], "executable": str(exe)}
             (home / ".codex").mkdir()
             (home / ".codex/config.toml").write_text('model_provider = "fugu"')
             with self.assertRaisesRegex(sources.SourceError, "Limits unavailable"):
@@ -486,7 +549,7 @@ class UsageTests(unittest.TestCase):
                         patch.object(usage, "verified_scope", side_effect=sources.SourceError("Account unknown")):
                     collector.scan()
                 rows = {row["provider"]: row["state"] for row in collector.write()["rows"]}
-                self.assertEqual(rows, {"agy": "Account unknown", "claude": "Dependency unavailable", "grok": "Dependency unavailable"})
+                self.assertEqual(rows, {"agy": "Account unknown", "claude": "CodexBar has no Windows build", "grok": "CodexBar has no Windows build"})
             finally:
                 collector.close()
 
@@ -658,12 +721,12 @@ class UsageTests(unittest.TestCase):
 
     def test_partial_unreadable_tabs_do_not_warn_when_plan_is_measured(self):
         row = dict(measured(), state="Measured")
-        for state in ("Account unknown", "Limits unavailable", "Dependency unavailable", "Reading usage"):
+        for state in ("Account unknown", "Limits unavailable", "Reading usage", *sources.DEPENDENCY_STATES):
             with self.subTest(state=state):
                 notice = {"provider": "codex", "state": state}
                 plain = usage.render({"rows": [row]}, now=1800000030, width=61)
                 self.assertEqual(usage.render({"rows": [row, notice]}, now=1800000030, width=61), plain)
-                self.assertIn(state, usage.render({"rows": [notice]}, now=1800000030, width=61))
+                self.assertIn(state, " ".join(usage.render({"rows": [notice]}, now=1800000030, width=61).split()))
         for state in ("Last update failed", "Sign in required"):
             notice = {"provider": "codex", "state": state}
             self.assertIn(f"OpenAI: {state}.", usage.render({"rows": [row, notice]}, now=1800000030, width=61))
@@ -752,9 +815,14 @@ class UsageTests(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "requires a Unix pseudoterminal")
     def test_readout_live_terminal_scroll_and_close_restore_terminal(self):
+        import fcntl
         import pty
         import select
+        import struct
+        import termios
         master, slave = pty.openpty()
+        # A real pane has a size. Python before 3.11 keeps a 0x0 size instead of the default.
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         code = r'''import sys
 sys.path.insert(0, sys.argv[1])
 from terminal_readout import Readout
@@ -841,6 +909,92 @@ with Readout() as r:
             self.assertEqual(before["key"], after["key"])
             self.assertNotEqual(before["lifetime"], after["lifetime"])
 
+    def test_watcher_reports_slow_herdr_status_and_recovers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "socket").touch()
+            response = subprocess.CompletedProcess([], 0, json.dumps({"server": {"running": True, "socket": str(root / "socket")}}), "")
+            calls, draws = [], []
+
+            def status(command, **kwargs):
+                calls.append(command)
+                if len(calls) == 1:
+                    raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+                return response
+
+            class Screen:
+                def __init__(self, stop):
+                    self.stop = stop
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_):
+                    pass
+
+                def draw(self, output):
+                    draws.append(output)
+
+                def wait(self, _):
+                    if len(draws) == 2:
+                        self.stop.set()
+
+            with patch.dict(os.environ, {"XDG_STATE_HOME": str(root / "xdg")}), \
+                    patch.object(runtime.subprocess, "run", side_effect=status), \
+                    patch.object(field, "snapshot", return_value=([], [], [])), \
+                    patch.object(usage, "Readout", Screen):
+                usage.run(root / "state", "herdr", True, threading.Event(), 5)
+            self.assertEqual(draws[0], "Plan Usage\nHerdr server status timed out\n")
+            self.assertIn("No open service plans.", draws[1])
+
+    def test_server_status_timeout_marks_collected_limits_stale_then_recovers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            endpoint = root / "socket"
+            endpoint.touch()
+            response = subprocess.CompletedProcess([], 0, json.dumps({
+                "server": {"running": True, "socket": str(endpoint)}}), "")
+            with patch.object(runtime.subprocess, "run", return_value=response):
+                server = runtime.server_identity("herdr", 2)
+            collector = usage.Collector(root / "state", root / "shared", "herdr", server)
+            collector.validated = True
+            collector.bindings["a"] = {"scope": {"key": "a", "provider": "codex"}, "tabs": {"tab"}}
+            collector.cache["a"] = {"state": "Measured", "result": measured()}
+            try:
+                failure = subprocess.TimeoutExpired(["herdr", "private-command-text"], 2)
+                with patch.object(runtime.subprocess, "run", side_effect=failure):
+                    collector.scan()
+                collector.schedule()
+                self.assertEqual(collector.pending, {})
+                stale = collector.write()
+                self.assertTrue(stale["scan_failed"])
+                self.assertIn("Herdr scan failed.", usage.render(stale, now=1800000030))
+                self.assertIn("79%*", usage.render(stale, now=1800000030))
+                with patch.object(runtime.subprocess, "run", return_value=response), \
+                        patch.object(field, "snapshot", return_value=([], [], [])):
+                    collector.scan()
+                recovered = collector.write()
+                self.assertFalse(recovered["scan_failed"])
+                self.assertEqual(recovered["rows"], [])
+                self.assertEqual(collector.cache, {})
+            finally:
+                collector.close()
+
+
+    def test_refresh_server_status_timeout_returns_clean_failure(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(sys, "argv", ["plan-usage", "--state-dir", temporary, "refresh"]), \
+                patch.object(usage.signal, "signal"), \
+                patch.object(runtime.subprocess, "run", side_effect=subprocess.TimeoutExpired(
+                    ["herdr", "private-command-text"], 2, output="private-output", stderr="private-stderr")), \
+                patch.object(sys, "stderr", new_callable=io.StringIO) as errors, \
+                patch.object(sys, "stdout", new_callable=io.StringIO) as output:
+            result = usage.main()
+        self.assertEqual(result, 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(errors.getvalue(), "plan-usage: Herdr server status timed out\n")
+
+
     def test_codex_stdio_handshake_notifications_and_timeout(self):
         with tempfile.TemporaryDirectory() as temporary:
             script = Path(temporary) / "server.py"
@@ -873,8 +1027,108 @@ for line in sys.stdin:
 
     def test_explicit_invalid_codexbar_never_falls_back(self):
         with patch.dict(os.environ, {"LANTERN_CODEXBAR_BIN": "/absent/tool"}), patch.object(sources.shutil, "which", side_effect=AssertionError("no fallback")):
-            with self.assertRaisesRegex(sources.SourceError, "Dependency unavailable"):
+            # Windows has no CodexBar build, so it says that before it looks at the setting.
+            expected = sources.CODEXBAR_WINDOWS if os.name == "nt" else sources.CODEXBAR_SETTING
+            with patch.object(sources, "install", side_effect=AssertionError("no install")), \
+                    self.assertRaisesRegex(sources.SourceError, f"^{expected}$"):
                 sources.resolve_codexbar(Path("state"), time.monotonic() + 1, threading.Event())
+
+    @unittest.skipIf(os.name == "nt", "CodexBar has no Windows build")
+    def test_missing_codexbar_is_installed_once_per_watcher(self):
+        import http.client
+        missing = "^CodexBar 0.74.0 not found. Ask Lantern to install it$"
+
+        def resolve(state, cancel=None):
+            return sources.resolve_codexbar(state, time.monotonic() + 5, cancel or threading.Event())
+
+        def fake_install(state, cancel=None):
+            tool = sources.tools_dir(state) / "CodexBarCLI"
+            tool.parent.mkdir(parents=True)
+            tool.write_text("#!/bin/sh\necho 'CodexBar 0.74.0'\n")
+            tool.chmod(0o700)
+            return tool
+
+        @contextlib.contextmanager
+        def machine(temporary):
+            with patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
+                    patch.object(sources, "codexbar_asset", return_value="macos-arm64"), \
+                    patch.object(sources.shutil, "which", return_value=None):
+                os.environ.pop("LANTERN_CODEXBAR_BIN", None)
+                yield
+
+        # Installed once, then found without another install.
+        with tempfile.TemporaryDirectory() as temporary:
+            with machine(temporary), patch.object(sources, "install", side_effect=fake_install) as install:
+                state = Path(temporary) / "herd"
+                tool = str(sources.tools_dir(state) / "CodexBarCLI")
+                self.assertEqual([resolve(state), resolve(state)], [tool, tool])
+                install.assert_called_once()
+        # Any failed install, including a garbled HTTP reply, leaves the hint and is not retried.
+        for failure in (OSError("offline"), http.client.BadStatusLine("garbage")):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                with machine(temporary), patch.object(sources, "install", side_effect=failure) as install:
+                    for _ in range(2):
+                        with self.assertRaisesRegex(sources.SourceError, missing):
+                            resolve(Path(temporary) / "herd")
+                    install.assert_called_once()
+        # A watcher that stops mid-download leaves the try for the next one. A read
+        # whose watcher has already stopped starts no download.
+        with tempfile.TemporaryDirectory() as temporary:
+            stopped = threading.Event()
+
+            def stopped_once(state, cancel=None):
+                if not stopped.is_set():
+                    stopped.set()
+                    raise RuntimeError("CodexBar install was stopped")
+                return fake_install(state)
+
+            with machine(temporary), patch.object(sources, "install", side_effect=stopped_once) as install:
+                state = Path(temporary) / "herd"
+                for _ in range(2):
+                    with self.assertRaisesRegex(sources.SourceError, missing):
+                        resolve(state, stopped)
+                self.assertEqual(install.call_count, 1)
+                self.assertEqual(resolve(state), str(sources.tools_dir(state) / "CodexBarCLI"))
+                self.assertEqual(install.call_count, 2)
+        # A second row waits for the install in progress and then uses it.
+        with tempfile.TemporaryDirectory() as temporary:
+            started, release, found = threading.Event(), threading.Event(), []
+
+            def slow_install(state, cancel=None):
+                started.set()
+                release.wait(5)
+                return fake_install(state)
+            with machine(temporary), patch.object(sources, "install", side_effect=slow_install) as install:
+                state = Path(temporary) / "herd"
+                rows = [threading.Thread(target=lambda: found.append(resolve(state))) for _ in range(2)]
+                rows[0].start()
+                started.wait(5)
+                rows[1].start()
+                time.sleep(.2)
+                release.set()
+                for row in rows:
+                    row.join(5)
+                self.assertEqual(found, [str(sources.tools_dir(state) / "CodexBarCLI")] * 2)
+                install.assert_called_once()
+        # No release for this system: every read says so, and nothing is downloaded.
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
+                patch.object(sources.platform, "system", return_value="FreeBSD"), \
+                patch.object(sources.shutil, "which", return_value=None), \
+                patch.object(sources.urllib.request, "urlopen", side_effect=AssertionError("no download")):
+            os.environ.pop("LANTERN_CODEXBAR_BIN", None)
+            for _ in range(2):
+                with self.assertRaisesRegex(sources.SourceError, "^CodexBar has no build for this system$"):
+                    resolve(Path(temporary) / "herd")
+
+    def test_dependency_notes_say_what_is_missing_and_what_to_do(self):
+        rows = [{"provider": "claude", "state": sources.CODEXBAR_MISSING},
+                {"provider": "fugu", "state": sources.FUGU_KEY_MISSING},
+                {"provider": "codex", "state": sources.NEEDS_PYTHON}]
+        output = " ".join(usage.render({"rows": rows}, now=1800000030, width=61).split())
+        for note in ("Claude: CodexBar 0.74.0 not found. Ask Lantern to install it.",
+                     "Fugu: Sakana API key missing.", "OpenAI: Needs Python 3.11 or newer."):
+            self.assertIn(note, output)
 
     def test_unknown_scopes_at_one_provider_do_not_overlap(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -945,6 +1199,73 @@ for line in sys.stdin:
                 scope = usage.verified_scope("herdr", "claude", {"pane_id": "p"})
             self.assertEqual((scope["provider"], scope["executable"]), ("claude", str(exe)))
 
+    @unittest.skipIf(os.name == "nt" or not shutil.which("cc"), "needs a C compiler on macOS or Linux")
+    def test_program_path_survives_its_file_being_deleted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source, program = Path(temporary) / "wait.c", Path(temporary) / "wait"
+            source.write_text("#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n")
+            subprocess.run(["cc", "-o", str(program), str(source)], check=True)
+            child = subprocess.Popen([str(program)])
+            try:
+                expected = os.path.realpath(program)
+                self.assertEqual(runtime.process_executable(child.pid), expected)
+                # Like Claude's updater removing a version that a tab still runs.
+                program.unlink()
+                self.assertEqual(runtime.process_executable(child.pid), expected)
+                # Both systems report the old path again once a new file is there.
+                program.write_text("replacement")
+                self.assertEqual(runtime.process_executable(child.pid), expected)
+            finally:
+                child.kill()
+                child.wait()
+
+    def test_claude_tab_on_a_deleted_version_reads_through_the_current_version(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            versions = home / ".local/share/claude/versions"
+            elsewhere = home / "other/claude/versions"
+            for folder in (versions, elsewhere, home / ".local/bin"):
+                folder.mkdir(parents=True)
+            for path in (versions / "2.1.301", versions / "helper", elsewhere / "2.1.302"):
+                path.touch(); path.chmod(0o700)
+            launcher = home / ".local/bin/claude"
+            deleted = str(versions / "2.1.300")
+            launcher.symlink_to(versions / "2.1.301")
+            scope = sources.scope_for("claude", {"argv": ["claude"], "executable": deleted}, {"HOME": str(home)})
+            self.assertEqual(scope["executable"], str(versions / "2.1.301"))
+            for target in (elsewhere / "2.1.302", versions / "helper", None):
+                launcher.unlink()
+                if target:
+                    launcher.symlink_to(target)
+                with self.subTest(launcher=target), self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.scope_for("claude", {"argv": ["claude"], "executable": deleted}, {"HOME": str(home)})
+            launcher.symlink_to(versions / "2.1.301")
+            for provider, executable in (("claude", str(versions / "latest")), ("claude", str(home / "gone/claude")),
+                                         ("codex", deleted)):
+                with self.subTest(provider=provider, executable=executable), \
+                        self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.scope_for(provider, {"argv": [provider], "executable": executable}, {"HOME": str(home)})
+
+    def test_agent_started_in_place_of_the_pane_shell_is_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            exe = Path(temporary) / "claude"
+            exe.touch(); exe.chmod(0o700)
+            for processes, expected in (([{"pid": 2, "argv": ["claude"]}], 2),
+                                        ([{"pid": 2, "argv": ["claude"]}, {"pid": 3, "argv": ["claude", "-p"]}], 3),
+                                        ([{"pid": 2, "argv": ["-zsh"]}], None)):
+                info = {"process_info": {"shell_pid": 2, "foreground_processes": [dict(p, cwd=temporary) for p in processes]}}
+                read = []
+                with self.subTest(processes=processes), patch.object(field, "control", return_value=info), \
+                        patch.object(runtime, "process_start", return_value="started"), \
+                        patch.object(runtime, "process_environment", return_value={"HOME": temporary}), \
+                        patch.object(runtime, "process_executable", side_effect=lambda pid: read.append(pid) or str(exe)):
+                    if expected is None:
+                        with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                            usage.verified_scope("herdr", "claude", {"pane_id": "p"})
+                    else:
+                        self.assertEqual(usage.verified_scope("herdr", "claude", {"pane_id": "p"})["provider"], "claude")
+                        self.assertEqual(set(read), {expected})
+
     def test_tls_context_falls_back_when_python_has_no_certificates(self):
         with tempfile.TemporaryDirectory() as temporary:
             bundle = Path(temporary) / "cert.pem"
@@ -969,17 +1290,16 @@ for line in sys.stdin:
                 self.assertIsNone(runtime.tls_context().cafile)
 
     def test_codexbar_download_and_fugu_read_verify_with_the_shared_context(self):
-        import io
         import ssl
         import urllib.error
         context = ssl.create_default_context()
         with tempfile.TemporaryDirectory() as temporary, patch.object(runtime, "tls_context", return_value=context):
             with patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
-                    patch.object(usage.platform, "system", return_value="Darwin"), \
-                    patch.object(usage.platform, "machine", return_value="arm64"), \
-                    patch.object(usage.urllib.request, "urlopen", return_value=io.BytesIO(b"bad")) as opened:
+                    patch.object(sources.platform, "system", return_value="Darwin"), \
+                    patch.object(sources.platform, "machine", return_value="arm64"), \
+                    patch.object(sources.urllib.request, "urlopen", return_value=io.BytesIO(b"bad")) as opened:
                 with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
-                    usage.install(Path(temporary) / "herd")
+                    sources.install(Path(temporary) / "herd")
             self.assertIs(opened.call_args.kwargs["context"], context)
             opener = Mock()
             opener.open.side_effect = urllib.error.URLError("offline")
@@ -1134,29 +1454,40 @@ for line in sys.stdin:
 
     def test_installer_rejects_bad_digest_and_archive_escape(self):
         import hashlib
-        import io
         import tarfile
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary) / "herd"
             env = {"HERDR_PLUGIN_STATE_DIR": temporary}
-            with patch.dict(os.environ, env), patch.object(usage.platform, "system", return_value="Darwin"), \
-                    patch.object(usage.platform, "machine", return_value="arm64"), \
-                    patch.object(usage.urllib.request, "urlopen", return_value=io.BytesIO(b"bad")):
+            with patch.dict(os.environ, env), patch.object(sources.platform, "system", return_value="Darwin"), \
+                    patch.object(sources.platform, "machine", return_value="arm64"), \
+                    patch.object(sources.urllib.request, "urlopen", return_value=io.BytesIO(b"bad")):
                 with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
-                    usage.install(state)
+                    sources.install(state)
             output = io.BytesIO()
             with tarfile.open(fileobj=output, mode="w:gz") as archive:
                 entry = tarfile.TarInfo("../escape")
                 entry.size = 1
                 archive.addfile(entry, io.BytesIO(b"x"))
             data = output.getvalue()
-            with patch.dict(os.environ, env), patch.object(usage.platform, "system", return_value="Darwin"), \
-                    patch.object(usage.platform, "machine", return_value="arm64"), \
-                    patch.dict(usage.ASSETS, {"macos-arm64": hashlib.sha256(data).hexdigest()}), \
-                    patch.object(usage.urllib.request, "urlopen", return_value=io.BytesIO(data)):
+            with patch.dict(os.environ, env), patch.object(sources.platform, "system", return_value="Darwin"), \
+                    patch.object(sources.platform, "machine", return_value="arm64"), \
+                    patch.dict(sources.ASSETS, {"macos-arm64": hashlib.sha256(data).hexdigest()}), \
+                    patch.object(sources.urllib.request, "urlopen", return_value=io.BytesIO(data)):
                 with self.assertRaisesRegex(RuntimeError, "archive path"):
-                    usage.install(state)
+                    sources.install(state)
             self.assertFalse((Path(temporary) / "tools/codexbar/escape").exists())
+
+    def test_installer_stops_when_the_watcher_stops(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stop = threading.Event()
+            stop.set()
+            with patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
+                    patch.object(sources.platform, "system", return_value="Darwin"), \
+                    patch.object(sources.platform, "machine", return_value="arm64"), \
+                    patch.object(sources.urllib.request, "urlopen", return_value=io.BytesIO(b"x" * 10)):
+                with self.assertRaisesRegex(RuntimeError, "install was stopped"):
+                    sources.install(Path(temporary) / "herd", stop)
+            self.assertFalse((Path(temporary) / "tools/codexbar/0.74.0").exists())
 
     def test_first_failed_scan_retains_same_lifetime_membership_without_quota(self):
         with tempfile.TemporaryDirectory() as temporary:

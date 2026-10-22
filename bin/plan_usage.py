@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import math
 import os
-import platform
 import shutil
 import signal
-import tarfile
-import tempfile
 import threading
 import time
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, tzinfo
 from pathlib import Path
@@ -41,10 +36,12 @@ def eligible(tabs: list[dict], agents: list[dict]) -> dict[str, list[dict]]:
 def verified_scope(binary: str, provider: str, agent: dict) -> dict:
     pane = agent["pane_id"]
     before = field.control(binary, ["pane", "process-info", "--pane", pane], 2).get("process_info", {})
-    candidates = [p for p in before.get("foreground_processes", []) if isinstance(p, dict)
-                  and isinstance(p.get("pid"), int) and p.get("pid") != before.get("shell_pid")
-                  and isinstance(p.get("argv"), list) and p["argv"]
-                  and provider in Path(str(p["argv"][0])).name.lower()]
+    matching = [p for p in before.get("foreground_processes", []) if isinstance(p, dict)
+                and isinstance(p.get("pid"), int) and isinstance(p.get("argv"), list) and p["argv"]
+                and provider in Path(str(p["argv"][0])).name.lower()]
+    # Lantern's own tab starts its agent in place of a shell. Prefer a
+    # foreground agent, and read the pane's first process when it is the agent.
+    candidates = [p for p in matching if p["pid"] != before.get("shell_pid")] or matching
     if len(candidates) != 1:
         raise sources.SourceError("Account unknown")
     process = candidates[0]
@@ -132,7 +129,7 @@ class Collector:
                 notices[(provider, state)] = {row["tab_id"] for row in rows}
                 continue
             if os.name == "nt" and provider in ("claude", "grok"):
-                notices[(provider, "Dependency unavailable")] = {row["tab_id"] for row in rows}
+                notices[(provider, sources.CODEXBAR_WINDOWS)] = {row["tab_id"] for row in rows}
                 continue
             for agent in rows:
                 try:
@@ -389,7 +386,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             notes.append(f"{name}: {', '.join(sorted(notices)) or 'Limits unavailable'}.")
         else:
             # Unreadable or unsupported extra tabs do not invalidate measured plans.
-            errors = notices - {"Account unknown", "Limits unavailable", "Dependency unavailable", "Reading usage"}
+            errors = notices - {"Account unknown", "Limits unavailable", "Reading usage", *sources.DEPENDENCY_STATES}
             if errors:
                 notes.append(f"{name}: {', '.join(sorted(errors))}.")
     if notes:
@@ -397,85 +394,6 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         for note in dict.fromkeys(notes):
             lines.extend(style(line, "33") for line in textwrap.wrap(note, width))
     return "\n".join(lines).rstrip() + "\n"
-
-
-ASSETS = {
-    "macos-arm64": "9aab1b9229f5d1d77de21b99aa887a60a47921bfd9b66e4b941a0e8a9d6e38e8",
-    "macos-x86_64": "4d239b7412683f1eb529d55b851fe922bb462527850b767d6c9b89ba14be3fdb",
-    "linux-aarch64": "46dc3b259b1df48b3fd6f337c754dd60dbece6772d7840cdc9514ab4977a0007",
-    "linux-x86_64": "fac8b2c474e4e37a2b067224437cb182693411ebf639441cd0facbb57bf086b1",
-    "linux-musl-aarch64": "9dab39f1197d9ccc501d1f678234cf15f94e8b84aa7349ba87103a5866dd793b",
-    "linux-musl-x86_64": "e7b0bdc6d6931a4e6fd5ce4037e1125a073ec6cf38cd72f1b3bd8aeecfde51f5",
-}
-
-
-def install(state: Path) -> Path:
-    system, machine = platform.system(), platform.machine().lower()
-    arch = {"arm64": "aarch64", "aarch64": "aarch64", "amd64": "x86_64", "x86_64": "x86_64"}.get(machine)
-    if system == "Darwin" and arch:
-        asset = "macos-" + ("arm64" if arch == "aarch64" else arch)
-    elif system == "Linux" and arch:
-        musl = bool(list(Path("/lib").glob("ld-musl-*.so.1"))) or platform.libc_ver()[0] == "musl"
-        asset = ("linux-musl-" if musl else "linux-") + arch
-    else:
-        raise sources.SourceError("Dependency unavailable")
-    target = sources.tools_dir(state)
-    runtime.private_dir(target.parent)
-    lock = runtime.FileLock(target.parent / "install.lock")
-    try:
-        if not lock.acquire():
-            raise RuntimeError("CodexBar install is in progress")
-        if target.exists():
-            if target.is_symlink():
-                raise RuntimeError("CodexBar install path is a symlink")
-            tool = target / "CodexBarCLI"
-            code, output = runtime.capture([str(tool), "--version"], {"PATH": os.environ.get("PATH", "")},
-                                           time.monotonic() + 3)
-            if code == 0 and b"CodexBar 0.74.0" in output:
-                return tool
-            raise RuntimeError("Private CodexBar install has the wrong version")
-        with tempfile.TemporaryDirectory(prefix=".install-", dir=target.parent) as temporary:
-            root = Path(temporary)
-            archive = root / "release.tar.gz"
-            url = f"https://github.com/steipete/CodexBar/releases/download/v{sources.VERSION}/CodexBarCLI-v{sources.VERSION}-{asset}.tar.gz"
-            digest = hashlib.sha256()
-            with urllib.request.urlopen(url, timeout=30, context=runtime.tls_context()) as response, archive.open("wb") as stream:
-                total = 0
-                while chunk := response.read(65536):
-                    total += len(chunk)
-                    if total > 100 * 1024 * 1024:
-                        raise RuntimeError("CodexBar release is too large")
-                    digest.update(chunk)
-                    stream.write(chunk)
-            if digest.hexdigest() != ASSETS[asset]:
-                raise RuntimeError("CodexBar release digest mismatch")
-            unpacked = runtime.private_dir(root / "files")
-            with tarfile.open(archive) as tar:
-                total = 0
-                for member in tar.getmembers():
-                    path = unpacked / member.name
-                    if not path.resolve().is_relative_to(unpacked.resolve()):
-                        raise RuntimeError("CodexBar archive path is invalid")
-                    if member.isdir():
-                        path.mkdir(parents=True, exist_ok=True)
-                    elif member.isfile():
-                        total += member.size
-                        if total > 200 * 1024 * 1024:
-                            raise RuntimeError("CodexBar archive is too large")
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        with tar.extractfile(member) as source, path.open("wb") as output:
-                            shutil.copyfileobj(source, output)
-                        path.chmod(0o700 if member.mode & 0o111 else 0o600)
-                    elif not member.issym() and not member.islnk():
-                        raise RuntimeError("CodexBar archive entry is invalid")
-            cli = unpacked / "CodexBarCLI"
-            code, output = runtime.capture([str(cli), "--version"], {"PATH": os.environ.get("PATH", "")}, time.monotonic() + 3)
-            if code or b"CodexBar 0.74.0" not in output:
-                raise RuntimeError("CodexBar release version mismatch")
-            os.replace(unpacked, target)
-            return target / "CodexBarCLI"
-    finally:
-        lock.close()
 
 
 def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: float) -> None:
@@ -559,7 +477,7 @@ def main() -> int:
         signal.signal(signum, lambda *_: stop.set())
     try:
         if args.command == "install":
-            print(install(state))
+            print(sources.install(state))
         elif args.command == "pane":
             from lantern_views import open_view
             pane, _ = open_view(state, Path(__file__).resolve().parent.parent, args.herdr, 15, "usage")

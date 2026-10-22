@@ -1,4 +1,5 @@
 """Shared parsing for model routes and availability checks."""
+from __future__ import annotations
 
 import json
 import re
