@@ -12,6 +12,10 @@ All notable changes to Lantern, by Elves are documented here.
   pipe cut off before `--model` appeared. Lantern now writes `claude --help`
   to a temporary file instead of a pipe, cleans it up right after, and retries
   when the output is still incomplete. Reported by @pacificera.
+- Linux CI runs on Ubuntu 24.04 again. GitHub's `ubuntu-latest` moved to
+  Ubuntu 26.04, which has no Python 3.9 for the oldest-Python job, and the
+  smoke test now waits for the background update check to finish before it
+  removes its launch state ([#71](https://github.com/aigorahub/herdr-lantern/pull/71)).
 
 ## [0.17.11] - 2026-10-16
 
