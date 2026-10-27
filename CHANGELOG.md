@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.12] - 2026-10-27
+
+### Fixed
+
+- Claude model routing and preflight work again on Claude Code 2.1.311 and
+  other builds that exit before a piped `claude --help` finishes writing.
+  Before, both stopped with "Claude help has no model choices" because the
+  pipe cut off before `--model` appeared. Lantern now writes `claude --help`
+  to a temporary file instead of a pipe, cleans it up right after, and retries
+  when the output is still incomplete. Reported by @pacificera.
+
 ## [0.17.11] - 2026-10-16
 
 ### Added

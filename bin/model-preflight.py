@@ -12,6 +12,7 @@ import sys
 
 from dataclasses import dataclass
 
+import model_catalog
 from model_catalog import claude_initialization, listed_codex_models, model_words
 
 
@@ -51,28 +52,35 @@ def resolve_command(name: str) -> list[str]:
     return command
 
 
-def run(command: list[str], *, input_text: str | None = None) -> str:
+def run(
+    command: list[str], *, input_text: str | None = None, stdout_via_file: bool = False
+) -> str:
     prefix = resolve_command(command[0])
     if len(prefix) > 1:
         command_line = subprocess.list2cmdline([prefix[-1], *command[1:]])
         process_command = [*prefix[:-1], command_line]
     else:
         process_command = [*prefix, *command[1:]]
-    try:
-        result = subprocess.run(
+
+    def invoke(stdout):
+        return subprocess.run(
             process_command,
             check=True,
             input=input_text,
-            stdout=subprocess.PIPE,
+            stdout=stdout,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=30,
         )
+
+    try:
+        if stdout_via_file:
+            return model_catalog.capture_to_file(invoke)
+        return invoke(subprocess.PIPE).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         fail(f"availability check failed: {command[0]} ({error})")
-    return result.stdout
 
 
 def words(value: str) -> set[str]:
