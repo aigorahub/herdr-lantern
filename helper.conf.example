@@ -30,6 +30,9 @@ HELPER_CWD="~"
 # default. Set these from the lantern chat ("make X my default spawn")
 # or with `bin/onboard apply`. Codex example: model "astra high".
 # Claude example: "fable high". Fable 5.1 resolves through the live CLI initialization catalog.
+# Gemini seats require an exact ID and explicit native-routing acknowledgement.
+# Thinking requires the managed launcher bridge; see docs/gemini-routing.md.
+# This affects seats only; Gemini is not a HELPER_AGENT option.
 HELPER_SPAWN_KIND="claude"
 HELPER_SPAWN_MODEL=""
 HELPER_SPAWN_EFFORT=""

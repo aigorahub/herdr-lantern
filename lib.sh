@@ -216,7 +216,7 @@ helper_list_helpers() {
     # Prints the helper CLIs on PATH, space-separated, or nothing.
     _helper_list=
     _helper_cand=
-    for _helper_cand in agent devin claude codex grok pi; do
+    for _helper_cand in agent devin claude codex grok pi gemini; do
         if command -v "$_helper_cand" >/dev/null 2>&1; then
             if [ -n "$_helper_list" ]; then
                 _helper_list="$_helper_list $_helper_cand"

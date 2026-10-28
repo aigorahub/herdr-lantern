@@ -26,6 +26,40 @@ case ${HERDR_HELPER_OK:-} in
         exit $?
     fi
     if helper_is_agent_start "$@"; then
+        kind=$(helper_argv_option_value --kind "$@") || kind=
+        gemini_kind=0
+        kind_count=0
+        previous=
+        for argument in "$@"; do
+            [ "$argument" = -- ] && break
+            if [ "$previous" = --kind ]; then
+                kind_count=$((kind_count + 1))
+                [ "$argument" = gemini ] && gemini_kind=1
+            else
+                case $argument in
+                --kind=*)
+                    kind_count=$((kind_count + 1))
+                    [ "$argument" = --kind=gemini ] && gemini_kind=1
+                    ;;
+                esac
+            fi
+            previous=$argument
+        done
+        if [ "$gemini_kind" = 1 ] && [ "$kind_count" -ne 1 ]; then
+            printf '%s\n' 'lantern: duplicate Herdr kind options cannot select a Gemini seat' >&2
+            exit 2
+        fi
+        if [ "$kind" = gemini ]; then
+            # Subshell preserves the original Herdr argv. Validate only
+            # the native arguments after -- before contacting the target.
+            (
+                while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
+                [ $# -gt 0 ] && shift
+                python=$(helper_detect_python) || exit 2
+                # shellcheck disable=SC2086
+                $python "$self_dir/gemini-start-check.py" "$@"
+            ) || exit 2
+        fi
         helper_relay_agent_start "$real" "$@"
         exit $?
     fi

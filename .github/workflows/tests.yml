@@ -49,6 +49,6 @@ jobs:
           python-version: '3.9'
       - name: Python suites on 3.9
         run: |
-          for suite in models codex_jobs field_status plan_usage session_cleanup teams desktop; do
+          for suite in models gemini_models codex_jobs field_status plan_usage session_cleanup teams desktop; do
             python "tests/$suite.py" || exit 1
           done

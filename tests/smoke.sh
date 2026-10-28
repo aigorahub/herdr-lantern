@@ -3009,6 +3009,7 @@ printf 'ok\n'
 model_test_python=$(helper_detect_python) || fail "model tests need Python 3"
 # shellcheck disable=SC2086
 $model_test_python "$root/tests/models.py" || fail "model regression tests"
+$model_test_python "$root/tests/gemini_models.py" || fail "Gemini model regression tests"
 $model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests"
 $model_test_python "$root/tests/field_status.py" || fail "Field Status tests"
 $model_test_python "$root/tests/plan_usage.py" || fail "Plan Usage tests"
