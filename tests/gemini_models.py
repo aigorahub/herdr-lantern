@@ -241,6 +241,40 @@ class GeminiModels(unittest.TestCase):
             self.assertEqual(json.loads(marker.read_text()), command[2:] + args)
             marker.unlink()
 
+    def test_wrapper_rejects_alternate_native_model_assignments(self):
+        fake = self.root / 'herdr-real'
+        marker = self.root / 'native-model-argv.json'
+        fake.write_text('#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\nPath(' + repr(str(marker)) + ').write_text(json.dumps(sys.argv[1:]))\n')
+        fake.chmod(0o755)
+        env = dict(os.environ, HERDR_REAL=str(fake), HERDR_HELPER_OK='1', LANTERN_GEMINI_EFFORT_BRIDGE='1')
+        command = ['sh', str(ROOT / 'bin/herdr'), 'agent', 'start', 'test', '--kind', 'gemini', '--pane', 'fixture-pane', '--']
+        # Negation, dot notation and camel-case normalization all assign native
+        # model/m values. Reject the whole ambiguous family, including equals
+        # forms of negation, rather than guessing which yargs branch wins.
+        spellings = ['--no-model', '--no-m', '--no-model=false', '--no-m=false',
+                     '--model.foo=x', '--m.foo=x', '--no-model.foo', '--no-m.foo',
+                     '---model=x', '----model=x', '---m=x', '--no--model', '--no---model',
+                     '--no--m', '--model-=x', '--model--=x', '--model_=x',
+                     '--m-=x', '--no-model-', '--no-m-', '--model-.foo=x',
+                     '--no-model-.foo', '--model.=x', '--model..foo=x']
+        for spelling in spellings:
+            for args in ([spelling, '--model', 'gemini-3.8-flash'],
+                         ['--model', 'gemini-3.8-flash', spelling]):
+                with self.subTest(args=args):
+                    result = subprocess.run(command + args, env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertFalse(marker.exists(), 'alternate model assignment must not reach Herdr')
+        # All accepted model aliases retain exact argv; prompt data is not an
+        # option. These requests contact only the argv-recording fake Herdr.
+        for args in (['--model', 'gemini-3.8-flash', '--thinking-level', 'high'],
+                     ['--model=gemini-3.8-flash', '--thinking-level=HIGH'],
+                     ['-m=gemini-3.8-flash', '--thinking-level', 'high'],
+                     ['--m=gemini-3.8-flash', '--prompt=--no-model']):
+            result = subprocess.run(command + args, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(marker.read_text()), command[2:] + args)
+            marker.unlink()
+
     def test_duplicate_herdr_kinds_cannot_hide_gemini(self):
         fake = self.root / 'herdr-real'
         marker = self.root / 'called'

@@ -23,6 +23,17 @@ def check(arguments):
         if arg == '--':
             raise ValueError('nested option terminator is not supported for Gemini seats')
         key, separator, value = arg.partition('=')
+        if key.startswith('--'):
+            # yargs boolean negation, dot notation and camel-case expansion
+            # can assign model/m through otherwise unknown long options.
+            # Reserve this family for the two canonical positive spellings;
+            # never forward an unvalidated second native model assignment.
+            native_key = key[2:].lower()
+            if native_key.startswith('no-'):
+                native_key = native_key[3:]
+            model_root = native_key.split('.', 1)[0].strip('-_')
+            if model_root in ('model', 'm') and key not in ('--model', '--m'):
+                raise ValueError('alternate or negated native model assignments are not supported')
         if key in OPTIONAL_VALUE_OPTIONS:
             if not separator and index + 1 < len(arguments) and not arguments[index + 1].startswith('-'):
                 index += 1
