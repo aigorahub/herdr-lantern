@@ -41,7 +41,7 @@ def check(arguments):
             raise ValueError('packed or unknown short options are not supported for Gemini seats')
         if key == '--effort':
             raise ValueError('Gemini has no native --effort; use the configured thinking bridge')
-        if key in ('--model', '-m', '--thinking-level'):
+        if key in ('--model', '-m', '--m', '--thinking-level'):
             if not separator:
                 index += 1
                 if index >= len(arguments) or arguments[index].startswith('-'):
@@ -49,9 +49,11 @@ def check(arguments):
                 value = arguments[index]
             if not value:
                 raise ValueError(f'{key} requires a nonempty value')
-            if key in ('--model', '-m'):
+            if key in ('--model', '-m', '--m'):
                 if model is not None:
                     raise ValueError('Gemini requires exactly one explicit model')
+                if value not in model_catalog.GEMINI_CURRENT:
+                    raise ValueError('Gemini native model must be exactly one current model ID')
                 model = value
             else:
                 if effort is not None:
@@ -60,7 +62,10 @@ def check(arguments):
         index += 1
     if not model:
         raise ValueError('Gemini requires one explicit current --model ID')
-    return model_catalog.gemini_route_info(model + (' ' + effort if effort else ''))
+    route = model_catalog.gemini_route_info(model + (' ' + effort if effort else ''))
+    if route['model'] != model or route['effort'] != effort:
+        raise ValueError('Gemini route does not match native model/thinking fields')
+    return route
 
 
 if __name__ == '__main__':

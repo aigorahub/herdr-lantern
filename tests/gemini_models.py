@@ -158,6 +158,7 @@ class GeminiModels(unittest.TestCase):
     def test_start_guard_rejects_missing_duplicate_and_retired_models(self):
         for args in ([], ['--', '--model', 'gemini-3.8-flash'], ['--model', 'gemini-3.8-flash', '--', '--thinking-level', 'high'], ['--model', 'gemini-2.5-pro'],
                      ['--model', 'gemini-3.8-flash', '-m', 'gemini-3.5-flash'],
+                     ['--m=gemini-3.8-flash', '--model', 'gemini-3.5-flash'],
                      ['--model=gemini-3.8-flash', '--effort', 'high'],
                      ['--model', 'gemini-3.8-flash', '-mgemini-2.5-pro']):
             with self.subTest(args=args):
@@ -209,6 +210,36 @@ class GeminiModels(unittest.TestCase):
         good = subprocess.run(command + ['--model', 'gemini-3.8-flash'], env=env, capture_output=True, text=True)
         self.assertEqual(good.returncode, 0, good.stderr)
         self.assertTrue(marker.exists())
+
+    def test_native_token_is_checked_before_phrase_resolution(self):
+        guard = load('gemini_start_guard_tests', 'gemini-start-check.py')
+        with patch.object(model_catalog, 'gemini_route_info') as resolve:
+            with self.assertRaises(ValueError):
+                guard.check(['--model', 'gemini-3.8-flash high'])
+            resolve.assert_not_called()
+        with patch.object(model_catalog, 'gemini_route_info', return_value={'model':'other', 'effort':'high'}):
+            with self.assertRaises(ValueError):
+                guard.check(['--model', 'gemini-3.8-flash', '--thinking-level', 'high'])
+
+    def test_wrapper_preserves_exact_native_fields(self):
+        fake = self.root / 'herdr-real'
+        marker = self.root / 'native-argv.json'
+        fake.write_text('#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\nPath(' + repr(str(marker)) + ').write_text(json.dumps(sys.argv[1:]))\n')
+        fake.chmod(0o755)
+        env = dict(os.environ, HERDR_REAL=str(fake), HERDR_HELPER_OK='1', LANTERN_GEMINI_EFFORT_BRIDGE='1')
+        command = ['sh', str(ROOT / 'bin/herdr'), 'agent', 'start', 'test', '--kind', 'gemini', '--pane', 'fixture-pane', '--']
+        for value in ('gemini-3.8-flash high', ' gemini-3.8-flash', 'gemini-3.8-flash ', 'gemini-3.8-flash\thigh'):
+            for args in (['--model', value], ['--model=' + value], ['-m', value], ['--m', value], ['--m=' + value]):
+                with self.subTest(args=args):
+                    result = subprocess.run(command + args, env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertFalse(marker.exists(), 'malformed model must not reach Herdr')
+        for args in (['--model', 'gemini-3.8-flash', '--thinking-level', 'high'],
+                     ['--model=gemini-3.8-flash', '--thinking-level=HIGH']):
+            result = subprocess.run(command + args, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(marker.read_text()), command[2:] + args)
+            marker.unlink()
 
     def test_duplicate_herdr_kinds_cannot_hide_gemini(self):
         fake = self.root / 'herdr-real'
