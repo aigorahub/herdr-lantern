@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Explicit Gemini seats with a static package inventory, dated lifecycle policy,
+  model/effort validation and an optional managed native thinking bridge.
+  Bare defaults and unknown or obsolete routes are refused. Preflight reports
+  account access and inference as unknown rather than treating installed model
+  constants as availability. Native CLI model remapping remains an explicit,
+  acknowledged limitation; no Lantern substitution is performed.
+
 ## [0.18.0] - 2026-10-29
 
 ### Added

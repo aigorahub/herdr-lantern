@@ -529,6 +529,15 @@ $onboard_note
   \`fugu-ultra-v1.0\`. A review prompt ranks areas, excludes known
   findings, and requires an ordered P0-P3 report. Run \`codex-fugu
   --check\` when the catalog is stale. Do not invent a slug.
+- Gemini seats require an exact current ID through \`model-route gemini\`
+  and \`model-preflight gemini\`. No default or Lantern substitution.
+  Static package evidence is not entitlement or inference. Native Gemini
+  may remap/fallback; strict backend identity is unsupported. Do not set
+  LANTERN_GEMINI_ACK_NATIVE_ROUTING without explicit user acknowledgement.
+  Thinking requires an owner-installed canonical gemini launcher that
+  consumes private --thinking-level and native settings interpolation;
+  never pass a native --effort. Controller capability checks do not prove
+  the target shell PATH. Read docs/gemini-routing.md for the owner contract.
 - Live models: Astra supports low, medium, high, xhigh, max, ultra. Codex
   also lists gpt-6-sol and gpt-6-luna. Bare gpt-6 is ambiguous: ask for
   Astra, Sol, or Luna. Bare sol and bare luna are ambiguous between

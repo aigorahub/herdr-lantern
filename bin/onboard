@@ -169,6 +169,11 @@ cmd_apply() {
     esac
     model=$(helper_normalize_spawn_model "$kind" "$model")
 
+    if [ "$kind" = gemini ]; then
+        "$plugin_root/bin/model-route" gemini "$model${effort:+ $effort}" >/dev/null || exit 2
+        printf '%s\n' 'Gemini: requested ID only; CLI may remap. Target pane launcher still needs owner verification.' >&2
+    fi
+
     helper_conf_set_keys "$conf" \
         HELPER_SPAWN_KIND "$kind" \
         HELPER_SPAWN_MODEL "$model" \

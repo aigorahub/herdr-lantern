@@ -562,6 +562,9 @@ Reopen Lantern after an upgrade to load it.
 
 `bin/model-route` reads the installed catalogs and returns separate argv.
 `bin/model-preflight` checks the resolved route before a herd change.
+Gemini seats use exact IDs and a guarded native thinking bridge, with no default
+model or Lantern substitution. Static package evidence is separate from account
+access; native CLI remapping remains explicit. See [Gemini routing](docs/gemini-routing.md).
 
 - Codex: `astra`, `gpt-6 astra`, and `astra high` select `gpt-6-astra`.
   The default is live Astra at its catalog effort, currently medium, with

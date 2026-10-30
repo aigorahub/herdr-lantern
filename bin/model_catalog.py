@@ -182,3 +182,130 @@ def claude_initialization(run) -> tuple[dict[str, tuple[str, set[str]]], str | N
         return catalog, token_source or None
     except (ValueError, KeyError, TypeError, AttributeError, StopIteration) as error:
         raise ValueError(f"Claude returned an unparseable initialization catalog ({error})") from error
+
+
+# Reviewed 2026-10-28. A bounded lifecycle policy, not an account allowlist.
+# Cloud retirement dates do not establish Developer API retirement.
+GEMINI_POLICY_DATE = "2026-10-28"
+GEMINI_CURRENT = {
+    "gemini-3.1-pro-preview": {"low", "medium", "high"},
+    "gemini-3.8-flash": {"low", "medium", "high"},
+    "gemini-3.5-flash": {"minimal", "low", "medium", "high"},
+    "gemini-3-flash-preview": {"minimal", "low", "medium", "high"},
+    "gemini-3.5-flash-lite": {"minimal", "low", "medium", "high"},
+    "gemini-3.1-flash-lite": {"minimal", "low", "medium", "high"},
+}
+GEMINI_BLOCKED = {
+    "gemini-3-pro-preview": "original preview shut down 2026-03-09; alias behavior is not portable",
+    **{name: "Cloud retirement was 2026-10-20; choose an explicit current ID"
+       for name in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite")},
+    **{name: "Developer API ID documented; Cloud route compatibility is unverified"
+       for name in ("gemma-4-31b-it", "gemma-4-26b-a4b-it")},
+}
+
+
+def gemini_package_catalog() -> dict[str, object]:
+    """Read package metadata and JS constants only; never start Gemini or read auth."""
+    from pathlib import Path
+    import shutil
+    explicit = os.environ.get("LANTERN_GEMINI_PACKAGE_ROOT")
+    candidates = []
+    if explicit:
+        candidates.append(Path(explicit))
+    else:
+        executable = shutil.which("gemini")
+        if executable:
+            resolved = Path(executable).resolve()
+            for parent in resolved.parents:
+                candidates.extend((parent, parent / "libexec/lib/node_modules/@google/gemini-cli"))
+    for root in candidates:
+        metadata = root / "package.json"
+        if not metadata.is_file():
+            continue
+        try:
+            package = json.loads(metadata.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise ValueError(f"Gemini package metadata unreadable: {error}") from error
+        if not isinstance(package, dict) or package.get("name") != "@google/gemini-cli":
+            continue
+        if not isinstance(package.get("version"), str):
+            raise ValueError("Gemini package version missing")
+        # Scan only shipped JS, never import or execute it. Reading constants
+        # avoids treating documentation strings as a live backend inventory.
+        models = set()
+        paths = sorted((root / "bundle").glob("*.js"))
+        paths += sorted((root / "dist").glob("**/models.js"))
+        for path in paths:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            models.update(re.findall(
+                r'\b(?:var|const|let)\s+[A-Z][A-Z0-9_]*\s*=\s*["\']((?:gemini|gemma)-[a-z0-9.-]+)["\']', text))
+        if not models:
+            raise ValueError("Gemini package contains no recognized model constants")
+        return {"models": models, "version": package["version"], "source": "installed-package-static"}
+    raise ValueError("Gemini package not found; set LANTERN_GEMINI_PACKAGE_ROOT to the installed @google/gemini-cli package (not settings)")
+
+
+def gemini_inventory() -> dict[str, object]:
+    catalog = gemini_package_catalog()
+    models = []
+    for name in [*GEMINI_CURRENT, *GEMINI_BLOCKED]:
+        present = name in catalog["models"]
+        models.append({"model": name, "packaged_constant": present,
+            "policy": "candidate" if name in GEMINI_CURRENT else "blocked",
+            "reason": GEMINI_BLOCKED.get(name, "current documented ID; requires package presence and explicit routing acknowledgement"),
+            "thinking_levels": sorted(GEMINI_CURRENT.get(name, set())),
+            "entitlement": "unknown", "inference": "untested"})
+    return {"kind": "gemini", "models": models, "cli_version": catalog["version"],
+        "catalog_source": catalog["source"], "policy_date": GEMINI_POLICY_DATE,
+        "policy_scope": "conservative-cloud-compatible", "actual_model_verified": False}
+
+
+def gemini_route_info(phrase: str) -> dict[str, object]:
+    parts = phrase.strip().split()
+    if len(parts) not in (1, 2) or parts[0] not in GEMINI_CURRENT:
+        reason = GEMINI_BLOCKED.get(parts[0] if parts else "")
+        raise ValueError(reason or "Gemini requires an exact current model ID; no default, alias, or unknown model is validated")
+    model = parts[0]
+    effort = parts[1] if len(parts) == 2 else None
+    if effort and effort not in GEMINI_CURRENT[model]:
+        raise ValueError(f"{model} does not support requested thinking level {effort}")
+    catalog = gemini_package_catalog()
+    if model not in catalog["models"]:
+        raise ValueError(f"{model} absent from installed Gemini package constants")
+    if os.environ.get("LANTERN_GEMINI_ACK_NATIVE_ROUTING") != "1":
+        raise ValueError("Gemini CLI may remap/fallback from the requested model; actual model is unverified. Set LANTERN_GEMINI_ACK_NATIVE_ROUTING=1 only after acknowledging this limitation; strict backend routing is unsupported")
+    command = "gemini"  # Herdr starts this canonical name in the target shell.
+    import shutil
+    if shutil.which(command) is None:
+        raise ValueError("Gemini canonical executable is absent from controller PATH")
+    argv = ["--model", model]
+    if effort:
+        if os.environ.get("LANTERN_GEMINI_EFFORT_BRIDGE") != "1":
+            raise ValueError("Gemini effort bridge is not configured: launcher owner must install a --thinking-level consumer and native modelConfigs.customOverrides environment bridge; this is not a Gemini --effort flag")
+        import subprocess
+        try:
+            executable = shutil.which(command)
+            if executable is None:
+                raise ValueError("Gemini launcher disappeared from PATH")
+            capability_command = [executable, "--lantern-capabilities"]
+            if os.name == "nt" and executable.lower().endswith((".cmd", ".bat")):
+                capability_command = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c",
+                    subprocess.list2cmdline(capability_command)]
+            capability = subprocess.run(capability_command,
+                check=True, capture_output=True, text=True, timeout=5)
+            metadata = json.loads(capability.stdout)
+            if not isinstance(metadata, dict) or metadata.get("schema_version") != 1 or metadata.get("native_thinking_bridge") is not True:
+                raise ValueError("bridge capability metadata is incompatible")
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise ValueError(f"Gemini launcher capability check failed: {error}") from error
+        argv += ["--thinking-level", effort]
+    return {
+        "kind": "gemini", "command": command, "model": model,
+        "requested_model": model, "effort": effort, "fast": False, "argv": argv,
+        "catalog_source": catalog["source"], "cli_version": catalog["version"],
+        "policy_date": GEMINI_POLICY_DATE, "entitlement": "unknown", "inference": "untested",
+        "actual_model_verified": False, "cli_may_remap": True,
+        "requested_effort": effort, "actual_effort_verified": False,
+        "target_launcher_verified": False,
+        "effort_mechanism": "managed-native-settings-bridge" if effort else "cli-default",
+    }
