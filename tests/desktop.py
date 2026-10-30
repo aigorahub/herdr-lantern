@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -64,16 +67,18 @@ class DesktopTests(unittest.TestCase):
                 args = desktop.helper_argv({}, "native instructions")
             self.assertEqual(args[0], str(command))
             self.assertIn("--no-daemon", args)
-            self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", args)
+            self.assertIn("--dangerously-bypass-approvals-and-sandbox", args)
 
-    def test_accept_edits_does_not_select_automatic_command_approval(self):
+    def test_claude_helper_retains_its_provider_permission_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = Path(tmp) / ("claude.exe" if os.name == "nt" else "claude")
             command.write_text("")
             command.chmod(0o700)
             with patch.dict(os.environ, {"PATH": tmp}):
                 args = desktop.helper_argv({"HELPER_AGENT": "claude", "HELPER_PERMISSION": "accept-edits"}, "native")
-                self.assertEqual(args[args.index("--permission-mode") + 1], "acceptEdits")
+                self.assertNotIn("--permission-mode", args)
+                dangerous = desktop.helper_argv({"HELPER_AGENT": "claude", "HELPER_PERMISSION": "dangerous"}, "native")
+                self.assertNotIn("bypassPermissions", dangerous)
                 self.assertFalse(desktop.active_helper({"foreground": {"name": "zsh", "argv": ["zsh"]}},
                                                       {"HELPER_AGENT": "claude"}))
                 self.assertTrue(desktop.active_helper({"foreground": {"name": "claude", "argv": ["claude"]}},
@@ -89,6 +94,20 @@ class DesktopTests(unittest.TestCase):
                     str(command), "--use-system-ca", "/app/index.js"]}}, {"HELPER_AGENT": "agent"}))
                 self.assertFalse(desktop.active_helper({"foreground": {"name": "node", "argv": [
                     "node", "/unrelated/server.js"]}}, {"HELPER_AGENT": "agent"}))
+
+    def test_remote_space_does_not_remove_local_agents(self):
+        inventory = self.inventory()
+        inventory["spaces"].append({"id": "remote/s1", "name": "remote api", "machine": "remote", "tabs": []})
+        result = desktop.snapshot(inventory, self.terminals(), {})
+        self.assertEqual([agent["pane_id"] for agent in result["agents"]], ["p1"])
+
+    def test_exited_helper_does_not_reuse_the_initial_shell_grace(self):
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        child.wait(timeout=5)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": tmp}):
+            Path(tmp, "chat-start.json").write_text(json.dumps({"terminal": "t-ended", "pid": child.pid, "start": "ended"}))
+            terminal = {"address": "t-ended", "created_ms": int(time.time() * 1000)}
+            self.assertFalse(desktop.starting(terminal))
 
 
 if __name__ == "__main__":

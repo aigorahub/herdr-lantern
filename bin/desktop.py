@@ -81,7 +81,7 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
     result = {"workspaces": [], "tabs": [], "agents": [], "panes": []}
     for space in inventory["spaces"]:
         if space.get("machine"):
-            raise RuntimeError("Desktop readouts do not yet support remote spaces")
+            continue
         label = "Lantern" if space["name"].lower() in {"lantern", "🔥 lantern"} else space["name"]
         result["workspaces"].append({"workspace_id": space["id"], "label": label})
         for tab in space["tabs"]:
@@ -186,16 +186,10 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
     permission = config.get("HELPER_PERMISSION") or "smart"
     if permission not in {"auto", "accept-edits", "smart", "dangerous"}:
         raise RuntimeError("Invalid HELPER_PERMISSION")
-    if kind in {"claude", "grok"}:
-        mode = {"accept-edits": "acceptEdits", "dangerous": "bypassPermissions"}.get(permission, "auto")
-        args += ["--permission-mode", mode]
-    elif kind == "codex":
-        args += ["--no-daemon"]
-        if permission == "dangerous":
-            args += ["--dangerously-bypass-approvals-and-sandbox"]
-        else:
-            args += ["--sandbox", "workspace-write"]
-            args += ["--ask-for-approval", "on-request"] if permission == "accept-edits" else ["--approve-for-me"]
+    # Keep the legacy helper's policy. Claude and Grok use their own saved
+    # settings; Codex retains the established orchestration launch flags.
+    if kind == "codex":
+        args += ["--no-daemon", "--dangerously-bypass-approvals-and-sandbox"]
     elif kind == "agent":
         args += ["--trust", "--sandbox", "disabled"]
         if permission in {"smart", "accept-edits"}:
@@ -215,6 +209,7 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
 
 
 def chat() -> None:
+    record_start(state_dir(), "chat")
     config = read_config(config_dir() / "helper.conf")
     state = state_dir()
     work = runtime.private_dir(state / "workdir")
@@ -255,7 +250,17 @@ def active_helper(terminal: dict, config: dict, binary: str | None = None) -> bo
     return str(Path(__file__).resolve()) in argv and "chat" in argv
 
 
-def starting(terminal: dict) -> bool:
+def record_start(state: Path, role: str) -> None:
+    field.write_json(state / (role + "-start.json"), {"terminal": os.environ.get("HC_TERMINAL_ID"),
+                     "pid": os.getpid(), "start": runtime.process_start(os.getpid())})
+
+
+def starting(terminal: dict, state: Path | None = None, role: str = "chat") -> bool:
+    record = field.read_json((state or state_dir()) / (role + "-start.json"), {})
+    if record.get("terminal") == terminal["address"]:
+        pid = record.get("pid")
+        return bool(isinstance(pid, int) and record.get("start") and
+                    runtime.process_start(pid) == record["start"])
     return time.time() * 1000 - terminal.get("created_ms", 0) < 30000
 
 
@@ -295,7 +300,7 @@ def ensure_views(record: dict, state: Path) -> None:
                 run([HC, "label", target["address"], "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
                 continue
             argv = fg.get("argv") or []
-            if str(Path(__file__).resolve()) in argv and role in argv or starting(target):
+            if str(Path(__file__).resolve()) in argv and role in argv or starting(target, state, role):
                 continue
             if fg.get("pid") != target.get("pid") or fg.get("name") not in {"sh", "bash", "zsh", "fish", "pwsh", "powershell.exe"}:
                 raise RuntimeError("A Lantern readout pane now runs another program; preserve it")
@@ -364,7 +369,7 @@ def open_home() -> dict:
                 raise RuntimeError("Multiple Lantern homes match this instance; preserve them")
             home = candidates[0] if candidates else None
         binary = record.get("helper_binary") or (home or {}).get("labels", {}).get("lantern.helper")
-        if home and (active_helper(home, config, binary) or starting(home)):
+        if home and (active_helper(home, config, binary) or starting(home, state)):
             if record.get("terminal") != home["address"]:
                 record = {"terminal": home["address"]}
             record["instance"] = instance
@@ -419,6 +424,8 @@ def main() -> int:
         elif command in {"field", "usage"}:
             if args:
                 os.environ["LANTERN_DESKTOP_STATE_DIR"] = args[0]
+            record_start(state_dir(), command)
+            os.environ["LANTERN_VIEW_SCOPE"] = "local"
             record = field.read_json(state_dir() / "home.json", {})
             if record.get("pane"):
                 os.environ["HERDR_PANE_ID"] = record["pane"]

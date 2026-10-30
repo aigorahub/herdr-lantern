@@ -289,7 +289,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
     def style(text: str, code: str) -> str:
         return f"\033[{code}m{text}\033[0m" if color else text
 
-    lines = []
+    lines = ["Local agents only."] if os.environ.get("LANTERN_VIEW_SCOPE") == "local" else []
     if snapshot.get("scan_failed"):
         lines += [style(line, "33") for line in textwrap.wrap("Herdr scan failed. Plan data is not current.", width)]
     services = {}

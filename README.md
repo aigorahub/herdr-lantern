@@ -56,8 +56,8 @@ read model adapter is read only. Lantern uses `herdr-app` and `hc` to change
 native work. It uses legacy commands only for legacy sessions. Do not stop
 the old Herdr server while those sessions are connected.
 
-Desktop readouts currently support local spaces. Remote app spaces require
-a separate adapter. The legacy plugin keeps its existing remote support.
+Desktop readouts currently show local spaces. They omit remote app spaces
+and keep local work visible. The legacy plugin keeps its remote support.
 Use `LANTERN_CONFIG_DIR` to select another helper configuration directory.
 Use `LANTERN_DESKTOP_STATE_DIR` to select separate private desktop state.
 The checkout must stay available while its desktop sessions run.
