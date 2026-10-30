@@ -628,9 +628,12 @@ the usage pane. Use `refresh` for the shared cache. Include plans with an open
 agent tab in any workspace on this Herdr server. Idle and Done tabs count.
 Field Status Keep visibility does not select usage plans. Group by verified
 provider and account for collection. Display one table row per service.
-Show Service, Session left, Week left, and Week resets. When a service has saved
-usage resets, Resets and Expires columns appear (a note in narrow panes). Never
-spend a reset. Allowances use percentages.
+Show Service, Session left, Week left, and Week resets. Panes of 70 columns or
+more add Resets and Expires for saved usage resets. A service whose reader
+doesn't report them shows unknown; never guess. Narrow panes add a note for a
+service with resets. Resets the person entered in hand_resets.json in the
+Lantern config folder show until their expiry day ends, marked as entered by
+hand; a live report replaces them. Never spend a reset. Allowances use percentages.
 Weekly resets use local time for the limit that sets the weekly percentage.
 Claude uses its total weekly reset when total and model limits have the same
 percentage. Other tied limits with different reset times show Varies. Missing or expired times
@@ -652,7 +655,9 @@ Codex profile. The configured local fugu profile also stays visible after a
 short review command ends. It uses the reader's HOME and CODEX_HOME. The key
 comes from its environment or private .env store. No shell code runs from
 that store. Changed keys or profile files hide prior values. Show Fugu as
-its own service. Never count it as OpenAI.
+its own service. Never count it as OpenAI. This computer's signed-in Codex
+login also stays visible without a tab when its default provider is OpenAI.
+A Codex tab on that login shares its row and read.
 No quota read sends a model prompt or answers an agent's approval dialog.
 Windows lacks the process environment needed for open Codex, Antigravity,
 and Fugu tabs. The configured Fugu profile read works without process inspection.

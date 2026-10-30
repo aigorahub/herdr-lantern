@@ -190,6 +190,75 @@ class ConfiguredFuguTests(unittest.TestCase):
                 self.assertEqual(failure.exception.provider, "fugu")
 
 
+# The fixture installs codex as a symbolic link found on a Unix PATH.
+@unittest.skipIf(os.name == "nt", "needs Unix symbolic links and PATH lookup")
+class ConfiguredCodexTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.root = self.home / ".codex"
+        self.root.mkdir()
+        (self.root / "auth.json").write_text("{}")
+        (self.root / "config.toml").write_text("")
+        # The installer puts a codex link on PATH that points at the real program.
+        release = self.home / "releases" / "1"
+        release.mkdir(parents=True)
+        self.program = release / "codex"
+        self.program.touch(); self.program.chmod(0o700)
+        self.bin = self.home / "bin"
+        self.bin.mkdir()
+        (self.bin / "codex").symlink_to(self.program)
+        self.env = {"HOME": str(self.home), "PATH": str(self.bin), "OPENAI_API_KEY": "private-key"}
+
+    @needs_tomllib
+    def test_signed_in_login_is_bound_like_an_open_tab_on_it(self):
+        scope = sources.configured_codex_scope(self.env)
+        self.assertEqual(scope["provider"], "codex")
+        self.assertEqual(scope["executable"], os.path.realpath(self.program))
+        # An open tab on this login has the same key, so it shares the row and the read.
+        process = {"argv": [str(self.program)], "executable": os.path.realpath(self.program)}
+        self.assertEqual(scope["key"], sources.scope_for("codex", process, {"HOME": str(self.home)})["key"])
+        # An inherited API key doesn't hide the saved login and never reaches the reader.
+        self.assertNotIn("private-key", json.dumps(scope))
+
+    @needs_tomllib
+    def test_nothing_is_shown_without_a_signed_in_openai_login(self):
+        for change in ("no sign-in", "no codex", "relative path", "relative home", "other provider",
+                       "fugu default", "not codex"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as other:
+                env = dict(self.env)
+                if change == "no sign-in":
+                    env["CODEX_HOME"] = other
+                elif change == "no codex":
+                    env["PATH"] = other
+                elif change == "relative path":
+                    env["PATH"] = "bin"
+                elif change == "relative home":
+                    env["CODEX_HOME"] = ".codex"
+                elif change in ("other provider", "fugu default"):
+                    config = Path(other) / "config.toml"
+                    config.write_text('model_provider = "local"\n[model_providers.local]\nbase_url = "http://localhost"\n'
+                                      if change == "other provider" else
+                                      'model_provider = "sakana"\n[model_providers.sakana]\n'
+                                      'base_url = "https://api.sakana.ai/v1"\nenv_key = "SAKANA_API_KEY"\n')
+                    (Path(other) / "auth.json").write_text("{}")
+                    env["CODEX_HOME"] = other
+                else:
+                    (self.bin / "codex").unlink()
+                    shim = Path(other) / "codex-shim"
+                    shim.touch(); shim.chmod(0o700)
+                    (self.bin / "codex").symlink_to(shim)
+                self.assertIsNone(sources.configured_codex_scope(env))
+        self.assertIsNone(sources.configured_codex_scope({"PATH": str(self.bin)}))
+
+    @needs_tomllib
+    def test_unreadable_settings_are_reported_not_hidden(self):
+        (self.root / "config.toml").write_text("not = [toml")
+        with self.assertRaisesRegex(sources.SourceError, "^Account unknown$"):
+            sources.configured_codex_scope(self.env)
+
+
 class OldPythonTests(unittest.TestCase):
     """Python 3.10 and older have no tomllib, so Codex settings can't be read."""
 
@@ -213,10 +282,11 @@ class OldPythonTests(unittest.TestCase):
 
 class UsageTests(unittest.TestCase):
     def setUp(self):
-        # Collector fixtures do not use the machine's installed Fugu account.
-        configured = patch.object(sources, "configured_fugu_scope", return_value=None)
-        configured.start()
-        self.addCleanup(configured.stop)
+        # Collector fixtures do not use the machine's installed Fugu or Codex account.
+        for name in ("configured_fugu_scope", "configured_codex_scope"):
+            configured = patch.object(sources, name, return_value=None)
+            configured.start()
+            self.addCleanup(configured.stop)
 
     def test_configured_fugu_stays_visible_after_agent_exit_and_deduplicates_open_tab(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -251,6 +321,39 @@ class UsageTests(unittest.TestCase):
                     collector.scan()
                 self.assertEqual(collector.write()["rows"], [])
                 self.assertEqual(collector.cache, {})
+            finally:
+                collector.close()
+
+    def test_configured_codex_and_an_open_codex_tab_on_its_login_make_one_row(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); server = {"key": "server", "lifetime": "one"}
+            collector = usage.Collector(root / "state", root / "shared", "herdr", server)
+            scope = {"key": "codex-key", "provider": "codex", "stamp": "stamp"}
+            tab = ([{"tab_id": "a"}], [{"agent": "codex", "tab_id": "a", "pane_id": "p", "agent_status": "done"}], [])
+            try:
+                with patch.object(runtime, "server_identity", return_value=server), \
+                        patch.object(field, "snapshot", return_value=tab), \
+                        patch.object(usage, "verified_scope", return_value=scope), \
+                        patch.object(sources, "configured_codex_scope", return_value=scope), \
+                        patch.object(sources, "fetch") as fetch:
+                    collector.scan()
+                    self.assertEqual(len(collector.bindings), 1)
+                    collector.schedule()
+                    self.assertEqual(fetch.call_count, 1)
+                    # A tab scoped by another path to the same account still shares one row.
+                    collector.bindings["tab-key"] = {"scope": dict(scope, key="tab-key"), "tabs": {"a"}}
+                    for key in ("codex-key", "tab-key"):
+                        collector.cache[key] = {"result": dict(measured(), observed_at=1800000000), "state": "Measured"}
+                    rows = collector.write()["rows"]
+                self.assertEqual([row["provider"] for row in rows], ["codex"])
+                table = usage.render({"rows": rows}, now=1800000030, width=88, zone=timezone.utc).split("\n\n")[0]
+                self.assertEqual(sum(line.startswith("OpenAI") for line in table.splitlines()), 1)
+                # The configured login stays after the tab closes.
+                with patch.object(runtime, "server_identity", return_value=server), \
+                        patch.object(field, "snapshot", return_value=([], [], [])), \
+                        patch.object(sources, "configured_codex_scope", return_value=scope):
+                    collector.scan()
+                self.assertEqual([(row["provider"], row["tabs"]) for row in collector.write()["rows"]], [("codex", 0)])
             finally:
                 collector.close()
 
@@ -744,7 +847,7 @@ class UsageTests(unittest.TestCase):
         self.assertNotIn("private-id", json.dumps(result))
         self.assertNotIn("resets", measured())
 
-    def test_reset_columns_appear_only_when_a_service_has_a_reset(self):
+    def test_reset_columns_list_every_service_and_say_unknown_when_not_reported(self):
         now = 1800000000
         def codex(count, expires=now + 6 * 86400, known=True, account="one"):
             return dict(measured(account), state="Measured", observed_at=now,
@@ -752,26 +855,30 @@ class UsageTests(unittest.TestCase):
         claude = {"provider": "claude", "state": "Measured", "observed_at": now, "account": "c",
                   "windows": [{"id": "secondary", "minutes": 10080, "remaining": 55, "reset_at": now + 3600, "scope": "service"}]}
         heading = lambda output: output.splitlines()[0]
-        for rows in ([claude], [claude, codex(0)]):
-            self.assertNotIn("Resets", usage.render({"rows": rows}, now=now, width=88, zone=timezone.utc))
-        output = usage.render({"rows": [claude, codex(2)]}, now=now, width=88, zone=timezone.utc)
-        self.assertTrue(heading(output).endswith("Week resets       Resets  Expires"))
-        lines = output.splitlines()
+        # Claude doesn't report saved resets, so it says unknown instead of looking like none.
+        for rows in ([claude], [claude, codex(0)], [claude, codex(2)]):
+            output = usage.render({"rows": rows}, now=now, width=88, zone=timezone.utc)
+            self.assertTrue(heading(output).endswith("Week resets        Resets  Expires"), output)
+            self.assertRegex(next(line for line in output.splitlines() if line.startswith("Claude")), r"\sunknown  unknown$")
+        lines = usage.render({"rows": [claude, codex(2)]}, now=now, width=88, zone=timezone.utc).splitlines()
         self.assertRegex(next(line for line in lines if line.startswith("OpenAI")), r"\s2  Jan 21$")
-        self.assertRegex(next(line for line in lines if line.startswith("Claude")), r"\s--  --$")
-        for rows, cells in (([codex(1, None)], r"\s1  No expiry$"), ([codex(2, None, False)], r"\s2  --$"),
+        for rows, cells in (([codex(0)], r"\s0  --$"), ([codex(1, None)], r"\s1  No expiry$"),
+                            ([codex(2, None, False)], r"\s2  unknown$"),
                             ([codex(1, now + 9 * 86400), codex(2, now + 6 * 86400, account="two")], r"\s3  Jan 21$"),
-                            ([codex(1, now + 9 * 86400), codex(1, None, False, account="two")], r"\s2  --$"),
+                            ([codex(1, now + 9 * 86400), codex(1, None, False, account="two")], r"\s2  unknown$"),
                             # A date already past, or a login that didn't report resets, leaves it unknown.
-                            ([codex(2, now - 60)], r"\s2  --$"),
-                            ([codex(1, now + 9 * 86400), dict(measured("two"), state="Measured", observed_at=now)], r"\s1  --$"),
-                            ([codex(1, now + 9 * 86400), {"provider": "codex", "state": "Reading usage", "tabs": 1}], r"\s1  --$")):
+                            ([codex(2, now - 60)], r"\s2  unknown$"),
+                            ([codex(1, now + 9 * 86400), dict(measured("two"), state="Measured", observed_at=now)], r"\s1  unknown$"),
+                            ([codex(1, now + 9 * 86400), {"provider": "codex", "state": "Reading usage", "tabs": 1}], r"\s1  unknown$"),
+                            # A Codex read without a reset report is unknown too, not zero.
+                            ([dict(measured(), state="Measured", observed_at=now)], r"\sunknown  unknown$")):
             with self.subTest(rows=len(rows), cells=cells):
                 table = usage.render({"rows": rows}, now=now, width=88, zone=timezone.utc).splitlines()
                 self.assertRegex(next(line for line in table if line.startswith("OpenAI")), cells)
         # Too narrow for the two columns: the table stays as it is, with one line under it.
-        narrow = usage.render({"rows": [claude, codex(2)]}, now=now, width=68, zone=timezone.utc)
+        narrow = usage.render({"rows": [claude, codex(2)]}, now=now, width=69, zone=timezone.utc)
         self.assertNotIn("Resets", heading(narrow))
+        self.assertNotIn(usage.UNKNOWN, narrow)
         self.assertIn("OpenAI: 2 resets. The oldest expires Jan 21.", narrow)
         self.assertIn("OpenAI: 1 reset. It doesn't expire.", usage.render({"rows": [codex(1, None)]}, now=now, width=40))
         self.assertIn("OpenAI: 2 resets.\n", usage.render({"rows": [codex(2, None, False)]}, now=now, width=40))
@@ -782,8 +889,48 @@ class UsageTests(unittest.TestCase):
                 output = usage.render({"rows": rows}, now=now, width=width, zone=timezone.utc)
                 # The reset columns leave the rest of the layout as it was.
                 self.assertEqual("Percent left." in output, width < 32, (width, output))
+                self.assertEqual("Resets" in heading(output), width >= 70, (width, output))
                 for line in output.splitlines():
                     self.assertLessEqual(len(line), width, (width, line))
+
+    def test_hand_entered_resets_fill_unreported_services_until_their_day_ends(self):
+        now = 1800000000  # Jan 15 2027, 08:00 UTC
+        claude = {"provider": "claude", "state": "Measured", "observed_at": now, "account": "c",
+                  "windows": [{"id": "secondary", "minutes": 10080, "remaining": 55, "reset_at": now + 3600, "scope": "service"}]}
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hand_resets.json"
+            path.write_text(json.dumps({"claude": {"count": 1, "expires": "2027-01-20"},
+                                        "codex": {"count": 2, "expires": "2027-01-20"},
+                                        "grok": {"count": True, "expires": "2027-01-20"},
+                                        "fugu": {"count": 0, "expires": "2027-01-20"},
+                                        "agy": {"count": 1, "expires": "2027-13-01"}, "gemini": [1]}))
+            hand = usage.hand_resets(path)
+            self.assertEqual(sorted(hand), ["claude", "codex"])
+            for text in ("{not json", "[]"):
+                path.write_text(text)
+                self.assertEqual(usage.hand_resets(path), {})
+            self.assertEqual(usage.hand_resets(Path(temporary) / "missing.json"), {})
+        live = dict(measured(), state="Measured", observed_at=now,
+                    resets={"count": 0, "expiry_known": True, "expires_at": None})
+        render = lambda moment, width=88: usage.render({"rows": [claude, live]}, now=moment, width=width,
+                                                       zone=timezone.utc, hand=hand)
+        output = render(now)
+        self.assertRegex(next(line for line in output.splitlines() if line.startswith("Claude")), r"\s1  Jan 20$")
+        self.assertIn("\nClaude resets: entered by hand.", output)
+        # A live report replaces the hand entry.
+        self.assertRegex(next(line for line in output.splitlines() if line.startswith("OpenAI")), r"\s0  --$")
+        self.assertNotIn("OpenAI resets", output)
+        narrow = render(now, 60)
+        self.assertIn("Claude: 1 reset. It expires Jan 20.\nClaude resets: entered by hand.", narrow)
+        # The entry lasts to the end of its expiry day, then the service is unknown again.
+        last = 1800000000 + 5 * 86400 + 16 * 3600 - 1  # Jan 20 23:59:59 UTC
+        self.assertIn("entered by hand", render(last))
+        after = render(last + 1)
+        self.assertRegex(next(line for line in after.splitlines() if line.startswith("Claude")), r"\sunknown  unknown$")
+        self.assertNotIn("entered by hand", after)
+        for width in range(20, 121):
+            for line in render(now, width).splitlines():
+                self.assertLessEqual(len(line), width, (width, line))
 
     def test_stale_resets_on_a_higher_allowance_login_are_not_reported_as_current(self):
         now = 1800000000

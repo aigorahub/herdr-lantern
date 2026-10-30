@@ -2,6 +2,20 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.18.1] - 2026-10-30
+
+### Changed
+
+- Plan Usage keeps this computer's signed-in Codex login visible without a
+  Codex tab, the way it keeps the configured Fugu plan. A Codex tab on the
+  same login shares that row and its read, so the limit shows once.
+- Plan Usage shows the Resets and Expires columns for every service when the
+  pane is 70 columns or wider. A service whose reader doesn't report saved
+  resets, such as Claude, says unknown instead of --.
+- Plan Usage reads saved resets entered by hand in `hand_resets.json` in
+  the Lantern config folder for services that don't report them. They show
+  until the end of their expiry day, marked as entered by hand.
+
 ## [0.18.0] - 2026-10-29
 
 ### Added
