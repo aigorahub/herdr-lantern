@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.18.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.18.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -185,7 +185,9 @@ Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
 
 Plan Usage includes plans with an open agent tab anywhere on this Herdr
 server. Idle and Done tabs count. Tabs hidden from Field Status still count.
-The configured Fugu plan also stays visible after a short review command ends.
+This computer's signed-in Codex login and configured Fugu plan also stay
+visible without a tab, since Lantern's reviews run them as short commands. A
+Codex tab on the same login shares that row, so one limit never shows twice.
 The table shows one row per service: Claude, OpenAI, Grok, Google, Fugu,
 and other open services. Its columns are Service, Session left, Week left,
 and Week resets. Allowances use percentages. Weekly resets use local time,
@@ -195,14 +197,15 @@ percentage. Other tied limits with different reset times show Varies. Missing or
 times show --. Panes under 39 columns retain the percentages and ask for more
 width to show resets. It omits IDs, model names, plan codes, credit balances,
 source details, and tab counts.
-When a service has saved usage resets, two more columns appear: Resets (how
-many) and Expires (the local date the oldest one expires). Codex reports its
-reset credits in the usage read Lantern already makes. Services that don't
-report resets show --, and a service with none shows 0. Expires shows -- when
-Codex doesn't list every reset, a date can't be read or has passed, or another
-login of that service hasn't reported resets, even one still being read, so
-the oldest is never guessed, and No expiry when they don't expire. Panes under
-69 columns keep the table as it is and add one line, such as "OpenAI: 2
+Panes of 70 columns or more add two columns for saved usage resets: Resets
+(how many) and Expires (the local date the oldest one expires). Codex reports
+its reset credits in the usage read Lantern already makes. Services that don't
+report resets, such as Claude, show unknown in both columns, and a service with
+none shows 0 and --. Expires shows unknown when Codex doesn't list every
+reset, a date can't be read or has passed, or another login of that service
+hasn't reported resets, even one still being read, so the oldest is never
+guessed, and No expiry when they don't expire. Narrower panes keep the table
+as it is and add one line for a service with resets, such as "OpenAI: 2
 resets. The oldest expires Oct 22." Lantern never spends a reset.
 Each period shows its lowest remaining percentage across that service's
 limits and login profiles. It never adds percentages. This is a conservative

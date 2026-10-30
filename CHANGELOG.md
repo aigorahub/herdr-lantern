@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.18.1] - 2026-10-30
+
+### Changed
+
+- Plan Usage keeps this computer's signed-in Codex login visible without a
+  Codex tab, the way it keeps the configured Fugu plan. A Codex tab on the
+  same login shares that row and its read, so the limit shows once.
+- Plan Usage shows the Resets and Expires columns for every service when the
+  pane is 70 columns or wider. A service whose reader doesn't report saved
+  resets, such as Claude, says unknown instead of --.
+
 ## [0.18.0] - 2026-10-29
 
 ### Added

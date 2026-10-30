@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Show plan limits for accounts with an open agent tab on this Herdr server."""
+"""Show plan limits for accounts with an open agent tab on this Herdr server,
+plus this computer's own Codex and Fugu logins."""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +19,8 @@ import usage_runtime as runtime
 import usage_sources as sources
 from terminal_readout import Readout
 
+# Said where a service's reader doesn't report saved resets. Never guessed.
+UNKNOWN = "unknown"
 NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok", "agy": "Google", "gemini": "Google", "fugu": "Fugu"}
 CONFIG = {"version": 1, "hooks": {"enabled": False, "events": []}, "providers": [
     {"id": provider, "enabled": True, "cookieSource": "off", "source": source}
@@ -142,12 +145,17 @@ class Collector:
                     continue
                 entry = bindings.setdefault(scope["key"], {"scope": scope, "tabs": set()})
                 entry["tabs"].add(agent["tab_id"])
-        try:
-            configured = sources.configured_fugu_scope(os.environ)
-            if configured:
-                bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
-        except sources.SourceError as exc:
-            notices.setdefault(("fugu", exc.state), set())
+        # This computer's own Fugu and Codex logins stay listed without a tab.
+        for provider, configured_scope in (("fugu", sources.configured_fugu_scope),
+                                           ("codex", sources.configured_codex_scope)):
+            try:
+                configured = configured_scope(os.environ)
+                if configured:
+                    bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
+            except sources.SourceError as exc:
+                notices.setdefault((provider, exc.state), set())
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+                notices.setdefault((provider, "Account unknown"), set())
         self.bindings, self.notices = bindings, notices
         self.cache = {key: self.cache[key] for key in bindings if key in self.cache}
         self.validated, self.scan_error = True, False
@@ -305,10 +313,11 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         for saved in saved_by_service.values():
             if saved:
                 saved["stale"] = True
-    any_resets = any(saved and saved["count"] for saved in saved_by_service.values())
     show_resets = width >= 39
     full_labels = width >= (50 if show_resets else 32)
-    reset_columns = any_resets and full_labels and show_resets and width >= 69
+    # Every service gets a Resets cell whenever the pane fits it, so a service
+    # whose reader doesn't report resets says unknown rather than looking empty.
+    reset_columns = full_labels and show_resets and width >= 70
     gap = "  " if full_labels else " "
     widths = [7, 12, 9] if full_labels else [7, width - 14, 5]
     heading = ["Service", "Session left", "Week left"] if full_labels else ["Service", "Sess", "Week"]
@@ -319,7 +328,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
     elif not full_labels:
         lines.append("Percent left.")
     if reset_columns:
-        widths += [6, 9]
+        widths += [7, 9]
         heading += ["Resets", "Expires"]
     def align(text: str, index: int, size: int) -> str:
         if index in (1, 2, 4):
@@ -378,8 +387,12 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         return f"{local:%b} {local.day}"
 
     def expiry(saved: dict | None) -> str:
-        if not saved or saved["stale"] or not saved["count"] or not saved["known"]:
+        if not saved:
+            return UNKNOWN
+        if saved["stale"] or not saved["count"]:
             return "--"
+        if not saved["known"]:
+            return UNKNOWN
         return day(saved["expires_at"]) if saved["expires_at"] else "No expiry"
 
     def reset_note(name: str, saved: dict) -> str:
@@ -433,10 +446,10 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         saved = saved_by_service[name]
         stale = stale or bool(saved and saved["stale"])
         if reset_columns:
-            values += [("--*" if saved["stale"] else str(saved["count"])) if saved else "--", expiry(saved)]
-            codes += ["" if saved else "2", "2" if values[-1] == "--" else ""]
+            values += [("--*" if saved["stale"] else str(saved["count"])) if saved else UNKNOWN, expiry(saved)]
+            codes += ["" if saved else "2", "2" if values[-1] in ("--", UNKNOWN) else ""]
         add(values, codes)
-        if any_resets and not reset_columns and saved and saved["count"] and not saved["stale"]:
+        if not reset_columns and saved and saved["count"] and not saved["stale"]:
             infos.append(reset_note(name, saved))
         if stale:
             notes.append(f"{name}: * Waiting for fresh limits.")

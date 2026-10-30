@@ -234,6 +234,40 @@ def configured_fugu_scope(env: dict[str, str]) -> dict | None:
         raise SourceError("Account unknown", provider="fugu") from None
 
 
+def configured_codex_scope(env: dict[str, str]) -> dict | None:
+    """Keep this computer's signed-in Codex plan visible without a Codex tab.
+
+    Lantern runs Codex reviews as short commands, like Fugu. Nothing shows when
+    Codex isn't installed or signed in here, or when its default model provider
+    isn't an OpenAI plan. A Codex tab on the same account shares this row.
+    """
+    home = env.get("HOME", "")
+    root_value = env.get("CODEX_HOME") or str(Path(home) / ".codex")
+    if not home or not Path(home).is_absolute() or not Path(root_value).is_absolute():
+        return None
+    if not (Path(root_value) / "auth.json").is_file():
+        return None
+    search = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep) if p and Path(p).is_absolute())
+    found = shutil.which("codex", path=search) if search else None
+    if not found:
+        return None
+    # A tab's scope names the program's real path, so an open tab on this
+    # login resolves to the same binding.
+    executable = os.path.realpath(found)
+    if not re.fullmatch(r"codex(?:\.exe)?", Path(executable).name.lower()):
+        return None
+    # API keys don't select the saved login, and the reader never receives them.
+    login = {key: value for key, value in env.items() if key not in OVERRIDES["codex"]}
+    try:
+        scope = scope_for("codex", {"argv": [executable], "executable": executable}, login)
+    except SourceError as exc:
+        # A default Fugu profile is configured_fugu_scope's row, errors included.
+        if exc.state == "Limits unavailable" or exc.provider == "fugu":
+            return None
+        raise
+    return scope if scope["provider"] == "codex" else None
+
+
 def native_claude(executable: str) -> bool:
     """Claude's native installer runs claude/versions/<version> through a claude symlink."""
     path = Path(executable)
