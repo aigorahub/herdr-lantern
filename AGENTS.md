@@ -19,8 +19,8 @@ Done means the goal is met, not that nothing more can be found. In an authorized
 
 ### Finishing work
 - A finding blocks only when it names a trigger, a code path, an impact, and evidence for one of these: data loss, a security hole, a wrong answer, a crash, a broken build, a destructive migration, or a missing acceptance criterion. Changed code can expose a defect in unchanged code. Speculative improvements are advisory and become issues.
-- Each batch gets one full review and one delta review from two reviewers. The delta review covers only the delta. Then stop: finish, or give the user the remaining blockers to decide. Never start a third round.
-- If the two reviewers disagree, the user decides from the evidence. The final review uses all configured reviewers for one round, under the same rules.
+- Review each batch with two reviewers until it is green: one full review, then a delta review of every fix, until neither reviewer has a blocking finding. A delta review covers only the delta. Never merge a fix that no reviewer has seen.
+- If the two reviewers disagree, the user decides from the evidence. The final review uses all configured reviewers, under the same rules.
 - A docs-only commit needs no new review or full CI rerun.
 - Test infrastructure is not product scope. Green CI on the exact starting commit is the baseline. After a change, rerun the affected checks, including after dependency, config, fixture, or environment changes.
 - If a requirement is impossible as written, say so and propose an alternative. Never redefine acceptance silently.
