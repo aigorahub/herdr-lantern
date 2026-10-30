@@ -106,6 +106,11 @@ def server_identity(binary: str, timeout: float) -> dict:
     if proc.returncode:
         raise RuntimeError("Herdr server status unavailable")
     server = json.loads(proc.stdout).get("server", {})
+    if server.get("running") and server.get("transport") == "herdr-core":
+        identity, started = server.get("id"), server.get("started_at")
+        if not isinstance(identity, str) or not identity or not isinstance(started, str) or not started:
+            raise RuntimeError("Herdr core identity unavailable")
+        return {"key": digest(["herdr-core", identity]), "lifetime": digest([identity, started])}
     endpoint = server.get("socket")
     if not server.get("running") or not isinstance(endpoint, str) or not endpoint:
         raise RuntimeError("Herdr server endpoint unavailable")
