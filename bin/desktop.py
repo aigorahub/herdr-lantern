@@ -18,6 +18,12 @@ APP = os.environ.get("LANTERN_APP_BIN", "herdr-app")
 HC = os.environ.get("LANTERN_HC_BIN", "hc")
 
 
+class CoreError(RuntimeError):
+    def __init__(self, error: dict):
+        self.kind = error.get("data", {}).get("kind")
+        super().__init__(str(error))
+
+
 def state_dir() -> Path:
     return runtime.private_dir(Path(os.environ.get(
         "LANTERN_DESKTOP_STATE_DIR", str(Path.home() / ".local/state/herdr/plugins/aigora.lantern/desktop"))))
@@ -42,7 +48,7 @@ def core(method: str, **params) -> dict:
         raise RuntimeError(field.clean(proc.stderr, 300))
     response = json.loads(proc.stdout)
     if "error" in response:
-        raise RuntimeError(str(response["error"]))
+        raise CoreError(response["error"])
     return response["result"]
 
 
@@ -108,12 +114,28 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
                                                         "name", "state_change_seq") if k in original})
                     row.update(legacy_binary=binary, legacy_pane_id=original["pane_id"])
                 elif status.get("app"):
-                    row["agent"] = {"claude-code": "claude", "antigravity-cli": "agy",
+                    row["agent"] = {"claude-code": "claude", "grok-build": "grok", "antigravity-cli": "agy",
                                     "antigravity": "agy"}.get(status["app"], status["app"])
                 if row.get("agent"):
                     result["agents"].append(row)
                 result["panes"].append(row)
     return result
+
+
+def native_process(terminal: dict) -> dict:
+    fg = dict(terminal.get("foreground") or {})
+    if not fg:
+        return fg
+    argv = fg.get("argv") or []
+    # Accept the app's fixed exec wrapper without parsing arbitrary shell code.
+    if (len(argv) >= 5 and argv[1:3] == ["-ic", '\"$@\"; exec "$0" -i']
+            and argv[0] == argv[3] and Path(argv[0]).name in {"sh", "bash", "zsh"}):
+        fg["argv"] = argv[4:]
+    cwd = fg.get("cwd") or terminal.get("cwd")
+    if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+        raise RuntimeError("Native process working directory unavailable")
+    fg["cwd"] = cwd
+    return fg
 
 
 def read_model(args: list[str]) -> None:
@@ -138,7 +160,7 @@ def read_model(args: list[str]) -> None:
             print(run([row["legacy_binary"], "pane", "process-info", "--pane", row["legacy_pane_id"]]), end="")
         else:
             terminal = terminals[row["terminal_id"]]
-            fg = terminal.get("foreground")
+            fg = native_process(terminal)
             print(json.dumps({"result": {"process_info": {"shell_pid": terminal["pid"],
                              "foreground_processes": [fg] if fg else []}}}))
     else:
@@ -223,7 +245,7 @@ def chat() -> None:
         if name.startswith("HERDR_") and name != "HERDR_APP_HOME":
             os.environ.pop(name, None)
     os.environ.update(LANTERN_DESKTOP_COMMAND=str(ROOT / "bin/lantern-app"),
-                      LANTERN_HERD_STATE_DIR=str(state), LANTERN_TEAM_STATE_DIR=str(state / "teams"),
+                      LANTERN_HERD_STATE_DIR=str(state), LANTERN_TEAM_STATE_DIR=str(state),
                       LANTERN_TEAM_MAILBOX=str(ROOT / "bin/team_mailbox.py"))
     os.chdir(work)
     os.execv(args[0], args)
@@ -236,6 +258,17 @@ def locate(inventory: dict, address: str) -> tuple[dict, dict, dict] | None:
                 if pane["terminal"] == address:
                     return space, tab, pane
     return None
+
+
+def wait_location(address: str) -> tuple[dict, dict, dict]:
+    end = time.monotonic() + 3
+    while True:
+        current = locate(json.loads(run([APP, "ls"])), address)
+        if current:
+            return current
+        if time.monotonic() >= end:
+            raise RuntimeError("Readout adoption is still pending; retry open")
+        time.sleep(0.05)
 
 
 def active_helper(terminal: dict, config: dict, binary: str | None = None) -> bool:
@@ -292,10 +325,17 @@ def ensure_views(record: dict, state: Path) -> None:
                     field.write_json(state / "home.json", record)
         if target and target.get("state") == "live":
             current = locate(inventory, target["address"])
-            if not current or current[1]["id"] != tab["id"]:
+            if not current:
+                run([HC, "label", target["address"], "herdr.space=" + space["id"], "herdr.tab=" + tab["id"],
+                     "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
+                current = wait_location(target["address"])
+                record[role] = {"pane": current[2]["pane"], "terminal": target["address"]}
+                field.write_json(state / "home.json", record)
+                changed = True
+            if current[1]["id"] != tab["id"]:
                 raise RuntimeError("A saved Lantern readout moved; leave its current location unchanged")
             from lantern_views import matches_watcher
-            fg = target.get("foreground") or {}
+            fg = native_process(target)
             if matches_watcher(fg, ROOT, state, role):
                 run([HC, "label", target["address"], "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
                 continue
@@ -312,7 +352,22 @@ def ensure_views(record: dict, state: Path) -> None:
                 if time.monotonic() >= end:
                     raise RuntimeError("Readout parking is still pending; retry open")
                 time.sleep(0.05)
+            run([HC, "label", target["address"], "lantern.desktop=", "lantern.instance=", "herdr.space=", "herdr.tab="])
             record.setdefault("parked_readouts", []).append(target["address"])
+        elif saved.get("terminal"):
+            mounted = locate(inventory, saved["terminal"])
+            if mounted:
+                if mounted[1]["id"] != tab["id"]:
+                    raise RuntimeError("A saved Lantern readout moved; preserve its pane")
+                try:
+                    ended = core("terminal.get", terminal=saved["terminal"])
+                except CoreError as exc:
+                    if exc.kind != "not_found":
+                        raise
+                    ended = {"state": "finished"}
+                if ended.get("state") != "finished":
+                    raise RuntimeError("Readout state changed during repair; retry open")
+                app("pane.close", pane=mounted[2]["pane"])
         anchor = record.get("field", {}).get("pane") if role == "usage" else pane["pane"]
         saved = app("pane.split", pane=anchor, direction="down" if role == "usage" else "right",
                     argv=["sh", str(ROOT / "bin/lantern-app"), role, str(state)])

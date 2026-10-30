@@ -32,6 +32,10 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(len(result["agents"]), 1)
         self.assertEqual(result["agents"][0]["agent_status"], "blocked")
         self.assertEqual(result["agents"][0]["pane_id"], "p1")
+        terminals = self.terminals()
+        terminals["t1"]["status"] = {"app": "grok-build", "state": "working"}
+        grok = desktop.snapshot(self.inventory(), terminals, {})["agents"][0]
+        self.assertEqual((grok["agent"], grok["agent_status"]), ("grok", "working"))
 
     def test_bridged_legacy_agent_keeps_legacy_action_target_and_app_focus_target(self):
         terminals = self.terminals()
@@ -108,6 +112,14 @@ class DesktopTests(unittest.TestCase):
             Path(tmp, "chat-start.json").write_text(json.dumps({"terminal": "t-ended", "pid": child.pid, "start": "ended"}))
             terminal = {"address": "t-ended", "created_ms": int(time.time() * 1000)}
             self.assertFalse(desktop.starting(terminal))
+
+    def test_native_process_retains_actual_arguments_and_fills_its_working_directory(self):
+        cwd = str(Path.cwd())
+        fg = {"pid": 3, "argv": ["/bin/zsh", "-ic", '\"$@\"; exec "$0" -i', "/bin/zsh", "grok", "--model", "grok-4.7"]}
+        result = desktop.native_process({"foreground": fg, "cwd": cwd})
+        self.assertEqual(result["argv"], ["grok", "--model", "grok-4.7"])
+        self.assertEqual(result["cwd"], cwd)
+        self.assertEqual(fg["argv"][0], "/bin/zsh")
 
 
 if __name__ == "__main__":
