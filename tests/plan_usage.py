@@ -785,6 +785,22 @@ class UsageTests(unittest.TestCase):
                 for line in output.splitlines():
                     self.assertLessEqual(len(line), width, (width, line))
 
+    def test_stale_resets_on_a_higher_allowance_login_are_not_reported_as_current(self):
+        now = 1800000000
+        fresh = dict(measured("fresh"), state="Measured", observed_at=now)
+        for window in fresh["windows"]:
+            window["reset_at"] = now + 3600
+        stale = dict(measured("stale"), state="Last update failed", observed_at=now - 121,
+                     resets={"count": 2, "expiry_known": True, "expires_at": now + 6 * 86400})
+        for window in stale["windows"]:
+            window["remaining"] = 99
+        for width in (60, 88):
+            output = usage.render({"rows": [fresh, stale]}, now=now, width=width, zone=timezone.utc)
+            with self.subTest(width=width):
+                self.assertIn("Waiting for fresh limits", output)
+                self.assertNotIn("2 resets", output)
+                self.assertNotIn("Jan 21", output)
+
     def test_a_newer_reading_without_resets_drops_the_older_resets(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1603,6 +1619,7 @@ for line in sys.stdin:
 
 
 class ViewTests(unittest.TestCase):
+    maxDiff = None
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -1627,7 +1644,8 @@ class ViewTests(unittest.TestCase):
         self.temp.cleanup()
 
     def setup_views(self, view="both"):
-        return views.setup(self.state, ROOT, str(ROOT / "bin/herdr"), "w9", "w9:p1", str(self.root), view=view)
+        return views.setup(self.state, ROOT, str(ROOT / "bin/herdr"), "w9", "w9:p1", str(self.root),
+                           view=view, timeout=45 if os.name == "nt" else 15)
 
     def data(self):
         return json.loads(self.fixture.read_text())
@@ -1719,6 +1737,15 @@ class ViewTests(unittest.TestCase):
         self.save(data)
         self.assertEqual(self.setup_views("field")["errors"], [])
         self.assertEqual(self.data()["starting"][pane], 0)
+
+    def test_explicit_long_setup_budget_allows_slow_control_process(self):
+        data = self.data()
+        data["delay_once"] = {"command": ["pane", "process-info"], "seconds": 2.1}
+        self.save(data)
+        result = views.setup(self.state, ROOT, str(ROOT / "bin/herdr"), "w9", "w9:p1",
+                             str(self.root), timeout=45)
+        self.assertEqual(result["errors"], [])
+        self.assert_layout()
 
     def test_lost_layout_move_response_recovers_without_new_panes(self):
         for lost_stage in (True, False):
