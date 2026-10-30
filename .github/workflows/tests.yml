@@ -36,6 +36,8 @@ jobs:
         run: python tests/session_cleanup.py
       - name: Team transport tests
         run: python tests/teams.py
+      - name: Desktop protocol tests
+        run: python tests/desktop.py
   oldest-python:
     # Apple's own python3 is 3.9. Lantern keeps running on it, and the Codex
     # and Fugu rows say they need Python 3.11 there.
@@ -47,6 +49,6 @@ jobs:
           python-version: '3.9'
       - name: Python suites on 3.9
         run: |
-          for suite in models codex_jobs field_status plan_usage session_cleanup teams; do
+          for suite in models codex_jobs field_status plan_usage session_cleanup teams desktop; do
             python "tests/$suite.py" || exit 1
           done

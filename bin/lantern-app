@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+. "$root/lib.sh"
+helper_extend_user_path
+python=$(helper_detect_python) || exit 127
+if [ "$python" = 'py -3' ]; then
+    exec py -3 "$root/bin/desktop.py" "$@"
+fi
+exec "$python" "$root/bin/desktop.py" "$@"

@@ -2,6 +2,17 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.18.0] - 2026-10-29
+
+### Added
+
+- Native Herdr app support through `lantern-app`. It uses `hc` and
+  `herdr-app` for new agents and workspaces. Field Status and Plan Usage
+  include native agents and live connections to legacy Herdr.
+- The native launcher keeps the existing helper configuration and spawn
+  defaults. It repairs closed readouts and preserves existing sessions.
+  The legacy plugin and its launch commands remain supported.
+
 ## [0.17.13] - 2026-10-29
 
 ### Fixed

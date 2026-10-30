@@ -349,9 +349,11 @@ def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True
     width = max(38, width)
     local_time = eastern(now)
     stamp = local_time.strftime("%a %b %d, %Y · %I:%M %p ET")
-    heading = f"FIELD STATUS  {stamp}"
+    scope = "LOCAL " if os.environ.get("LANTERN_VIEW_SCOPE") == "local" else ""
+    heading = f"{scope}FIELD STATUS  {stamp}"
     if len(heading) > width:
-        heading = f"FIELD STATUS · {local_time.strftime('%b %d %I:%M %p ET')}"
+        separator = ": " if scope else " · "
+        heading = f"{scope}FIELD STATUS{separator}{local_time.strftime('%b %d %I:%M %p ET')}"
     lines = [heading, ""]
     append_note_section(lines, "IMPORTANT", note_data.get("important", {}), "red", width, colors)
     append_note_section(lines, "NEEDS YOU", note_data.get("needs_you", {}), "purple", width, colors)

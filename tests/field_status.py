@@ -119,6 +119,11 @@ class FieldStatusTests(unittest.TestCase):
         self.assertIn("DONE\n• Plugin Update\n  Review\n  Outcome not yet verified", output)
         self.assertIn("• Choose whether to merge", output)
         self.assertIn("  update", output)
+        with patch.dict(os.environ, {"LANTERN_VIEW_SCOPE": "local"}):
+            local = status.render(rows, {}, NOW, False, width=38).splitlines()[0]
+        self.assertTrue(local.startswith("LOCAL FIELD STATUS"))
+        self.assertLessEqual(len(local), 38)
+        self.assertIn("ET", local)
 
     def test_unavailable_snapshot_does_not_erase_prior_rows(self):
         with tempfile.TemporaryDirectory() as root:

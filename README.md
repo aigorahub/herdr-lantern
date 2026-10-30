@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.17.13** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.18.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -30,6 +30,37 @@ launcher. Windows also needs Git for Windows. See [Windows](#windows).
 | The CLI you chat with | the chat tab | Lantern says the agent program is not on `PATH`. |
 | CodexBar CLI 0.74.0 | Claude and Grok usage rows | Plan Usage installs it once by itself. If that fails, the row says to ask Lantern to install it. |
 | The Fugu profile's API key | the Fugu usage row | The row says the Sakana API key is missing. |
+
+## Herdr desktop app
+
+The desktop app uses `hc` and `herdr-app`. It has a separate Lantern entry
+point. The legacy plugin and its commands stay supported.
+
+From this checkout, with the app open:
+
+```sh
+sh bin/lantern-app open
+```
+
+On macOS or Linux, `sh bin/lantern-app install` adds `lantern-app` to
+`~/.local/bin`. Then run `lantern-app open` from any folder.
+
+This opens a native Lantern chat in the first space. Field Status and Plan
+Usage sit to its right. It reads your existing `helper.conf` and spawn
+defaults. It keeps the old Lantern chat and all existing agents. New work
+uses the app's own spaces and terminals. Existing direct connections to old
+Herdr retain their legacy action targets and appear in the readouts.
+
+`sh bin/lantern-app snapshot` reports native and bridged agent IDs. The
+read model adapter is read only. Lantern uses `herdr-app` and `hc` to change
+native work. It uses legacy commands only for legacy sessions. Do not stop
+the old Herdr server while those sessions are connected.
+
+Desktop readouts currently show local spaces. They omit remote app spaces
+and keep local work visible. The legacy plugin keeps its remote support.
+Use `LANTERN_CONFIG_DIR` to select another helper configuration directory.
+Use `LANTERN_DESKTOP_STATE_DIR` to select separate private desktop state.
+The checkout must stay available while its desktop sessions run.
 
 ## Install the plugin
 
