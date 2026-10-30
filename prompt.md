@@ -631,7 +631,9 @@ provider and account for collection. Display one table row per service.
 Show Service, Session left, Week left, and Week resets. Panes of 70 columns or
 more add Resets and Expires for saved usage resets. A service whose reader
 doesn't report them shows unknown; never guess. Narrow panes add a note for a
-service with resets. Never spend a reset. Allowances use percentages.
+service with resets. Resets the person entered in hand_resets.json in the
+Lantern config folder show until their expiry day ends, marked as entered by
+hand; a live report replaces them. Never spend a reset. Allowances use percentages.
 Weekly resets use local time for the limit that sets the weekly percentage.
 Claude uses its total weekly reset when total and model limits have the same
 percentage. Other tied limits with different reset times show Varies. Missing or expired times

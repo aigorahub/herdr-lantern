@@ -207,6 +207,10 @@ hasn't reported resets, even one still being read, so the oldest is never
 guessed, and No expiry when they don't expire. Narrower panes keep the table
 as it is and add one line for a service with resets, such as "OpenAI: 2
 resets. The oldest expires Oct 22." Lantern never spends a reset.
+Resets a service doesn't report can be entered by hand in `hand_resets.json`
+in the Lantern config folder, for example `{"claude": {"count": 1, "expires":
+"2026-11-30"}}`. They show with the line "Claude resets: entered by hand."
+until the end of their expiry day, and a live report replaces them.
 Each period shows its lowest remaining percentage across that service's
 limits and login profiles. It never adds percentages. This is a conservative
 service summary. Percentage columns align to the right. Low allowances use

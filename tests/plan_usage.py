@@ -190,6 +190,8 @@ class ConfiguredFuguTests(unittest.TestCase):
                 self.assertEqual(failure.exception.provider, "fugu")
 
 
+# The fixture installs codex as a symbolic link found on a Unix PATH.
+@unittest.skipIf(os.name == "nt", "needs Unix symbolic links and PATH lookup")
 class ConfiguredCodexTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -890,6 +892,45 @@ class UsageTests(unittest.TestCase):
                 self.assertEqual("Resets" in heading(output), width >= 70, (width, output))
                 for line in output.splitlines():
                     self.assertLessEqual(len(line), width, (width, line))
+
+    def test_hand_entered_resets_fill_unreported_services_until_their_day_ends(self):
+        now = 1800000000  # Jan 15 2027, 08:00 UTC
+        claude = {"provider": "claude", "state": "Measured", "observed_at": now, "account": "c",
+                  "windows": [{"id": "secondary", "minutes": 10080, "remaining": 55, "reset_at": now + 3600, "scope": "service"}]}
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hand_resets.json"
+            path.write_text(json.dumps({"claude": {"count": 1, "expires": "2027-01-20"},
+                                        "codex": {"count": 2, "expires": "2027-01-20"},
+                                        "grok": {"count": True, "expires": "2027-01-20"},
+                                        "fugu": {"count": 0, "expires": "2027-01-20"},
+                                        "agy": {"count": 1, "expires": "2027-13-01"}, "gemini": [1]}))
+            hand = usage.hand_resets(path)
+            self.assertEqual(sorted(hand), ["claude", "codex"])
+            for text in ("{not json", "[]"):
+                path.write_text(text)
+                self.assertEqual(usage.hand_resets(path), {})
+            self.assertEqual(usage.hand_resets(Path(temporary) / "missing.json"), {})
+        live = dict(measured(), state="Measured", observed_at=now,
+                    resets={"count": 0, "expiry_known": True, "expires_at": None})
+        render = lambda moment, width=88: usage.render({"rows": [claude, live]}, now=moment, width=width,
+                                                       zone=timezone.utc, hand=hand)
+        output = render(now)
+        self.assertRegex(next(line for line in output.splitlines() if line.startswith("Claude")), r"\s1  Jan 20$")
+        self.assertIn("\nClaude resets: entered by hand.", output)
+        # A live report replaces the hand entry.
+        self.assertRegex(next(line for line in output.splitlines() if line.startswith("OpenAI")), r"\s0  --$")
+        self.assertNotIn("OpenAI resets", output)
+        narrow = render(now, 60)
+        self.assertIn("Claude: 1 reset. It expires Jan 20.\nClaude resets: entered by hand.", narrow)
+        # The entry lasts to the end of its expiry day, then the service is unknown again.
+        last = 1800000000 + 5 * 86400 + 16 * 3600 - 1  # Jan 20 23:59:59 UTC
+        self.assertIn("entered by hand", render(last))
+        after = render(last + 1)
+        self.assertRegex(next(line for line in after.splitlines() if line.startswith("Claude")), r"\sunknown  unknown$")
+        self.assertNotIn("entered by hand", after)
+        for width in range(20, 121):
+            for line in render(now, width).splitlines():
+                self.assertLessEqual(len(line), width, (width, line))
 
     def test_stale_resets_on_a_higher_allowance_login_are_not_reported_as_current(self):
         now = 1800000000
