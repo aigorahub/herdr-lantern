@@ -69,7 +69,7 @@ class DesktopTests(unittest.TestCase):
             command.chmod(0o700)
             with patch.dict(os.environ, {"PATH": tmp}):
                 args = desktop.helper_argv({}, "native instructions")
-            self.assertEqual(args[0], str(command))
+            self.assertTrue(os.path.samefile(args[0], command))
             self.assertIn("--no-daemon", args)
             self.assertIn("--dangerously-bypass-approvals-and-sandbox", args)
 

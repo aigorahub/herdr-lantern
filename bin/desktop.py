@@ -273,12 +273,12 @@ def wait_location(address: str) -> tuple[dict, dict, dict]:
 
 def active_helper(terminal: dict, config: dict, binary: str | None = None) -> bool:
     fg = terminal.get("foreground") or {}
-    expected = Path(binary or helper_command(config)[1]).name.removesuffix(".exe")
-    actual = Path(fg.get("name", "")).name.removesuffix(".exe")
+    expected = os.path.normcase(Path(binary or helper_command(config)[1]).name).removesuffix(".exe")
+    actual = os.path.normcase(Path(fg.get("name", "")).name).removesuffix(".exe")
     if actual == expected:
         return True
     argv = fg.get("argv") or []
-    if actual == "node" and any(Path(arg).stem == expected for arg in argv):
+    if actual == "node" and any(os.path.normcase(Path(arg).stem) == expected for arg in argv):
         return True
     return str(Path(__file__).resolve()) in argv and "chat" in argv
 
