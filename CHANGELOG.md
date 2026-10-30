@@ -12,6 +12,8 @@ All notable changes to Lantern, by Elves are documented here.
 - Readout setup honors a larger requested startup budget. Windows fixture
   tests allow for slow shell and Python startup. Timeout errors identify
   the command phase and actual limit (issue #67).
+- The deleted-program test waits for its process to start before removing
+  the executable. This removes a race with the macOS program loader.
 
 ## [0.17.12] - 2026-10-27
 

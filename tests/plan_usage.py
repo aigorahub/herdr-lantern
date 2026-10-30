@@ -1300,12 +1300,17 @@ for line in sys.stdin:
 
     @unittest.skipIf(os.name == "nt" or not shutil.which("cc"), "needs a C compiler on macOS or Linux")
     def test_program_path_survives_its_file_being_deleted(self):
+        import select
         with tempfile.TemporaryDirectory() as temporary:
             source, program = Path(temporary) / "wait.c", Path(temporary) / "wait"
-            source.write_text("#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n")
+            source.write_text('#include <unistd.h>\nint main(void) { write(1, "R", 1); sleep(30); return 0; }\n')
             subprocess.run(["cc", "-o", str(program), str(source)], check=True)
-            child = subprocess.Popen([str(program)])
+            child = subprocess.Popen([str(program)], stdout=subprocess.PIPE)
             try:
+                # proc_pidpath can name the image before dyld maps it. Wait
+                # for main before reproducing an updater deleting that image.
+                self.assertTrue(select.select([child.stdout], [], [], 5)[0], "Test program did not start")
+                self.assertEqual(child.stdout.read(1), b"R")
                 expected = os.path.realpath(program)
                 self.assertEqual(runtime.process_executable(child.pid), expected)
                 # Like Claude's updater removing a version that a tab still runs.
@@ -1317,6 +1322,7 @@ for line in sys.stdin:
             finally:
                 child.kill()
                 child.wait()
+                child.stdout.close()
 
     def test_claude_tab_on_a_deleted_version_reads_through_the_current_version(self):
         with tempfile.TemporaryDirectory() as temporary:
