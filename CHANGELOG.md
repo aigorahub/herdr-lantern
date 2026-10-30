@@ -13,6 +13,19 @@ All notable changes to Lantern, by Elves are documented here.
   defaults. It repairs closed readouts and preserves existing sessions.
   The legacy plugin and its launch commands remain supported.
 
+## [0.17.13] - 2026-10-29
+
+### Fixed
+
+- Plan Usage hides saved reset totals when one login's reset report is
+  stale. It marks the total as unknown and asks for fresh limits, even
+  when another login supplies the displayed allowance (issue #68).
+- Readout setup honors a larger requested startup budget. Windows fixture
+  tests allow for slow shell and Python startup. Timeout errors identify
+  the command phase and actual limit (issue #67).
+- The deleted-program test waits for its process to start before removing
+  the executable. This removes a race with the macOS program loader.
+
 ## [0.17.12] - 2026-10-27
 
 ### Fixed

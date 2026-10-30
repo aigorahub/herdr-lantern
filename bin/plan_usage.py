@@ -267,6 +267,8 @@ def saved_resets(rows: list[dict], now: float) -> dict | None:
     reported = [row["resets"] for row in rows if isinstance(row.get("resets"), dict)]
     if not reported:
         return None
+    stale = any(now - row.get("observed_at", 0) >= 120 or row.get("state") != "Measured"
+                for row in rows if isinstance(row.get("resets"), dict))
     held = [value for value in reported if value.get("count")]
     dated = [value["expires_at"] for value in held if value.get("expires_at")]
     # Any other login could hold an older reset, including one still reading or
@@ -274,7 +276,7 @@ def saved_resets(rows: list[dict], now: float) -> dict | None:
     # oldest unknown.
     known = (len(reported) == len(rows) and all(value.get("expiry_known") for value in held)
              and all(when > now for when in dated))
-    return {"count": sum(value.get("count", 0) for value in reported), "known": known,
+    return {"count": sum(value.get("count", 0) for value in reported), "known": known, "stale": stale,
             "expires_at": min(dated) if known and dated else None}
 
 
@@ -299,6 +301,10 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
     if not services:
         return "\n".join(lines + ["No open service plans."]) + "\n"
     saved_by_service = {name: saved_resets(rows, now) for name, rows in services.items()}
+    if snapshot.get("scan_failed"):
+        for saved in saved_by_service.values():
+            if saved:
+                saved["stale"] = True
     any_resets = any(saved and saved["count"] for saved in saved_by_service.values())
     show_resets = width >= 39
     full_labels = width >= (50 if show_resets else 32)
@@ -372,7 +378,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         return f"{local:%b} {local.day}"
 
     def expiry(saved: dict | None) -> str:
-        if not saved or not saved["count"] or not saved["known"]:
+        if not saved or saved["stale"] or not saved["count"] or not saved["known"]:
             return "--"
         return day(saved["expires_at"]) if saved["expires_at"] else "No expiry"
 
@@ -425,11 +431,12 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             values.append(reset_time(selected.get("week", (None, False, set()))[2]))
             codes.append("" if values[-1] not in ("--", "Varies") else "2")
         saved = saved_by_service[name]
+        stale = stale or bool(saved and saved["stale"])
         if reset_columns:
-            values += [str(saved["count"]) if saved else "--", expiry(saved)]
+            values += [("--*" if saved["stale"] else str(saved["count"])) if saved else "--", expiry(saved)]
             codes += ["" if saved else "2", "2" if values[-1] == "--" else ""]
         add(values, codes)
-        if any_resets and not reset_columns and saved and saved["count"]:
+        if any_resets and not reset_columns and saved and saved["count"] and not saved["stale"]:
             infos.append(reset_note(name, saved))
         if stale:
             notes.append(f"{name}: * Waiting for fresh limits.")
