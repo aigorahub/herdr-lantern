@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import re
 import shlex
 import shutil
 import subprocess
@@ -68,7 +67,13 @@ def read_world() -> tuple[dict, dict[str, dict], dict[str, dict]]:
     sources = {}
     for binary in {b[0] for t in terminals.values() if (b := bridge(t))}:
         data = json.loads(run([binary, "api", "snapshot"], 5))["result"]["snapshot"]
-        sources[binary] = {p["terminal_id"]: p for p in data["panes"]}
+        recognized = {agent["terminal_id"]: agent for agent in data["agents"]}
+        sources[binary] = {}
+        for pane in data["panes"]:
+            pane = dict(pane)
+            pane.pop("agent", None)
+            pane.update(recognized.get(pane["terminal_id"], {}))
+            sources[binary][pane["terminal_id"]] = pane
     return inventory, terminals, sources
 
 
@@ -141,16 +146,14 @@ def read_model(args: list[str]) -> None:
 
 
 def read_config(path: Path) -> dict[str, str]:
-    config = {}
-    if path.exists():
-        for line in path.read_text().splitlines():
-            match = re.fullmatch(r'\s*(HELPER_[A-Z_]+)\s*=\s*(.*?)\s*', line)
-            if match:
-                value = match[2]
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-                    value = value[1:-1]
-                config[match[1]] = value
-    return config
+    if not path.exists():
+        return {}
+    keys = ["HELPER_AGENT", "HELPER_MODEL", "HELPER_PROVIDER", "HELPER_EFFORT", "HELPER_CWD",
+            "HELPER_SPAWN_KIND", "HELPER_SPAWN_MODEL", "HELPER_SPAWN_EFFORT", "HELPER_PERMISSION", "HELPER_EXTRA_ARGS"]
+    # The legacy parser is the configuration contract for both backends.
+    script = '. "$1"; helper_parse_conf "$2" || exit 1; printf "%s\\0" ' + " ".join('"$' + key + '"' for key in keys)
+    values = run(["sh", "-c", script, "lantern-config", str(ROOT / "lib.sh"), str(path)]).split("\0")
+    return dict(zip(keys, values))
 
 
 def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
@@ -163,6 +166,8 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
         raise RuntimeError(f"Helper command is not installed: {kind}")
     args = [binary]
     model, effort = config.get("HELPER_MODEL", ""), config.get("HELPER_EFFORT", "")
+    if kind == "agent" and not model:
+        model = "grok-4.7-high-fast"
     if kind == "pi" and config.get("HELPER_PROVIDER"):
         args += ["--provider", config["HELPER_PROVIDER"]]
     if model and kind != "devin":
@@ -173,20 +178,25 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
             args += [flag, effort]
         elif kind == "codex":
             args += ["--config", f'model_reasoning_effort="{effort}"']
-    permission = config.get("HELPER_PERMISSION", "smart")
+    permission = config.get("HELPER_PERMISSION") or "smart"
     if permission not in {"auto", "accept-edits", "smart", "dangerous"}:
         raise RuntimeError("Invalid HELPER_PERMISSION")
-    if permission == "dangerous" and kind != "pi":
-        raise RuntimeError("Desktop Lantern does not enable dangerous permission modes")
     if kind in {"claude", "grok"}:
-        args += ["--permission-mode", "acceptEdits" if permission == "accept-edits" else "auto"]
+        mode = {"accept-edits": "acceptEdits", "dangerous": "bypassPermissions"}.get(permission, "auto")
+        args += ["--permission-mode", mode]
     elif kind == "codex":
-        args += ["--no-daemon", "--sandbox", "workspace-write"]
-        args += ["--ask-for-approval", "on-request"] if permission == "accept-edits" else ["--approve-for-me"]
+        args += ["--no-daemon"]
+        if permission == "dangerous":
+            args += ["--dangerously-bypass-approvals-and-sandbox"]
+        else:
+            args += ["--sandbox", "workspace-write"]
+            args += ["--ask-for-approval", "on-request"] if permission == "accept-edits" else ["--approve-for-me"]
     elif kind == "agent":
-        if permission == "auto":
-            raise RuntimeError("Cursor desktop helper requires smart or accept-edits permission")
-        args += ["--auto-review", "--trust"]
+        args += ["--trust", "--sandbox", "disabled"]
+        if permission in {"smart", "accept-edits"}:
+            args += ["--auto-review"]
+        elif permission == "dangerous":
+            args += ["--force"]
     elif kind == "devin":
         args += ["--permission-mode", permission]
     if kind == "grok":
@@ -337,11 +347,6 @@ def open_home() -> dict:
             record["instance"] = instance
             ensure_views(record, state)
             return {"terminal": home["address"], "reused": True}
-        model = config.get("HELPER_MODEL")
-        kind = config.get("HELPER_AGENT")
-        if model and kind in {"claude", "codex", "grok", "cursor"}:
-            run([sys.executable, str(ROOT / "bin/model-preflight.py"), kind, model,
-                 config.get("HELPER_EFFORT", "")], 90)
         argv = [sys.executable, str(Path(__file__).resolve()), "chat", str(state), str(config_dir())]
         space = next((s for s in inventory["spaces"] if s["name"].lower() in {"lantern", "🔥 lantern"}
                       and not s.get("machine")), None)

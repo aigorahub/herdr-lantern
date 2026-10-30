@@ -51,8 +51,8 @@ class DesktopTests(unittest.TestCase):
             marker = Path(tmp) / "must-not-exist"
             path = Path(tmp) / "helper.conf"
             path.write_text(f'HELPER_MODEL="$(touch {marker})"\nHELPER_EFFORT="high"\n')
-            config = desktop.read_config(path)
-            self.assertEqual(config["HELPER_MODEL"], f"$(touch {marker})")
+            with self.assertRaises(RuntimeError):
+                desktop.read_config(path)
             self.assertFalse(marker.exists())
 
     def test_empty_helper_uses_an_installed_codex_and_retains_native_process_mode(self):
