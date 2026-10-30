@@ -3,12 +3,18 @@ import json
 import os
 import shlex
 import sys
+import time
 from pathlib import Path
 
 path = Path(os.environ["VIEWS_FIXTURE"])
 data = json.loads(path.read_text())
 args = sys.argv[1:]
 data.setdefault("calls", []).append(args)
+delay = data.get("delay_once", {})
+if args[:2] == delay.get("command"):
+    data.pop("delay_once")
+    path.write_text(json.dumps(data))
+    time.sleep(delay["seconds"])
 result = {}
 
 

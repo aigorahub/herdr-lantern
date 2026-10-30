@@ -109,13 +109,13 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
     if not workspace or not home or not Path(cwd).is_absolute():
         raise RuntimeError("Lantern setup context unavailable")
     private_dir(state)
-    deadline = time.monotonic() + min(timeout, 15)
+    deadline = time.monotonic() + timeout
 
     def call(args: list[str], end: float = deadline) -> dict:
         remaining = end - time.monotonic()
         if remaining <= 0:
             raise RuntimeError("Readout setup timed out")
-        return field.control(binary, args, min(2, remaining))
+        return field.control(binary, args, min(2 if timeout <= 15 else 5, remaining))
 
     chat = call(["pane", "get", home]).get("pane", {})
     if chat.get("workspace_id") != workspace or chat.get("label") != "Lantern":
@@ -333,7 +333,7 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
             return "idle"
 
         for kind in requested:
-            end = min(deadline, time.monotonic() + 7)
+            end = min(deadline, time.monotonic() + max(7, timeout / 2))
             label, _ = VIEWS[kind]
             try:
                 pane, status = find_target(kind, end)
