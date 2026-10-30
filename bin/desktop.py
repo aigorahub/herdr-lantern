@@ -167,7 +167,7 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
     args = [binary]
     model, effort = config.get("HELPER_MODEL", ""), config.get("HELPER_EFFORT", "")
     if kind == "agent" and not model:
-        model = "grok-4.7-high-fast"
+        model = run(["sh", "-c", '. "$1"; helper_cursor_default_model', "lantern-default", str(ROOT / "lib.sh")]).strip()
     if kind == "pi" and config.get("HELPER_PROVIDER"):
         args += ["--provider", config["HELPER_PROVIDER"]]
     if model and kind != "devin":
@@ -238,9 +238,9 @@ def locate(inventory: dict, address: str) -> tuple[dict, dict, dict] | None:
     return None
 
 
-def active_helper(terminal: dict, config: dict) -> bool:
+def active_helper(terminal: dict, config: dict, binary: str | None = None) -> bool:
     fg = terminal.get("foreground") or {}
-    expected = Path(helper_argv(config, "")[0]).name.removesuffix(".exe")
+    expected = Path(binary or helper_argv(config, "")[0]).name.removesuffix(".exe")
     actual = Path(fg.get("name", "")).name.removesuffix(".exe")
     if actual == expected:
         return True
@@ -268,6 +268,18 @@ def ensure_views(record: dict, state: Path) -> None:
     for role in ("field", "usage"):
         saved = record.get(role) or {}
         target = terminals.get(saved.get("terminal"))
+        if not target:
+            recovered = [t for t in terminals.values() if t.get("labels", {}).get("lantern.instance") == record["instance"]
+                         and t.get("labels", {}).get("lantern.desktop") == role
+                         and t.get("labels", {}).get("herdr.tab") == tab["id"] and t.get("state") == "live"]
+            if len(recovered) > 1:
+                raise RuntimeError("Multiple readouts have the same ownership label; preserve them")
+            if recovered:
+                target = recovered[0]
+                where = locate(inventory, target["address"])
+                if where:
+                    saved = record[role] = {"pane": where[2]["pane"], "terminal": target["address"]}
+                    field.write_json(state / "home.json", record)
         if target and target.get("state") == "live":
             current = locate(inventory, target["address"])
             if not current or current[1]["id"] != tab["id"]:
@@ -275,6 +287,7 @@ def ensure_views(record: dict, state: Path) -> None:
             from lantern_views import matches_watcher
             fg = target.get("foreground") or {}
             if matches_watcher(fg, ROOT, state, role):
+                run([HC, "label", target["address"], "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
                 continue
             argv = fg.get("argv") or []
             if str(Path(__file__).resolve()) in argv and role in argv or starting(target):
@@ -292,9 +305,10 @@ def ensure_views(record: dict, state: Path) -> None:
             record.setdefault("parked_readouts", []).append(target["address"])
         anchor = record.get("field", {}).get("pane") if role == "usage" else pane["pane"]
         saved = app("pane.split", pane=anchor, direction="down" if role == "usage" else "right",
-                    argv=[sys.executable, str(Path(__file__).resolve()), role, str(state)])
+                    argv=["sh", str(ROOT / "bin/lantern-app"), role, str(state)])
         record[role] = saved
         field.write_json(state / "home.json", record)
+        run([HC, "label", saved["terminal"], "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
         changed = True
     if changed:
         doc = core("doc.get", name="herdr-app")
@@ -330,31 +344,40 @@ def open_home() -> dict:
         raise RuntimeError("Lantern is already opening")
     try:
         config = read_config(config_dir() / "helper.conf")
-        helper_argv(config, "")
         instance = runtime.digest([str(state.resolve()), str(config_dir().resolve())])
         inventory = json.loads(run([APP, "ls"]))
         terminals = core("terminal.list")["terminals"]
         record = field.read_json(state / "home.json", {})
         if record.get("instance") not in (None, instance):
             raise RuntimeError("This state directory belongs to another configuration; select a separate desktop state directory")
-        home = next((t for t in terminals if t["state"] == "live" and
-                     (t["address"] == record.get("terminal") or
-                      t.get("labels", {}).get("lantern.instance") == instance and
-                      t.get("labels", {}).get("lantern.desktop") == "home")), None)
-        if home and (active_helper(home, config) or starting(home)):
+        home = next((t for t in terminals if t["state"] == "live" and t["address"] == record.get("terminal")), None)
+        if not home:
+            candidates = [t for t in terminals if t["state"] == "live" and
+                          t.get("labels", {}).get("lantern.instance") == instance and
+                          t.get("labels", {}).get("lantern.desktop") == "home"]
+            if len(candidates) > 1:
+                raise RuntimeError("Multiple Lantern homes match this instance; preserve them")
+            home = candidates[0] if candidates else None
+        binary = record.get("helper_binary")
+        if home and (active_helper(home, config, binary) or starting(home)):
             if record.get("terminal") != home["address"]:
                 record = {"terminal": home["address"]}
             record["instance"] = instance
+            record["helper_binary"] = binary or (home.get("foreground") or {}).get("argv", [""])[0]
+            run([HC, "label", home["address"], "lantern.instance=" + instance])
             ensure_views(record, state)
             return {"terminal": home["address"], "reused": True}
-        argv = [sys.executable, str(Path(__file__).resolve()), "chat", str(state), str(config_dir())]
+        helper_binary = helper_argv(config, "")[0]
+        if home:
+            run([HC, "label", home["address"], "lantern.desktop=", "lantern.instance="])
+        argv = ["sh", str(ROOT / "bin/lantern-app"), "chat", str(state), str(config_dir())]
         space = next((s for s in inventory["spaces"] if s["name"].lower() in {"lantern", "🔥 lantern"}
                       and not s.get("machine")), None)
         if space:
             made = app("tab.new", space=space["id"], name="Lantern", folder=str(state), argv=argv)
         else:
             made = app("space.new", name="lantern", tab="Lantern", folder=str(state), argv=argv)
-        record = dict(made, instance=instance)
+        record = dict(made, instance=instance, helper_binary=helper_binary)
         field.write_json(state / "home.json", record)
         run([HC, "label", made["terminal"], "lantern.desktop=home", "lantern.instance=" + instance])
         ensure_views(record, state)
