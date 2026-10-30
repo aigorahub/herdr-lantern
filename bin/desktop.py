@@ -156,7 +156,7 @@ def read_config(path: Path) -> dict[str, str]:
     return dict(zip(keys, values))
 
 
-def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
+def helper_command(config: dict[str, str]) -> tuple[str, str]:
     kind = config.get("HELPER_AGENT") or next((name for name in ("agent", "devin", "claude", "codex", "grok", "pi") if shutil.which(name)), "")
     kind = "agent" if kind == "cursor" else kind
     if kind not in {"claude", "codex", "grok", "pi", "agent", "devin"}:
@@ -164,6 +164,11 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
     binary = shutil.which(kind)
     if not binary:
         raise RuntimeError(f"Helper command is not installed: {kind}")
+    return kind, binary
+
+
+def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
+    kind, binary = helper_command(config)
     args = [binary]
     model, effort = config.get("HELPER_MODEL", ""), config.get("HELPER_EFFORT", "")
     if kind == "agent" and not model:
@@ -240,7 +245,7 @@ def locate(inventory: dict, address: str) -> tuple[dict, dict, dict] | None:
 
 def active_helper(terminal: dict, config: dict, binary: str | None = None) -> bool:
     fg = terminal.get("foreground") or {}
-    expected = Path(binary or helper_argv(config, "")[0]).name.removesuffix(".exe")
+    expected = Path(binary or helper_command(config)[1]).name.removesuffix(".exe")
     actual = Path(fg.get("name", "")).name.removesuffix(".exe")
     if actual == expected:
         return True
@@ -358,18 +363,19 @@ def open_home() -> dict:
             if len(candidates) > 1:
                 raise RuntimeError("Multiple Lantern homes match this instance; preserve them")
             home = candidates[0] if candidates else None
-        binary = record.get("helper_binary")
+        binary = record.get("helper_binary") or (home or {}).get("labels", {}).get("lantern.helper")
         if home and (active_helper(home, config, binary) or starting(home)):
             if record.get("terminal") != home["address"]:
                 record = {"terminal": home["address"]}
             record["instance"] = instance
             record["helper_binary"] = binary or (home.get("foreground") or {}).get("argv", [""])[0]
-            run([HC, "label", home["address"], "lantern.instance=" + instance])
+            run([HC, "label", home["address"], "lantern.instance=" + instance,
+                 "lantern.helper=" + record["helper_binary"]])
             ensure_views(record, state)
             return {"terminal": home["address"], "reused": True}
         helper_binary = helper_argv(config, "")[0]
         if home:
-            run([HC, "label", home["address"], "lantern.desktop=", "lantern.instance="])
+            run([HC, "label", home["address"], "lantern.desktop=", "lantern.instance=", "lantern.helper="])
         argv = ["sh", str(ROOT / "bin/lantern-app"), "chat", str(state), str(config_dir())]
         space = next((s for s in inventory["spaces"] if s["name"].lower() in {"lantern", "🔥 lantern"}
                       and not s.get("machine")), None)
@@ -379,7 +385,8 @@ def open_home() -> dict:
             made = app("space.new", name="lantern", tab="Lantern", folder=str(state), argv=argv)
         record = dict(made, instance=instance, helper_binary=helper_binary)
         field.write_json(state / "home.json", record)
-        run([HC, "label", made["terminal"], "lantern.desktop=home", "lantern.instance=" + instance])
+        run([HC, "label", made["terminal"], "lantern.desktop=home", "lantern.instance=" + instance,
+             "lantern.helper=" + helper_binary])
         ensure_views(record, state)
         return dict(made, native=True)
     finally:
