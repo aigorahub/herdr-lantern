@@ -133,7 +133,9 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
         proc = subprocess.run(command, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=timeout,
                               env=env, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Herdr {' '.join(args[:2])} timed out after {timeout:g}s") from None
+    except OSError as exc:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} unavailable: {exc}") from exc
     if proc.returncode:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} failed ({proc.returncode}): {clean(proc.stderr, 180)}")

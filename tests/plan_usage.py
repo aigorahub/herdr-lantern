@@ -785,6 +785,22 @@ class UsageTests(unittest.TestCase):
                 for line in output.splitlines():
                     self.assertLessEqual(len(line), width, (width, line))
 
+    def test_stale_resets_on_a_higher_allowance_login_are_not_reported_as_current(self):
+        now = 1800000000
+        fresh = dict(measured("fresh"), state="Measured", observed_at=now)
+        for window in fresh["windows"]:
+            window["reset_at"] = now + 3600
+        stale = dict(measured("stale"), state="Last update failed", observed_at=now - 121,
+                     resets={"count": 2, "expiry_known": True, "expires_at": now + 6 * 86400})
+        for window in stale["windows"]:
+            window["remaining"] = 99
+        for width in (60, 88):
+            output = usage.render({"rows": [fresh, stale]}, now=now, width=width, zone=timezone.utc)
+            with self.subTest(width=width):
+                self.assertIn("Waiting for fresh limits", output)
+                self.assertNotIn("2 resets", output)
+                self.assertNotIn("Jan 21", output)
+
     def test_a_newer_reading_without_resets_drops_the_older_resets(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1284,12 +1300,17 @@ for line in sys.stdin:
 
     @unittest.skipIf(os.name == "nt" or not shutil.which("cc"), "needs a C compiler on macOS or Linux")
     def test_program_path_survives_its_file_being_deleted(self):
+        import select
         with tempfile.TemporaryDirectory() as temporary:
             source, program = Path(temporary) / "wait.c", Path(temporary) / "wait"
-            source.write_text("#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n")
+            source.write_text('#include <unistd.h>\nint main(void) { write(1, "R", 1); sleep(30); return 0; }\n')
             subprocess.run(["cc", "-o", str(program), str(source)], check=True)
-            child = subprocess.Popen([str(program)])
+            child = subprocess.Popen([str(program)], stdout=subprocess.PIPE)
             try:
+                # proc_pidpath can name the image before dyld maps it. Wait
+                # for main before reproducing an updater deleting that image.
+                self.assertTrue(select.select([child.stdout], [], [], 5)[0], "Test program did not start")
+                self.assertEqual(child.stdout.read(1), b"R")
                 expected = os.path.realpath(program)
                 self.assertEqual(runtime.process_executable(child.pid), expected)
                 # Like Claude's updater removing a version that a tab still runs.
@@ -1301,6 +1322,7 @@ for line in sys.stdin:
             finally:
                 child.kill()
                 child.wait()
+                child.stdout.close()
 
     def test_claude_tab_on_a_deleted_version_reads_through_the_current_version(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1603,6 +1625,7 @@ for line in sys.stdin:
 
 
 class ViewTests(unittest.TestCase):
+    maxDiff = None
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -1627,7 +1650,8 @@ class ViewTests(unittest.TestCase):
         self.temp.cleanup()
 
     def setup_views(self, view="both"):
-        return views.setup(self.state, ROOT, str(ROOT / "bin/herdr"), "w9", "w9:p1", str(self.root), view=view)
+        return views.setup(self.state, ROOT, str(ROOT / "bin/herdr"), "w9", "w9:p1", str(self.root),
+                           view=view, timeout=45 if os.name == "nt" else 15)
 
     def data(self):
         return json.loads(self.fixture.read_text())
@@ -1719,6 +1743,15 @@ class ViewTests(unittest.TestCase):
         self.save(data)
         self.assertEqual(self.setup_views("field")["errors"], [])
         self.assertEqual(self.data()["starting"][pane], 0)
+
+    def test_explicit_long_setup_budget_allows_slow_control_process(self):
+        data = self.data()
+        data["delay_once"] = {"command": ["pane", "process-info"], "seconds": 2.1}
+        self.save(data)
+        result = views.setup(self.state, ROOT, str(ROOT / "bin/herdr"), "w9", "w9:p1",
+                             str(self.root), timeout=45)
+        self.assertEqual(result["errors"], [])
+        self.assert_layout()
 
     def test_lost_layout_move_response_recovers_without_new_panes(self):
         for lost_stage in (True, False):
