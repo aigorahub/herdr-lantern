@@ -28,7 +28,12 @@ Never send a task to an agent that is already working. If submission fails,
 read first. Do not resend blindly. Keep the original transcript on handoff.
 
 Use the installed Lantern model-route and model-preflight commands listed
-below before starting a requested model. Use the user's saved spawn defaults
+below for Claude, Codex, Cursor, Grok, and Fugu. For other harnesses, check
+their installed CLI help and live model catalog. Agy takes its initial prompt
+with --prompt-interactive. Put that prompt in argv and omit the app's task
+argument. Do not pass an Agy prompt as a bare positional argument. Pin the
+requested Agy model and effort. Agy reviews use /boost in plan mode.
+Use the user's saved spawn defaults
 when they name only a repo. Do not silently change the harness or model.
 Use the configured permission tier. Do not invent approval bypass flags.
 If a provider limit blocks work, identify the affected terminal and show
