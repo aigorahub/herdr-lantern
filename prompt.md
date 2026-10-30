@@ -618,7 +618,8 @@ quiet tabs and Lantern Home. Never close Lantern Home as part of Field Status.
   verified readout watchers from old tabs into this layout. Never close Lantern Home.
 
 Both readouts stay within their pane. Use Up/Down or Page Up/Page Down to
-scroll. Press q to close a readout. A later open restores the watcher.
+scroll. Press q to close a readout. A later open restores the watcher. It also
+replaces a watcher still running code from before an update.
 
 ### Plan Usage
 
@@ -627,7 +628,9 @@ the usage pane. Use `refresh` for the shared cache. Include plans with an open
 agent tab in any workspace on this Herdr server. Idle and Done tabs count.
 Field Status Keep visibility does not select usage plans. Group by verified
 provider and account for collection. Display one table row per service.
-Show Service, Session left, Week left, and Week resets. Allowances use percentages.
+Show Service, Session left, Week left, and Week resets. When a service has saved
+usage resets, Resets and Expires columns appear (a note in narrow panes). Never
+spend a reset. Allowances use percentages.
 Weekly resets use local time for the limit that sets the weekly percentage.
 Claude uses its total weekly reset when total and model limits have the same
 percentage. Other tied limits with different reset times show Varies. Missing or expired times
@@ -653,15 +656,17 @@ its own service. Never count it as OpenAI.
 No quota read sends a model prompt or answers an agent's approval dialog.
 Windows lacks the process environment needed for open Codex, Antigravity,
 and Fugu tabs. The configured Fugu profile read works without process inspection.
-Claude and Grok on Windows show Dependency unavailable.
+Claude and Grok on Windows say CodexBar has no Windows build.
 
 The private cache keeps each allowance's percentage, reset time, source, and age.
 Values become stale after 120 seconds. A past reset does not prove a full
 allowance. Missing access or a failed read must
 stay visible. The shared collector scans every five seconds and reads usage
 every 60 seconds. It does not send prompts or start model turns. Do not
-answer another agent's approval dialog to collect usage. Missing CodexBar
-requires the explicit `sh "$HERDR_PLUGIN_ROOT/bin/plan-usage" install` command.
+answer another agent's approval dialog to collect usage. The watcher
+installs the pinned CodexBar once by itself. When a row says to ask Lantern to
+install CodexBar, run `sh "$HERDR_PLUGIN_ROOT/bin/plan-usage" install` and
+report its output.
 Do not change browser cookies or the user's CodexBar configuration.
 
 Ground rules:

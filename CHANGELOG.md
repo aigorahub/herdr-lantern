@@ -2,6 +2,78 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [0.17.12] - 2026-10-27
+
+### Fixed
+
+- Claude model routing and preflight work again on Claude Code 2.1.311 and
+  other builds that exit before a piped `claude --help` finishes writing.
+  Before, both stopped with "Claude help has no model choices" because the
+  pipe cut off before `--model` appeared. Lantern now writes `claude --help`
+  to a temporary file instead of a pipe, cleans it up right after, and retries
+  when the output is still incomplete. Reported by @pacificera.
+- Linux CI runs on Ubuntu 24.04 again. GitHub's `ubuntu-latest` moved to
+  Ubuntu 26.04, which has no Python 3.9 for the oldest-Python job, and the
+  smoke test now waits for the background update check to finish before it
+  removes its launch state ([#71](https://github.com/aigorahub/herdr-lantern/pull/71)).
+
+## [0.17.11] - 2026-10-16
+
+### Added
+
+- Plan Usage shows saved usage resets. When a service has any, Resets and
+  Expires columns show how many and when the oldest expires, in local time.
+  Codex reports its reset credits in the usage read Lantern already makes.
+  Services that don't report resets show --. Narrow panes add one line under
+  the table instead. Lantern never spends a reset.
+
+## [0.17.10] - 2026-10-16
+
+### Fixed
+
+- Claude tabs keep their Plan Usage reading after Claude's updater deletes
+  the version they run. Before, every such tab showed Account unknown until it
+  restarted. Lantern uses the version that `~/.local/bin/claude` starts now,
+  and only from the same `claude/versions` folder.
+- Lantern's own chat tab counts for the Claude row. It runs Claude in place of
+  a shell, and that process was never read.
+- Plan Usage installs the pinned CodexBar CLI once by itself when a Claude or
+  Grok row needs it, with the same digest check as `plan-usage install`. Notes
+  now say what is missing and what to do: "CodexBar 0.74.0 not found. Ask
+  Lantern to install it", that CodexBar has no Windows build, or that
+  `LANTERN_CODEXBAR_BIN` is not CodexBar 0.74.0, instead of "Dependency
+  unavailable".
+- A Fugu profile with no API key says "Sakana API key missing" instead of
+  "Sign in required".
+- Model routing and seating run on Apple's Python 3.9 again. The OpenAI and
+  Fugu usage rows say they need Python 3.11 there instead of showing Account
+  unknown, and a false Fugu row no longer appears. The README lists
+  what Lantern needs, and CI runs the test suites on Python 3.9.
+- The Plan Usage watcher no longer exits when Herdr is slow to answer its
+  status check, as on a machine short of memory. The pane says the Herdr
+  status check timed out and recovers on the next pass. When a scan's own
+  status check times out, cached limits show as waiting for fresh values.
+  `refresh` exits with a short error instead of a traceback.
+- A usage read whose cleanup times out now counts as a failed read and is
+  retried later. Before, it also ended the watcher.
+
+## [0.17.9] - 2026-10-13
+
+### Fixed
+
+- Plan Usage reads Claude tabs from the native installer. Those tabs run a
+  versioned file such as `~/.local/share/claude/versions/2.1.292` and showed
+  Account unknown. Lantern accepts that file only inside a `claude/versions`
+  folder with a version number name. Other executable names still show
+  Account unknown.
+- `sh bin/plan-usage install` works with Homebrew Python, which ships without
+  CA certificates. Downloads and Fugu reads use the system's certificates in
+  that case, then certifi. Verification stays on, and the release digest check
+  is unchanged.
+- Reopening Lantern or running `pane` after an update replaces a Field Status
+  or Plan Usage watcher still running the old code. Before, the old watcher
+  kept running and held the usage collector.
+
 ## [0.17.8] - 2026-10-11
 
 ### Fixed

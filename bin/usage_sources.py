@@ -1,14 +1,19 @@
 """Read plan limits from the login profile of an open agent. No model turns."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import platform
 import queue
 import re
 import shlex
 import shutil
 import stat
+import subprocess
+import tarfile
+import tempfile
 import threading
 import time
 import urllib.error
@@ -20,6 +25,16 @@ import field_status as field
 import usage_runtime as runtime
 
 VERSION = "0.74.0"
+# Plan Usage notes say what is missing and what to do about it.
+CODEXBAR_MISSING = f"CodexBar {VERSION} not found. Ask Lantern to install it"
+CODEXBAR_SETTING = f"LANTERN_CODEXBAR_BIN is not CodexBar {VERSION}"
+CODEXBAR_WINDOWS = "CodexBar has no Windows build"
+CODEXBAR_PLATFORM = "CodexBar has no build for this system"
+DEPENDENCY_STATES = (CODEXBAR_MISSING, CODEXBAR_SETTING, CODEXBAR_WINDOWS, CODEXBAR_PLATFORM)
+FUGU_KEY_MISSING = "Sakana API key missing"
+NEEDS_PYTHON = "Needs Python 3.11 or newer"
+AUTO_INSTALL_LOCK = threading.Lock()
+AUTO_INSTALL_TRIED: set[str] = set()
 SUPPORTED = {"codex", "claude", "grok", "agy", "fugu"}
 SELECTORS = {"codex": ["CODEX_HOME"], "claude": ["CLAUDE_CONFIG_DIR"], "grok": ["GROK_HOME"], "agy": []}
 OVERRIDES = {
@@ -109,7 +124,14 @@ def codex_settings(root: Path, profile: list[str], optional: bool = False) -> tu
         if profile:
             raise SourceError("Limits unavailable" if profile == ["fugu"] else "Account unknown")
         return {}, {}, {}, files
-    import tomllib
+    try:
+        import tomllib
+    except ImportError:
+        # Codex settings are TOML, which Python reads from 3.11 on. Without
+        # them a configured Fugu profile is only known from its own file.
+        if optional and not (profile and (root / f"{profile[0]}.config.toml").is_file()):
+            return None
+        raise SourceError(NEEDS_PYTHON) from None
     try:
         data = tomllib.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
     except ValueError:
@@ -212,6 +234,30 @@ def configured_fugu_scope(env: dict[str, str]) -> dict | None:
         raise SourceError("Account unknown", provider="fugu") from None
 
 
+def native_claude(executable: str) -> bool:
+    """Claude's native installer runs claude/versions/<version> through a claude symlink."""
+    path = Path(executable)
+    return (path.parent.name == "versions" and path.parent.parent.name == "claude"
+            and re.fullmatch(r"\d+\.\d+\.\d+", path.name) is not None)
+
+
+def current_native_claude(home: str, deleted: str) -> str:
+    """The version Claude's launcher starts now, for a tab whose version was deleted.
+
+    Claude's updater removes old versions while tabs still run them. Lantern
+    runs the tab's Claude to read usage, so it uses the version the launcher
+    link in the tab's home points to, and only from the same versions folder.
+    """
+    try:
+        current = (Path(home) / ".local" / "bin" / "claude").resolve(strict=True)
+        folder = Path(deleted).parent.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise SourceError("Account unknown") from None
+    if current.parent != folder or not native_claude(str(current)):
+        raise SourceError("Account unknown")
+    return str(current)
+
+
 def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     home = env.get("HOME", "")
     argv = process.get("argv")
@@ -224,13 +270,16 @@ def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     # Keep only absolute executable search paths. Never use a shell alias.
     path = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep) if Path(p).is_absolute() and p)
     executable = process.get("executable")
+    if (provider == "claude" and executable and Path(executable).is_absolute()
+            and native_claude(executable) and not os.path.exists(executable)):
+        executable = current_native_claude(home, executable)
     if (not executable or not Path(executable).is_absolute()
             or (provider != "grok" and not os.access(executable, os.X_OK))):
         raise SourceError("Account unknown")
     basename = Path(executable).name.lower()
     expected = {"codex": r"codex(?:\.exe)?", "claude": r"claude(?:\.exe)?", "grok": r"grok(?:[-.].*)?",
                 "agy": r"agy(?:\.exe)?"}
-    if not re.fullmatch(expected[provider], basename):
+    if not re.fullmatch(expected[provider], basename) and not (provider == "claude" and native_claude(executable)):
         raise SourceError("Account unknown")
     native = {"HOME": home, "PATH": path}
     for key in ("USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "TMP", "TEMP", "SystemRoot", "COMSPEC", "USERPROFILE", "APPDATA", "LOCALAPPDATA"):
@@ -322,7 +371,7 @@ def fugu_scope(native: dict, env: dict, root: Path, files: list[Path], provider_
         raise SourceError("Account unknown", provider="fugu")
     credential = env.get(key_name)
     if not credential:
-        raise SourceError("Sign in required", provider="fugu")
+        raise SourceError(FUGU_KEY_MISSING, provider="fugu")
     scope = {"provider": "fugu", "env": native, "api_key": credential,
              "files": [str(path) for path in files]}
     scope["stamp"] = current_stamp(scope)
@@ -357,7 +406,8 @@ def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
+                                         urllib.request.HTTPSHandler(context=runtime.tls_context()))
     request = urllib.request.Request("https://api.sakana.ai/v1/usage",
                                      headers={"Authorization": "Bearer " + scope["api_key"],
                                               "Accept": "application/json"})
@@ -445,6 +495,28 @@ def cadence(minutes: object, fallback: str) -> str:
     return {300: "5 hours", 10080: "Weekly", 43200: "Monthly"}.get(number(minutes), fallback)
 
 
+def parse_reset_credits(summary: object) -> dict | None:
+    """Codex's saved usage resets: how many, and when the oldest expires.
+
+    The credit list can be left out or capped, so the oldest expiry is known
+    only when every available credit is listed. Never spends a reset.
+    """
+    if not isinstance(summary, dict):
+        return None
+    count = summary.get("availableCount")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        return None
+    listed = summary.get("credits")
+    available = ([credit for credit in listed if isinstance(credit, dict) and credit.get("status") == "available"]
+                 if isinstance(listed, list) else [])
+    known = len(available) >= count
+    raw = [credit.get("expiresAt") for credit in available] if known else []
+    dated = [epoch(value) for value in raw if value is not None]
+    if None in dated:
+        known, dated = False, []
+    return {"count": count, "expiry_known": known, "expires_at": min(dated) if dated else None}
+
+
 def parse_codex(account: dict, limits: dict, observed: float) -> dict:
     identity = limits.get("accountId")
     if account.get("type") != "chatgpt" or not isinstance(identity, str) or not identity.strip():
@@ -473,8 +545,12 @@ def parse_codex(account: dict, limits: dict, observed: float) -> dict:
             credits.append({"label": f"{pool_id} credits", "balance": balance, "unit": "credits"})
     if not windows:
         raise SourceError("Limits unavailable")
-    return {"account": runtime.digest(["codex", identity]), "provider": "codex", "plan": field.clean(plan or "Plan unknown"),
-            "windows": windows, "credits": credits, "observed_at": observed, "source": "account/rateLimits/read"}
+    result = {"account": runtime.digest(["codex", identity]), "provider": "codex", "plan": field.clean(plan or "Plan unknown"),
+              "windows": windows, "credits": credits, "observed_at": observed, "source": "account/rateLimits/read"}
+    resets = parse_reset_credits(limits.get("rateLimitResetCredits"))
+    if resets is not None:
+        result["resets"] = resets
+    return result
 
 
 def parse_codexbar(payload: object, provider: str, observed: float, auth: dict | None = None) -> dict:
@@ -611,17 +687,136 @@ def tools_dir(state: Path) -> Path:
 
 def resolve_codexbar(state: Path, deadline: float, cancel: threading.Event) -> str:
     if os.name == "nt":
-        raise SourceError("Dependency unavailable")
+        raise SourceError(CODEXBAR_WINDOWS)
     explicit = os.environ.get("LANTERN_CODEXBAR_BIN")
     candidates = [explicit] if explicit is not None else [str(tools_dir(state) / "CodexBarCLI"), shutil.which("codexbar")]
     for candidate in candidates:
-        if not candidate or not Path(candidate).is_absolute() or not os.access(candidate, os.X_OK):
-            continue
-        code, output = runtime.capture([candidate, "--version"], {"PATH": os.environ.get("PATH", "")},
-                                       min(deadline, time.monotonic() + 3), cancel)
-        if code == 0 and re.search(rb'\bCodexBar 0\.74\.0\b', output):
+        if usable_codexbar(candidate, deadline, cancel):
             return candidate
-    raise SourceError("Dependency unavailable")
+    if explicit is not None:
+        raise SourceError(CODEXBAR_SETTING)
+    codexbar_asset()
+    return auto_install(state, deadline, cancel)
+
+
+def usable_codexbar(candidate: str | None, deadline: float, cancel: threading.Event) -> bool:
+    if not candidate or not Path(candidate).is_absolute() or not os.access(candidate, os.X_OK):
+        return False
+    code, output = runtime.capture([candidate, "--version"], {"PATH": os.environ.get("PATH", "")},
+                                   min(deadline, time.monotonic() + 3), cancel)
+    return code == 0 and re.search(rb'\bCodexBar 0\.74\.0\b', output) is not None
+
+
+def auto_install(state: Path, deadline: float, cancel: threading.Event) -> str:
+    """Install the pinned CodexBar once per run, the way `plan-usage install` does.
+
+    A new machine has no CodexBar yet. One read installs it while the others
+    wait and then use it. After a failed try the note asks for the explicit
+    install, which shows the error.
+    """
+    tool = str(tools_dir(state) / "CodexBarCLI")
+    with AUTO_INSTALL_LOCK:
+        # A read that waited while the watcher stopped starts no download.
+        if cancel.is_set():
+            raise SourceError(CODEXBAR_MISSING)
+        if usable_codexbar(tool, deadline, cancel):
+            return tool
+        if tool in AUTO_INSTALL_TRIED:
+            raise SourceError(CODEXBAR_MISSING)
+        AUTO_INSTALL_TRIED.add(tool)
+        try:
+            return str(install(state, cancel))
+        except Exception:
+            # Any failure leaves CodexBar missing. A stopped watcher's try doesn't count.
+            if cancel.is_set():
+                AUTO_INSTALL_TRIED.discard(tool)
+            raise SourceError(CODEXBAR_MISSING) from None
+
+
+ASSETS = {
+    "macos-arm64": "9aab1b9229f5d1d77de21b99aa887a60a47921bfd9b66e4b941a0e8a9d6e38e8",
+    "macos-x86_64": "4d239b7412683f1eb529d55b851fe922bb462527850b767d6c9b89ba14be3fdb",
+    "linux-aarch64": "46dc3b259b1df48b3fd6f337c754dd60dbece6772d7840cdc9514ab4977a0007",
+    "linux-x86_64": "fac8b2c474e4e37a2b067224437cb182693411ebf639441cd0facbb57bf086b1",
+    "linux-musl-aarch64": "9dab39f1197d9ccc501d1f678234cf15f94e8b84aa7349ba87103a5866dd793b",
+    "linux-musl-x86_64": "e7b0bdc6d6931a4e6fd5ce4037e1125a073ec6cf38cd72f1b3bd8aeecfde51f5",
+}
+
+
+def codexbar_asset() -> str:
+    """The CodexBar release asset for this system."""
+    system, machine = platform.system(), platform.machine().lower()
+    arch = {"arm64": "aarch64", "aarch64": "aarch64", "amd64": "x86_64", "x86_64": "x86_64"}.get(machine)
+    if system == "Darwin" and arch:
+        return "macos-" + ("arm64" if arch == "aarch64" else arch)
+    if system == "Linux" and arch:
+        musl = bool(list(Path("/lib").glob("ld-musl-*.so.1"))) or platform.libc_ver()[0] == "musl"
+        return ("linux-musl-" if musl else "linux-") + arch
+    raise SourceError(CODEXBAR_PLATFORM)
+
+
+def install(state: Path, cancel: threading.Event | None = None) -> Path:
+    """Install the pinned CodexBar CLI into private Lantern state and return its path."""
+    asset = codexbar_asset()
+    target = tools_dir(state)
+    runtime.private_dir(target.parent)
+    lock = runtime.FileLock(target.parent / "install.lock")
+    try:
+        if not lock.acquire():
+            raise RuntimeError("CodexBar install is in progress")
+        if target.exists():
+            if target.is_symlink():
+                raise RuntimeError("CodexBar install path is a symlink")
+            tool = target / "CodexBarCLI"
+            code, output = runtime.capture([str(tool), "--version"], {"PATH": os.environ.get("PATH", "")},
+                                           time.monotonic() + 3)
+            if code == 0 and b"CodexBar 0.74.0" in output:
+                return tool
+            raise RuntimeError("Private CodexBar install has the wrong version")
+        with tempfile.TemporaryDirectory(prefix=".install-", dir=target.parent) as temporary:
+            root = Path(temporary)
+            archive = root / "release.tar.gz"
+            url = f"https://github.com/steipete/CodexBar/releases/download/v{VERSION}/CodexBarCLI-v{VERSION}-{asset}.tar.gz"
+            digest = hashlib.sha256()
+            with urllib.request.urlopen(url, timeout=30, context=runtime.tls_context()) as response, archive.open("wb") as stream:
+                total = 0
+                while chunk := response.read(65536):
+                    if cancel and cancel.is_set():
+                        raise RuntimeError("CodexBar install was stopped")
+                    total += len(chunk)
+                    if total > 100 * 1024 * 1024:
+                        raise RuntimeError("CodexBar release is too large")
+                    digest.update(chunk)
+                    stream.write(chunk)
+            if digest.hexdigest() != ASSETS[asset]:
+                raise RuntimeError("CodexBar release digest mismatch")
+            unpacked = runtime.private_dir(root / "files")
+            with tarfile.open(archive) as tar:
+                total = 0
+                for member in tar.getmembers():
+                    path = unpacked / member.name
+                    if not path.resolve().is_relative_to(unpacked.resolve()):
+                        raise RuntimeError("CodexBar archive path is invalid")
+                    if member.isdir():
+                        path.mkdir(parents=True, exist_ok=True)
+                    elif member.isfile():
+                        total += member.size
+                        if total > 200 * 1024 * 1024:
+                            raise RuntimeError("CodexBar archive is too large")
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        with tar.extractfile(member) as source, path.open("wb") as output:
+                            shutil.copyfileobj(source, output)
+                        path.chmod(0o700 if member.mode & 0o111 else 0o600)
+                    elif not member.issym() and not member.islnk():
+                        raise RuntimeError("CodexBar archive entry is invalid")
+            cli = unpacked / "CodexBarCLI"
+            code, output = runtime.capture([str(cli), "--version"], {"PATH": os.environ.get("PATH", "")}, time.monotonic() + 3)
+            if code or b"CodexBar 0.74.0" not in output:
+                raise RuntimeError("CodexBar release version mismatch")
+            os.replace(unpacked, target)
+            return target / "CodexBarCLI"
+    finally:
+        lock.close()
 
 
 def auth_status(scope: dict, deadline: float, cancel: threading.Event) -> dict:
@@ -678,5 +873,7 @@ def fetch(scope: dict, state: Path, cancel: threading.Event) -> dict:
         return result
     except SourceError:
         raise
-    except (OSError, ValueError, RuntimeError, TypeError, KeyError, AttributeError):
+    # Stopping a probe can time out on a busy machine. That is a failed read,
+    # not a reason for the watcher to exit.
+    except (OSError, ValueError, RuntimeError, TypeError, KeyError, AttributeError, subprocess.SubprocessError):
         raise SourceError("Last update failed") from None

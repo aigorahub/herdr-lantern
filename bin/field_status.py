@@ -127,7 +127,7 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
     command = herdr_command(binary, args)
     env = herdr_environment(binary)
     if args[:2] in (["pane", "run"], ["pane", "split"], ["pane", "move"],
-                    ["pane", "rename"], ["tab", "create"]):
+                    ["pane", "rename"], ["pane", "send-keys"], ["tab", "create"]):
         env["HERDR_HELPER_OK"] = "1"
     try:
         proc = subprocess.run(command, capture_output=True, text=True,
@@ -137,9 +137,9 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} unavailable: {exc}") from exc
     if proc.returncode:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} failed ({proc.returncode}): {clean(proc.stderr, 180)}")
-    if args[:2] == ["pane", "run"] and not proc.stdout.strip():
-        # The installed CLI returns no body after a successful submission.
-        # Callers still confirm the exact watcher before claiming success.
+    if args[:2] in (["pane", "run"], ["pane", "send-keys"]) and not proc.stdout.strip():
+        # The installed CLI returns no body after a successful submission or
+        # key press. Callers still confirm the pane's processes afterward.
         return {}
     try:
         result = json.loads(proc.stdout)["result"]
@@ -449,6 +449,8 @@ def main() -> int:
         if args.command == "watch":
             if args.interval <= 0:
                 parser.error("--interval must be positive")
+            from lantern_views import record_watcher
+            record_watcher(state_dir, "field")
             old_body = None
             with Readout() as screen:
                 while not screen.stop.is_set():

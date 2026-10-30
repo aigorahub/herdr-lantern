@@ -2704,6 +2704,18 @@ env -i \
     HERDR_BIN_PATH="$argv_bin/herdr" \
     sh "$root/launch.sh" </dev/null >/dev/null 2>&1 ||
     fail "launch.sh should still start with no interpreter on PATH"
+# launch.sh leaves the version check running in the background after it
+# execs the chat, and nothing here reads its stdout to EOF. Wait for that
+# writer to replace the placeholder, or the rm -rf below can race its
+# temp file and mv into the workdir.
+update_wait=0
+while grep -q 'had not finished by light-up' "$stale_workdir/update.txt" 2>/dev/null ||
+    ls "$stale_workdir"/update.txt.* >/dev/null 2>&1; do
+    update_wait=$((update_wait + 1))
+    [ "$update_wait" -le 20 ] ||
+        fail "the background update check never replaced update.txt"
+    sleep 1
+done
 for stale_file in goals-floor elves-floor; do
     if grep -q 'stale-' "$stale_workdir/$stale_file.txt"; then
         fail "launch.sh left last run's $stale_file.txt in place"

@@ -12,6 +12,7 @@ import sys
 
 from dataclasses import dataclass
 
+import model_catalog
 from model_catalog import claude_model_catalog, listed_codex_models, model_words
 
 
@@ -45,7 +46,9 @@ def fail(message: str) -> None:
     raise RouteError(message)
 
 
-def run_catalog(command: list[str], *, input_text: str | None = None) -> str:
+def run_catalog(
+    command: list[str], *, input_text: str | None = None, stdout_via_file: bool = False
+) -> str:
     command_name = command[0]
     executable = shutil.which(command_name)
     if os.name == "nt" and executable is not None:
@@ -65,21 +68,26 @@ def run_catalog(command: list[str], *, input_text: str | None = None) -> str:
     if os.name == "nt" and executable.lower().endswith((".cmd", ".bat")):
         command_line = subprocess.list2cmdline(process_command)
         process_command = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line]
-    try:
-        result = subprocess.run(
+
+    def invoke(stdout):
+        return subprocess.run(
             process_command,
             check=True,
             input=input_text,
-            stdout=subprocess.PIPE,
+            stdout=stdout,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=30,
         )
+
+    try:
+        if stdout_via_file:
+            return model_catalog.capture_to_file(invoke)
+        return invoke(subprocess.PIPE).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         fail(f"catalog unavailable: {command_name} ({error})")
-    return result.stdout
 
 
 def words(value: str) -> list[str]:

@@ -1,7 +1,10 @@
 """Shared parsing for model routes and availability checks."""
+from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 
 
 def listed_codex_models(text: str) -> list[dict[str, object]]:
@@ -60,6 +63,10 @@ def model_words(value: str) -> list[str]:
     return re.findall(r"\d+(?:\.\d+)*|[a-z][a-z0-9]*", value)
 
 
+class TruncatedHelpError(ValueError):
+    """Claude help ended before a required option; usually a cut-off capture."""
+
+
 def parse_claude_capabilities(help_text: str) -> tuple[set[str], set[str]]:
     def option(name: str, argument: str) -> str:
         match = re.search(
@@ -68,7 +75,7 @@ def parse_claude_capabilities(help_text: str) -> tuple[set[str], set[str]]:
             re.MULTILINE | re.DOTALL,
         )
         if match is None:
-            raise ValueError(f"Claude help has no {name} choices")
+            raise TruncatedHelpError(f"Claude help has no {name} choices")
         return match.group(0)
 
     models = {value.lower() for value in re.findall(r"['\"]([a-zA-Z0-9.-]+)['\"]", option("model", "model"))}
@@ -79,13 +86,49 @@ def parse_claude_capabilities(help_text: str) -> tuple[set[str], set[str]]:
     return models, efforts
 
 
+CLAUDE_HELP_ATTEMPTS = 3
+
+
+def capture_to_file(invoke) -> str:
+    fd, path = tempfile.mkstemp(prefix="lantern-stdout-", suffix=".txt")
+    try:
+        handle = os.fdopen(fd, "wb")
+        fd = -1
+        with handle:
+            invoke(handle)
+        with open(path, encoding="utf-8", errors="replace") as reader:
+            return reader.read()
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(path)
+        except OSError:
+            # On Windows a timed-out child may still hold the file open, so
+            # unlink can fail; ignore that deliberately.
+            pass
+
+
 def claude_model_catalog(run) -> dict[str, tuple[str, set[str]]]:
     return claude_initialization(run)[0]
 
 
 def claude_initialization(run) -> tuple[dict[str, tuple[str, set[str]]], str | None]:
     # Help supplies grammar and alias examples, not a model allowlist.
-    aliases, _ = parse_claude_capabilities(run(["claude", "--help"]))
+    # Claude Code can exit before a pipe drains --help, so capture via a
+    # regular file and retry truncated output.
+    aliases: set[str] = set()
+    for attempt in range(CLAUDE_HELP_ATTEMPTS):
+        help_text = run(["claude", "--help"], stdout_via_file=True)
+        try:
+            aliases, _ = parse_claude_capabilities(help_text)
+            break
+        except TruncatedHelpError:
+            if attempt + 1 == CLAUDE_HELP_ATTEMPTS:
+                raise
     request_id = "lantern-model-catalog"
     request = {"type": "control_request", "request_id": request_id,
                "request": {"subtype": "initialize"}}

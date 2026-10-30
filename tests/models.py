@@ -63,7 +63,7 @@ def claude_catalog_with_badged_opus():
     return json.dumps(catalog)
 
 
-def claude_read(command, *, input_text=None):
+def claude_read(command, *, input_text=None, **_):
     if command == ["claude", "--help"]:
         return CLAUDE_HELP.replace("claude-fable-5-1", "claude-fable-5")
     return CLAUDE_CATALOG
@@ -158,7 +158,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                  "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
             ]}}})
 
-        def read(command, *, input_text=None):
+        def read(command, *, input_text=None, **_):
             if command == ["claude", "--help"]:
                 return CLAUDE_HELP
             return catalog
@@ -298,7 +298,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
     def test_claude_catalog_normalizes_badged_opus_identity(self):
         badged_catalog = claude_catalog_with_badged_opus()
 
-        def badged_read(command, *, input_text=None):
+        def badged_read(command, *, input_text=None, **_):
             if command == ["claude", "--help"]:
                 return CLAUDE_HELP
             return badged_catalog
@@ -311,7 +311,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                 self.assertEqual(result["model"], "claude-opus-5[1m]")
                 self.assertEqual(result["argv"], ["--model", "claude-opus-5[1m]", "--effort", "high"])
 
-        def badged_run(command, *, input_text=None):
+        def badged_run(command, *, input_text=None, **_):
             if command == ["claude", "/usage", "-p", "--output-format", "json"]:
                 return json.dumps({"result": "Current session: 0% used"})
             return badged_read(command, input_text=input_text)
@@ -338,7 +338,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             self.assertEqual(self.check("codex", "gpt-6-invented", "high")[0], 3)
 
     def test_fable_51_quota_and_substitute(self):
-        def run(command, *, input_text=None):
+        def run(command, *, input_text=None, **_):
             if command != ["claude", "/usage", "-p", "--output-format", "json"]:
                 return claude_read(command, input_text=input_text)
             return json.dumps({"result": "Current session: 0% used\nCurrent week (Fable 5.1): 100% used"})
@@ -385,7 +385,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                 else:
                     catalog["response"]["response"]["account"] = {"tokenSource": token_source}
 
-                def run(command, *, input_text=None, catalog=catalog, usage=usage):
+                def run(command, *, input_text=None, catalog=catalog, usage=usage, **_):
                     if command == ["claude", "--help"]:
                         return CLAUDE_HELP
                     if command == ["claude", "/usage", "-p", "--output-format", "json"]:
@@ -418,7 +418,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             with self.subTest(account=account):
                 catalog = json.loads(CLAUDE_CATALOG)
                 catalog["response"]["response"]["account"] = account
-                def run(command, *, input_text=None):
+                def run(command, *, input_text=None, **_):
                     if command == ["claude", "--help"]:
                         return CLAUDE_HELP
                     if command == ["claude", "/usage", "-p", "--output-format", "json"]:
@@ -492,6 +492,233 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             self.assertFalse(preflight.claude_cost_usage(result + "\n" + line))
         empty = "Prompt cache (main): 0 requests · 0% of input tokens from cache · no misses · no prompt caching reported by the API"
         self.assertTrue(preflight.claude_cost_usage(result + "\n" + empty))
+
+    def test_claude_help_uses_regular_file_when_pipe_truncates(self):
+        script = "\n".join((
+            "import os, stat, sys",
+            "from pathlib import Path",
+            "here = Path(__file__).resolve().parent",
+            "if sys.argv[1:] == ['--help']:",
+            "    if os.environ.get('FAKE_CLAUDE_FAIL_HELP') == '1':",
+            "        raise SystemExit(2)",
+            "    prefix = 'Usage: claude [options]\\n  --effort <level>  Effort level (low, medium, high, xhigh, max)\\n'",
+            "    padding = ''.join(",
+            "        f'  --option-{index:04d} <value>  Option description text for flag padding\\n'",
+            "        for index in range(290)",
+            "    )",
+            "    suffix = (",
+            "        \"  --model <model>   Use 'fable', 'opus', or 'sonnet', or 'claude-fable-5-1'.\\n\"",
+            "        \"  -n, --name <name> A name such as 'not-a-model'\\n\"",
+            "    )",
+            "    full = (prefix + padding + suffix).encode('utf-8')",
+            "    once = os.environ.get('FAKE_CLAUDE_TRUNCATE_ONCE')",
+            "    if once and not Path(once).exists():",
+            "        Path(once).write_text('1', encoding='utf-8')",
+            "        data = full[:8190]",
+            "    else:",
+            "        data = full if stat.S_ISREG(os.fstat(1).st_mode) else full[:8190]",
+            "    sys.stdout.buffer.write(data)",
+            "    sys.stdout.buffer.flush()",
+            "    raise SystemExit(0)",
+            "if '--input-format' in sys.argv:",
+            "    _ = sys.stdin.readline()",
+            "    sys.stdout.write((here / 'claude-models.json').read_text(encoding='utf-8'))",
+            "    raise SystemExit(0)",
+            "if sys.argv[1:] == ['/usage', '-p', '--output-format', 'json']:",
+            "    sys.stdout.write('{\"result\":\"Current session: 0% used\"}\\n')",
+            "    raise SystemExit(0)",
+            "raise SystemExit(2)",
+        ))
+        with tempfile.TemporaryDirectory() as root:
+            bin_dir = Path(root) / "bin"
+            tmp_dir = Path(root) / "tmp"
+            bin_dir.mkdir()
+            tmp_dir.mkdir()
+            (bin_dir / "fake_claude.py").write_text(script, encoding="utf-8")
+            (bin_dir / "claude-models.json").write_text(CLAUDE_CATALOG, encoding="utf-8")
+            if os.name == "nt":
+                (bin_dir / "claude.cmd").write_text(
+                    '@echo off\r\n"%FAKE_CLAUDE_PYTHON%" "%~dp0fake_claude.py" %*\r\n',
+                    encoding="utf-8",
+                )
+            else:
+                posix_shim = bin_dir / "claude"
+                posix_shim.write_text(
+                    '#!/bin/sh\nexec "$FAKE_CLAUDE_PYTHON" "$(dirname "$0")/fake_claude.py" "$@"\n',
+                    encoding="utf-8",
+                )
+                posix_shim.chmod(0o755)
+            env = {
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                "FAKE_CLAUDE_PYTHON": sys.executable,
+            }
+            with patch.dict(os.environ, env), patch.object(tempfile, "tempdir", str(tmp_dir)):
+                piped = subprocess.run(
+                    [sys.executable, str(bin_dir / "fake_claude.py"), "--help"],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertEqual(len(piped.stdout), 8190)
+                self.assertNotIn(b"--model", piped.stdout)
+
+                routed = route.claude_route("opus high")
+                self.assertEqual(routed["model"], "claude-opus-5")
+                self.assertEqual(routed["argv"], ["--model", "claude-opus-5", "--effort", "high"])
+                self.assertEqual(list(tmp_dir.iterdir()), [])
+
+                code, checked = self.check("claude", "opus", "high")
+                self.assertEqual(code, 0)
+                self.assertTrue(checked["available"])
+                self.assertEqual(list(tmp_dir.iterdir()), [])
+
+                once_marker = Path(root) / "truncated-once"
+                with patch.dict(os.environ, {"FAKE_CLAUDE_TRUNCATE_ONCE": str(once_marker)}):
+                    retried = route.claude_route("opus high")
+                self.assertEqual(retried["model"], "claude-opus-5")
+                self.assertTrue(once_marker.exists())
+                self.assertEqual(list(tmp_dir.iterdir()), [])
+
+                with patch.dict(os.environ, {"FAKE_CLAUDE_FAIL_HELP": "1"}):
+                    with self.assertRaisesRegex(route.RouteError, "catalog unavailable: claude"):
+                        route.claude_route("opus high")
+                    self.assertEqual(list(tmp_dir.iterdir()), [])
+                    with self.assertRaisesRegex(preflight.CheckError, "availability check failed: claude"):
+                        self.check("claude", "opus", "high")
+                    self.assertEqual(list(tmp_dir.iterdir()), [])
+
+    def test_claude_help_retries_truncated_output(self):
+        truncated_model = (
+            "Usage: claude [options]\n"
+            "  --effort <level>  Effort level (low, medium, high, xhigh, max)\n"
+            + "".join(f"  --flag-{index:03d} <v>\n" for index in range(400))
+        )
+        truncated_effort = (
+            "Usage: claude [options]\n"
+            "  --model <model>   Use 'fable', 'opus', or 'sonnet', or 'claude-fable-5-1'.\n"
+        )
+
+        route_replies = iter([truncated_model, CLAUDE_HELP])
+        route_file_flags = []
+
+        def route_read(command, *, input_text=None, stdout_via_file=False):
+            route_file_flags.append((command[1], stdout_via_file))
+            if command == ["claude", "--help"]:
+                return next(route_replies)
+            return CLAUDE_CATALOG
+
+        with patch.object(route, "run_catalog", side_effect=route_read):
+            result = route.claude_route("opus high")
+            self.assertEqual(result["argv"], ["--model", "claude-opus-5", "--effort", "high"])
+        self.assertEqual(
+            route_file_flags,
+            [("--help", True), ("--help", True), ("--safe-mode", False)],
+        )
+
+        preflight_replies = iter([truncated_effort, truncated_model, CLAUDE_HELP])
+
+        def preflight_read(command, *, input_text=None, stdout_via_file=False):
+            if command == ["claude", "--help"]:
+                self.assertTrue(stdout_via_file)
+                return next(preflight_replies)
+            self.assertFalse(stdout_via_file)
+            if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                return json.dumps({"result": "Current session: 0% used"})
+            return CLAUDE_CATALOG
+
+        with patch.object(preflight, "run", side_effect=preflight_read):
+            code, payload = self.check("claude", "opus", "high")
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["available"])
+
+        direct_replies = iter([truncated_model, CLAUDE_HELP])
+
+        def plain_run(command, *, input_text=None, stdout_via_file=False):
+            if command == ["claude", "--help"]:
+                self.assertTrue(stdout_via_file)
+                return next(direct_replies)
+            return CLAUDE_CATALOG
+
+        catalog = route.claude_model_catalog(plain_run)
+        self.assertEqual(catalog["opus"][0], "claude-opus-5")
+
+    def test_claude_help_stops_after_max_truncated_attempts(self):
+        truncated_model = (
+            "Usage: claude [options]\n"
+            "  --effort <level>  Effort level (low, medium, high, xhigh, max)\n"
+        )
+        truncated_effort = (
+            "Usage: claude [options]\n"
+            "  --model <model>   Use 'fable', 'opus', or 'sonnet'.\n"
+        )
+        for label, truncated, expected in (
+            ("no_model", truncated_model, "Claude help has no model choices"),
+            ("no_effort", truncated_effort, "Claude help has no effort choices"),
+        ):
+            with self.subTest(case=label):
+                attempts = 0
+
+                def always_truncated(command, *, input_text=None, stdout_via_file=False, text=truncated):
+                    nonlocal attempts
+                    if command == ["claude", "--help"]:
+                        attempts += 1
+                        return text
+                    return CLAUDE_CATALOG
+
+                with patch.object(route, "run_catalog", side_effect=always_truncated):
+                    with self.assertRaisesRegex(route.RouteError, expected):
+                        route.claude_route("opus high")
+                self.assertEqual(attempts, 3)
+
+                with patch.object(preflight, "run", side_effect=always_truncated):
+                    with self.assertRaisesRegex(preflight.CheckError, expected):
+                        self.check("claude", "opus", "high")
+                self.assertEqual(attempts, 6)
+
+    def test_claude_help_does_not_retry_other_parse_errors(self):
+        malformed_help = (
+            "  --effort <level>  Effort level (none)\n"
+            "  --model <model>   Use a model without quoted aliases.\n"
+        )
+        attempts = 0
+
+        def unparseable_help(command, *, input_text=None, stdout_via_file=False):
+            nonlocal attempts
+            if command == ["claude", "--help"]:
+                attempts += 1
+                return malformed_help
+            return CLAUDE_CATALOG
+
+        with patch.object(route, "run_catalog", side_effect=unparseable_help):
+            with self.assertRaisesRegex(
+                route.RouteError, "Claude returned unparseable model or effort choices"
+            ):
+                route.claude_route("opus high")
+        self.assertEqual(attempts, 1)
+
+        with patch.object(preflight, "run", side_effect=unparseable_help):
+            with self.assertRaisesRegex(
+                preflight.CheckError, "Claude returned unparseable model or effort choices"
+            ):
+                self.check("claude", "opus", "high")
+        self.assertEqual(attempts, 2)
+
+    def test_capture_to_file_ignores_unlink_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(tempfile, "tempdir", tmp), patch.object(
+                os, "unlink", side_effect=PermissionError("locked")
+            ) as unlink:
+                self.assertEqual(
+                    route.model_catalog.capture_to_file(lambda handle: handle.write(b"ok")),
+                    "ok",
+                )
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    route.model_catalog.capture_to_file(
+                        lambda _handle: (_ for _ in ()).throw(
+                            subprocess.TimeoutExpired("claude", 30)
+                        )
+                    )
+                self.assertEqual(unlink.call_count, 2)
 
 if __name__ == "__main__":
     unittest.main()
