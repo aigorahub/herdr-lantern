@@ -1,6 +1,8 @@
 """Provider switch tests at the external CLI boundary."""
+import base64
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -18,12 +20,12 @@ class ProviderSwitch(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='lantern-switch-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.state = self.root / 'state'
+        self.state = self.root / 'state with spaces & 50% quota'
         self.log = self.root / 'commands.jsonl'
         self.fixture = self.root / 'fixture.json'
         self.fixture.write_text(json.dumps({'status': 'blocked', 'session': 'session-1', 'available': True}))
-        self.context = self.root / 'task.md'
-        self.context.write_text('Complete issue 60. Preserve the source transcript.')
+        self.context = self.root / 'task with spaces & 50% quota.md'
+        self.context.write_bytes('Complete issue 60.\r\nPreserve the source transcript.\nKeep "quotes", 50% quota, %PATH%, & and |.\nUnicode: café.\n'.encode('utf-8'))
         (self.root / 'bin').mkdir()
         fake = self.root / 'boundary.py'
         fake.write_text('''import json, os, sys
@@ -115,7 +117,15 @@ sys.exit(0 if fixture['available'] else 3)
         self.assertEqual(start[start.index('--pane') + 1], 'p2')
         self.assertIn('test-model', start)
         prompt = next(row for row in commands if row[:2] == ['agent', 'prompt'])
-        self.assertIn(self.context.read_text(), prompt[3])
+        self.assertNotIn('\n', prompt[3])
+        encoded = re.search(r'Context file path \(base64 UTF-8\): ([A-Za-z0-9+/=]+)$', prompt[3])
+        self.assertIsNotNone(encoded, prompt[3])
+        path = Path(base64.b64decode(encoded.group(1)).decode('utf-8'))
+        self.assertEqual(path.parent, self.state.resolve())
+        delivered = json.loads(path.read_text(encoding='utf-8'))['context']
+        self.assertEqual(delivered.encode('utf-8'), self.context.read_bytes())
+        if os.name != 'nt':
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertFalse(any('close' in row or 'stop' in row for row in commands))
         self.assertNotEqual(self.start(offer)[0], 0)
 

@@ -825,8 +825,9 @@ sh "$HERDR_PLUGIN_ROOT/bin/agent-switch" start --pane <pane-id> --token <offer-t
 
 The command checks the route again before it creates a tab. It refuses a
 working source agent, a changed source session, a changed configured route,
-a used offer, or an unavailable route. The task file supplies the continuation
-context. The original transcript stays in its original tab. The command does
+a used offer, or an unavailable route. The command keeps an exact private copy of the task context and sends a
+single-line file reference to the new agent. This preserves multiline text
+across Windows command wrappers. The original transcript stays in its original tab. The command does
 not send that full transcript to another provider.
 
 State uses `LANTERN_HERD_STATE_DIR`. Outside Lantern, pass `--state-dir <path>`
