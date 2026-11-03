@@ -2,6 +2,13 @@
 
 All notable changes to Lantern, by Elves are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- Add Claude status hooks to native desktop chat launches. Herdr can show
+  working, blocked, idle, and done states (issue #78).
+
 ## [0.18.0] - 2026-10-29
 
 ### Added

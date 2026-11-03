@@ -224,6 +224,13 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
         args += ["--no-subagents"]
     args += shlex.split(config.get("HELPER_EXTRA_ARGS", ""))
     if kind == "claude":
+        command = shlex.join([sys.executable, str(ROOT / "bin/agent_status.py")])
+        events = {"SessionStart": "idle", "UserPromptSubmit": "working",
+                  "PreToolUse": "working", "Notification": "blocked", "Stop": "done"}
+        hooks = {event: [{"matcher": "permission_prompt|elicitation_dialog" if event == "Notification" else "",
+                          "hooks": [{"type": "command", "command": command + " " + state}]}]
+                 for event, state in events.items()}
+        args += ["--settings", json.dumps({"hooks": hooks})]
         args += ["--append-system-prompt", prompt, "Read the native Lantern instructions and report which work needs attention. Do not change any project."]
     else:
         args += [prompt + "\nRead these instructions and report the field. Do not change any project."]
