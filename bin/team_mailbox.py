@@ -131,7 +131,11 @@ class Mailbox:
                 recipient TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL,
                 status TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL,
                 claim_until REAL, receipt TEXT, priority INTEGER NOT NULL DEFAULT 3)""")
-            self.db.execute("CREATE INDEX IF NOT EXISTS inbox ON messages(recipient,status,created_at)")
+            # Avoid the REAL timestamp key that triggers SQLITE_CORRUPT_INDEX
+            # during status updates on Windows SQLite 3.53.4. Receive sorts
+            # by priority first, so it already cannot use this index for order.
+            self.db.execute("CREATE INDEX IF NOT EXISTS inbox_recipient_status ON messages(recipient,status)")
+            self.db.execute("DROP INDEX IF EXISTS inbox")
             self.db.execute(f"PRAGMA user_version={PROTOCOL}")
 
     def close(self):

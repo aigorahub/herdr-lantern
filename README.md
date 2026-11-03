@@ -65,6 +65,13 @@ read model adapter is read only. Lantern uses `herdr-app` and `hc` to change
 native work. It uses legacy commands only for legacy sessions. Do not stop
 the old Herdr server while those sessions are connected.
 
+Claude chat launches add status hooks to their private workdir settings. They report
+idle at session start, working for prompts and tools, blocked for permission
+requests, and done when a response stops. The hooks write to the agent's
+terminal and do nothing outside Herdr. A done status means the response
+stopped; it does not prove task completion. Other helpers keep their own
+status reporting. Restart an existing Claude chat to load these hooks.
+
 Desktop readouts currently show local spaces. They omit remote app spaces
 and keep local work visible. The legacy plugin keeps its remote support.
 Use `LANTERN_CONFIG_DIR` to select another helper configuration directory.
