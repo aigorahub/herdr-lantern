@@ -275,6 +275,21 @@ class GeminiModels(unittest.TestCase):
             self.assertEqual(json.loads(marker.read_text()), command[2:] + args)
             marker.unlink()
 
+    def test_unknown_native_flags_do_not_reach_target(self):
+        fake = self.root / 'herdr-real'
+        marker = self.root / 'called'
+        fake.write_text('#!/bin/sh\ntouch "' + str(marker) + '"\n')
+        fake.chmod(0o755)
+        env = dict(os.environ, HERDR_REAL=str(fake), HERDR_HELPER_OK='1')
+        command = ['sh', str(ROOT / 'bin/herdr'), 'agent', 'start', 'test',
+                   '--kind', 'gemini', '--pane', 'fixture-pane', '--',
+                   '--model', 'gemini-3.8-flash']
+        for flag in ('--unreviewed-option', '--noModel', '--thinkingLevel=high'):
+            with self.subTest(flag=flag):
+                result = subprocess.run(command + [flag], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse(marker.exists(), 'unreviewed option must not reach Herdr')
+
     def test_duplicate_herdr_kinds_cannot_hide_gemini(self):
         fake = self.root / 'herdr-real'
         marker = self.root / 'called'

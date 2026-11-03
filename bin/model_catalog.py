@@ -184,9 +184,9 @@ def claude_initialization(run) -> tuple[dict[str, tuple[str, set[str]]], str | N
         raise ValueError(f"Claude returned an unparseable initialization catalog ({error})") from error
 
 
-# Reviewed 2026-10-28. A bounded lifecycle policy, not an account allowlist.
+# Reviewed 2026-11-02. A bounded lifecycle policy, not an account allowlist.
 # Cloud retirement dates do not establish Developer API retirement.
-GEMINI_POLICY_DATE = "2026-10-28"
+GEMINI_POLICY_DATE = "2026-11-02"
 GEMINI_CURRENT = {
     "gemini-3.1-pro-preview": {"low", "medium", "high"},
     "gemini-3.8-flash": {"low", "medium", "high"},

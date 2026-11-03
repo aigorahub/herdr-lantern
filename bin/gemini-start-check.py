@@ -10,9 +10,17 @@ VALUE_OPTIONS = {
     "--approval-mode", "--policy", "--admin-policy", "--allowed-mcp-server-names",
     "--allowed-tools", "--extensions", "-e", "--session-file",
     "--session-id", "--delete-session", "--include-directories", "--output-format", "-o",
+    "--fake-responses", "--fake-responses-non-strict", "--record-responses",
 }
 OPTIONAL_VALUE_OPTIONS = {"--resume", "-r", "--worktree", "-w"}
 BOOLEAN_SHORT_OPTIONS = {"-d", "-s", "-y", "-l", "-v", "-h"}
+BOOLEAN_LONG_OPTIONS = {
+    "--debug", "--sandbox", "--yolo", "--list-extensions", "--version", "--help",
+    "--skip-trust", "--acp", "--experimental-acp", "--list-sessions",
+    "--screen-reader", "--raw-output", "--accept-raw-output-risk",
+}
+KNOWN_LONG_OPTIONS = (VALUE_OPTIONS | OPTIONAL_VALUE_OPTIONS | BOOLEAN_LONG_OPTIONS
+                      | {"--model", "--m", "--thinking-level"})
 
 
 def check(arguments):
@@ -34,6 +42,10 @@ def check(arguments):
             model_root = native_key.split('.', 1)[0].strip('-_')
             if model_root in ('model', 'm') and key not in ('--model', '--m'):
                 raise ValueError('alternate or negated native model assignments are not supported')
+        # Native strict parsing happens after Herdr starts the seat. Reject
+        # unreviewed spellings here so invalid argv cannot replace its process.
+        if key.startswith('--') and key not in KNOWN_LONG_OPTIONS:
+            raise ValueError(f'unreviewed Gemini option: {key}')
         if key in OPTIONAL_VALUE_OPTIONS:
             if not separator and index + 1 < len(arguments) and not arguments[index + 1].startswith('-'):
                 index += 1

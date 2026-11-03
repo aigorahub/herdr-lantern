@@ -10,6 +10,24 @@ Gemini CLI 0.65.0 can remap an explicit ID and use fallback chains. **Exact back
 
 Preflight returns `available: null`, `launchable: true`, `entitlement: "unknown"`, `inference: "untested"`, `actual_model_verified: false`, `cli_may_remap: true`, and `substitute: null` after its local checks. Exit zero means the requested setup passed those checks; it does not mean the backend is accessible. A refusal exits nonzero and supplies no substitute. The Herdr wrapper repeats model/effort checks before starting a Gemini seat, including rejecting missing or duplicate model flags. It prints the native remapping limitation before contacting Herdr.
 
+## Supported launch path
+
+Gemini seats use the legacy Lantern `bin/herdr agent start` wrapper. Native
+`herdr-app do tab.new` and `space.new` do not pass through its validation and
+are unsupported for Gemini. The desktop coordinator must report this limit
+when Gemini is requested or saved as a spawn default. It must not replace
+Gemini with another route without the user's choice.
+
+The wrapper accepts the reviewed Gemini CLI 0.65 option spellings. Unknown
+long options are refused before Herdr starts a process. A CLI update that adds
+an option requires a parser review before Lantern forwards it.
+
+The dated policy is a reviewed subset, not the latest provider catalog. Keep
+it conservative across backends. Do not add IDs from a package or widen it
+from Cloud to the Developer API automatically. Review the official lifecycle
+and thinking pages, update the date, and test exact IDs when changing it.
+Account entitlement stays unknown until the selected route has real evidence.
+
 ## Thinking bridge contract
 
 Gemini has no native `--effort` flag. Explicit thinking needs a launcher installed by the environment owner, which consumes the private `--thinking-level` option before executing native Gemini. Without a level, Lantern leaves the CLI's thinking defaults alone.
@@ -51,7 +69,7 @@ bin/model-preflight gemini gemini-3.8-flash high
 
 Pass the returned `argv` after Herdr's `--` delimiter. Do not pass `--thinking-level` to an unconfigured native CLI. These examples specify a model; they do not make it a default recommendation.
 
-## Bounded lifecycle policy, reviewed 2026-10-28
+## Bounded lifecycle policy, reviewed 2026-11-02
 
 The policy covers the following twelve IDs. It is a conservative Cloud-compatible routing policy, not a universal catalog. New model names require a policy review even if they appear in the installed package.
 
