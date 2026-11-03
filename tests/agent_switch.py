@@ -51,16 +51,19 @@ print(json.dumps({'result': value}))
             self.herdr = self.root / 'herdr'
             self.herdr.write_text(f'#!{sys.executable}\nexec(compile(open({str(fake)!r}).read(), {str(fake)!r}, "exec"))\n')
             self.herdr.chmod(0o700)
-        (self.root / 'bin' / 'model-route.py').write_text('''import json, os
+        (self.root / 'bin' / 'model-route.py').write_text('''import json, os, sys
 from pathlib import Path
 fixture = json.loads(Path(os.environ['SWITCH_FIXTURE']).read_text())
 model = fixture.get('model', 'test-model')
-print(json.dumps({'kind': 'codex', 'model': model, 'effort': 'high', 'argv': ['-m', model]}))
+print(json.dumps({'kind': sys.argv[1], 'model': model, 'effort': 'high', 'argv': ['-m', model]}))
 ''')
         (self.root / 'bin' / 'model-preflight.py').write_text('''import json, os, sys
 from pathlib import Path
 fixture = json.loads(Path(os.environ['SWITCH_FIXTURE']).read_text())
-print(json.dumps({'available': fixture['available'], 'reason': 'Provider limit'}))
+payload = {'available': fixture['available'], 'reason': 'Provider limit'}
+if 'quota' in fixture:
+    payload['quota'] = fixture['quota']
+print(json.dumps(payload))
 sys.exit(0 if fixture['available'] else 3)
 ''')
         self.addCleanup(patch.stopall)
@@ -115,6 +118,18 @@ sys.exit(0 if fixture['available'] else 3)
         self.assertIn(self.context.read_text(), prompt[3])
         self.assertFalse(any('close' in row or 'stop' in row for row in commands))
         self.assertNotEqual(self.start(offer)[0], 0)
+
+    def test_unavailable_claude_route_does_not_invent_a_quota_measurement(self):
+        self.assertEqual(self.run_cli('configure', 'claude', '--kind', 'claude', '--model', 'test-model')[0], 0)
+        self.change(available=False)
+        code, offer = self.run_cli('offer', '--pane', 'p1', '--reason', 'Original limit')
+        self.assertEqual(code, 0, offer)
+        self.assertFalse(offer['alternatives'][0]['available'])
+        self.assertEqual(offer['alternatives'][0]['quota'], 'unknown')
+        self.change(quota='unavailable')
+        code, offer = self.run_cli('offer', '--pane', 'p1', '--reason', 'Original limit')
+        self.assertEqual(code, 0, offer)
+        self.assertEqual(offer['alternatives'][0]['quota'], 'unavailable')
 
     def test_catalog_change_requires_a_new_explicit_model_selection(self):
         offer = self.configure_offer()

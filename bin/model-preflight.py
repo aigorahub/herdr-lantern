@@ -314,8 +314,11 @@ def report_available(kind: str, model: str, effort: str, *, quota: str | None = 
     return 0
 
 
-def report_unavailable(kind: str, model: str, reason: str, substitute: dict[str, object] | None) -> int:
+def report_unavailable(kind: str, model: str, reason: str, substitute: dict[str, object] | None,
+                       *, quota: str | None = None) -> int:
     payload = {"available": False, "kind": kind, "model": model, "reason": reason, "substitute": substitute}
+    if quota is not None:
+        payload["quota"] = quota
     print(json.dumps(payload, separators=(",", ":")))
     return 3
 
@@ -401,8 +404,9 @@ def check(kind: str, model: str, effort: str) -> int:
                 model,
                 exhausted_reason(exhausted),
                 claude_substitute(model, buckets, models),
+                quota="unavailable",
             )
-        return report_available(kind, model, effort, quota="unknown" if not buckets else None)
+        return report_available(kind, model, effort, quota="unknown" if not buckets else "available")
     if kind == "cursor":
         models = cursor_models()
         if model not in models:

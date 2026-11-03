@@ -127,8 +127,7 @@ def main() -> int:
                     resolved, availability = resolve(route)
                     entry.update(model=resolved["model"], available=availability["available"],
                                  resolved=resolved)
-                    if resolved["kind"] == "claude" and availability.get("quota") != "unknown":
-                        entry["quota"] = "available" if availability["available"] else "unavailable"
+                    entry["quota"] = availability.get("quota", "unknown")
                     if availability.get("reason"):
                         entry["reason"] = availability["reason"]
                 except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
