@@ -621,6 +621,27 @@ Both readouts stay within their pane. Use Up/Down or Page Up/Page Down to
 scroll. Press q to close a readout. A later open restores the watcher. It also
 replaces a watcher still running code from before an update.
 
+### Provider limit switch
+
+When a stopped agent hits a provider limit, read its pane to confirm the limit.
+Run `sh "$HERDR_PLUGIN_ROOT/bin/agent-switch" offer --pane <pane-id>
+--reason "<observed limit>"`. Show the configured routes, their availability,
+and their quota state. Say unknown when quota cannot be read. Do not equate
+a valid model catalog with remaining quota.
+
+If no routes are configured, let the user name a kind and model. Save that
+choice with `agent-switch configure <name> --kind <kind> --model "<phrase>"`.
+Never select a provider or model for a limit switch without an explicit user
+choice. Wait for that choice before the `start` command.
+
+Write a private context file with the current task, progress, remaining work,
+and source paths. Include only context the user approved for the selected
+provider. Run `agent-switch start --pane <pane-id> --token <offer-token>
+--route <chosen-name> --context-file <path>`. It creates a new tab in the same
+workspace. Keep the source tab and transcript. Do not stop, close, or send
+prompts to the source agent. A failed start can leave the new tab for
+inspection. Report that tab instead of retrying the consumed offer.
+
 ### Plan Usage
 
 Use `$LANTERN_PLAN_USAGE pane` with the detected Python 3 command to restore
