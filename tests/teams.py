@@ -142,8 +142,8 @@ class Mailbox(unittest.TestCase):
         self.post(driver, self.message("message-b"))
         with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
             db.execute("DROP INDEX IF EXISTS inbox_recipient_status")
-            db.execute("CREATE INDEX IF NOT EXISTS inbox ON messages(recipient,status,created_at)")
             db.execute("UPDATE messages SET created_at=1234.125")
+            db.execute("CREATE INDEX IF NOT EXISTS inbox ON messages(recipient,status,created_at)")
             before = db.execute("SELECT message_id,payload,receipt,status,created_at FROM messages ORDER BY message_id").fetchall()
         self.invoke("inspect", "--actor", helper, "--message-id", "message-a")
         with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db:
