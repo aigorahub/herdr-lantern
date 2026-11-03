@@ -88,16 +88,28 @@ class DesktopTests(unittest.TestCase):
                 self.assertTrue(desktop.active_helper({"foreground": {"name": "claude", "argv": ["claude"]}},
                                                      {"HELPER_AGENT": "claude"}))
 
-    def test_claude_launch_registers_status_hooks_without_replacing_extra_settings(self):
+    def test_claude_hooks_preserve_local_settings_and_explicit_settings_argument(self):
         with patch.object(desktop, "helper_command", return_value=("claude", "/bin/claude")):
             args = desktop.helper_argv({"HELPER_EXTRA_ARGS": "--settings /tmp/user.json --resume abc"}, "native")
-        settings = [args[i + 1] for i, arg in enumerate(args) if arg == "--settings"]
-        self.assertEqual(settings[0], "/tmp/user.json")
-        hooks = json.loads(settings[1])["hooks"]
-        self.assertEqual(set(hooks), {"SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop"})
-        self.assertEqual(hooks["Notification"][0]["matcher"], "permission_prompt|elicitation_dialog")
-        self.assertTrue(hooks["Stop"][0]["hooks"][0]["command"].endswith(" done"))
-        self.assertIn("--resume", args)
+        self.assertEqual(args.count("--settings"), 1)
+        self.assertIn("/tmp/user.json", args)
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / ".claude").mkdir()
+            path = work / ".claude/settings.local.json"
+            original = {"permissions": {"defaultMode": "plan"}, "hooks": {
+                "Stop": [{"hooks": [{"type": "command", "command": "echo preserved"}]}]}}
+            path.write_text(json.dumps(original))
+            desktop.install_claude_hooks(work)
+            first = json.loads(path.read_text())
+            desktop.install_claude_hooks(work)
+            self.assertEqual(json.loads(path.read_text()), first)
+            self.assertEqual(first["permissions"], original["permissions"])
+            hooks = first["hooks"]
+            self.assertEqual(set(hooks), {"SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop"})
+            self.assertEqual(hooks["Notification"][0]["matcher"], "permission_prompt|elicitation_dialog")
+            self.assertEqual(hooks["Stop"][0], original["hooks"]["Stop"][0])
+            self.assertTrue(hooks["Stop"][1]["hooks"][0]["command"].endswith(" done"))
 
     @unittest.skipIf(os.name == "nt", "POSIX terminal protocol")
     def test_hook_writes_status_to_agent_tty_when_all_hook_streams_are_pipes(self):
