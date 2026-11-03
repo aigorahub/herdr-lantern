@@ -33,6 +33,11 @@ their installed CLI help and live model catalog. Agy takes its initial prompt
 with --prompt-interactive. Put that prompt in argv and omit the app's task
 argument. Do not pass an Agy prompt as a bare positional argument. Pin the
 requested Agy model and effort. Agy reviews use /boost in plan mode.
+Gemini seats are supported only through the legacy Lantern bin/herdr wrapper.
+Do not launch Gemini with native tab.new or space.new. Those commands bypass
+its model and thinking checks. A saved Gemini spawn default is not native
+launch approval. Report this limit and wait for a supported route selection.
+Never select a different harness on the user's behalf.
 Use the user's saved spawn defaults
 when they name only a repo. Do not silently change the harness or model.
 Use the configured permission tier. Do not invent approval bypass flags.

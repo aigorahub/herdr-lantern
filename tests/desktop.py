@@ -88,6 +88,59 @@ class DesktopTests(unittest.TestCase):
                 self.assertTrue(desktop.active_helper({"foreground": {"name": "claude", "argv": ["claude"]}},
                                                      {"HELPER_AGENT": "claude"}))
 
+    def test_claude_hooks_preserve_local_settings_and_explicit_settings_argument(self):
+        with patch.object(desktop, "helper_command", return_value=("claude", "/bin/claude")):
+            args = desktop.helper_argv({"HELPER_EXTRA_ARGS": "--settings /tmp/user.json --resume abc"}, "native")
+        self.assertEqual(args.count("--settings"), 1)
+        self.assertIn("/tmp/user.json", args)
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / ".claude").mkdir()
+            path = work / ".claude/settings.local.json"
+            original = {"permissions": {"defaultMode": "plan"}, "hooks": {
+                "Stop": [{"hooks": [{"type": "command", "command": "echo preserved"}]}]}}
+            path.write_text(json.dumps(original))
+            desktop.install_claude_hooks(work)
+            first = json.loads(path.read_text())
+            desktop.install_claude_hooks(work)
+            self.assertEqual(json.loads(path.read_text()), first)
+            self.assertEqual(first["permissions"], original["permissions"])
+            hooks = first["hooks"]
+            self.assertEqual(set(hooks), {"SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop"})
+            self.assertEqual(hooks["Notification"][0]["matcher"], "permission_prompt|elicitation_dialog")
+            self.assertEqual(hooks["Stop"][0], original["hooks"]["Stop"][0])
+            self.assertTrue(hooks["Stop"][1]["hooks"][0]["command"].endswith(" done"))
+
+    @unittest.skipIf(os.name == "nt", "POSIX terminal protocol")
+    def test_hook_writes_status_to_agent_tty_when_all_hook_streams_are_pipes(self):
+        import pty
+        import select
+        master, slave = pty.openpty()
+        script = Path(desktop.__file__).with_name("agent_status.py")
+        # A parent with a tty runs the hook with pipe-only streams, as Claude does.
+        code = ("import os,subprocess,sys; os.setsid(); "
+                ""
+                "p=subprocess.run([sys.executable,sys.argv[1],sys.argv[2]],capture_output=True); "
+                "sys.exit(p.returncode or bool(p.stdout) or bool(p.stderr))")
+        try:
+            for state in ("idle", "working", "blocked", "done"):
+                env = dict(os.environ, HC_TERMINAL_ID="test-terminal")
+                result = subprocess.run([sys.executable, "-c", code, str(script), state],
+                                        stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        env=env, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(select.select([master], [], [], 2)[0])
+                self.assertEqual(os.read(master, 1024),
+                                 f"\x1b]7501;state={state}:app=claude-code\x07".encode())
+            env.pop("HC_TERMINAL_ID")
+            result = subprocess.run([sys.executable, "-c", code, str(script), "done"],
+                                    stdin=slave, capture_output=True, env=env, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(select.select([master], [], [], 0.1)[0])
+        finally:
+            os.close(slave)
+            os.close(master)
+
     def test_cursor_node_wrapper_is_still_the_active_helper(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = Path(tmp) / ("agent.exe" if os.name == "nt" else "agent")

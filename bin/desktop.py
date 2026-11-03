@@ -230,6 +230,23 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
     return args
 
 
+def install_claude_hooks(work: Path) -> None:
+    folder = runtime.private_dir(work / ".claude")
+    path = folder / "settings.local.json"
+    settings = json.loads(path.read_text()) if path.exists() else {}
+    hooks = settings.setdefault("hooks", {})
+    command = shlex.join([sys.executable, str(ROOT / "bin/agent_status.py")])
+    events = {"SessionStart": "idle", "UserPromptSubmit": "working",
+              "PreToolUse": "working", "Notification": "blocked", "Stop": "done"}
+    for event, state in events.items():
+        entries = hooks.setdefault(event, [])
+        report = {"type": "command", "command": command + " " + state}
+        if not any(report in entry.get("hooks", []) for entry in entries):
+            entries.append({"matcher": "permission_prompt|elicitation_dialog" if event == "Notification" else "",
+                            "hooks": [report]})
+    field.write_json(path, settings)
+
+
 def chat() -> None:
     record_start(state_dir(), "chat")
     config = read_config(config_dir() / "helper.conf")
@@ -241,6 +258,8 @@ def chat() -> None:
     for filename in ("CLAUDE.md", "AGENTS.md", "GEMINI.md"):
         (work / filename).write_text(prompt)
     args = helper_argv(config, prompt)
+    if helper_command(config)[0] == "claude":
+        install_claude_hooks(work)
     for name in list(os.environ):
         if name.startswith("HERDR_") and name != "HERDR_APP_HOME":
             os.environ.pop(name, None)
