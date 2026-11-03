@@ -1,6 +1,7 @@
 """Read plan limits from the login profile of an open agent. No model turns."""
 from __future__ import annotations
 
+import errno
 import hashlib
 import http.client
 import json
@@ -9,6 +10,7 @@ import os
 import platform
 import queue
 import re
+import select
 import shlex
 import shutil
 import socket
@@ -408,9 +410,11 @@ def parse_fugu(payload: object, credential: str, observed: float) -> dict:
 FUGU_READ_TIMEOUT = 10
 # A blocked release read uses this unless the usage read's deadline is sooner.
 RELEASE_SOCKET_TIMEOUT = 30
-# create_connection returns only after the handshake. Retry in slices so a
-# stop or deadline is noticed during connect, before the socket exists to abort.
+# How often a handshake or name lookup checks the deadline and a stop.
+# The connecting socket stays open across checks.
 _CONNECT_SLICE = 0.2
+# Non-blocking connect reports these until the handshake finishes.
+_IN_PROGRESS = {errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK, errno.EAGAIN}
 
 
 class _SocketDeadline:
@@ -506,34 +510,111 @@ def _socket_timeout(deadline: float | None) -> float:
     return min(RELEASE_SOCKET_TIMEOUT, max(0.001, remaining))
 
 
+def _poll_seconds(guard: _SocketDeadline) -> float:
+    """How long the next poll may block. Raises when the read must stop."""
+    if guard.cancel is not None and guard.cancel.is_set():
+        raise TimeoutError
+    if guard.deadline is None:
+        return _CONNECT_SLICE
+    remaining = guard.deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    return min(_CONNECT_SLICE, remaining)
+
+
+def _lookup(host, port, guard: _SocketDeadline):
+    # getaddrinfo blocks before a socket exists, so the socket timeout cannot
+    # bound it. Abandon the daemon thread at the deadline; the lookup itself
+    # cannot be cancelled.
+    _poll_seconds(guard)
+    outcome = []
+    done = threading.Event()
+
+    def resolve() -> None:
+        try:
+            outcome.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
+        except Exception as exc:
+            outcome.append(exc)
+        finally:
+            done.set()
+
+    threading.Thread(target=resolve, name="usage-dns", daemon=True).start()
+    while not done.is_set():
+        if done.wait(_poll_seconds(guard)):
+            break
+    if not done.is_set():
+        raise TimeoutError
+    found = outcome[0]
+    if isinstance(found, Exception):
+        raise found
+    return found
+
+
+def _connect_pending(sock: socket.socket, guard: _SocketDeadline) -> None:
+    """Wait until this handshake finishes. Leave the socket open across polls."""
+    while True:
+        try:
+            writable = select.select([], [sock], [], _poll_seconds(guard))[1]
+        except InterruptedError:
+            continue
+        if not writable:
+            continue
+        err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+        if not err:
+            return
+        if err not in _IN_PROGRESS:
+            raise OSError(err, os.strerror(err))
+
+
+def _finish_connected(sock: socket.socket, guard: _SocketDeadline) -> socket.socket:
+    sock.settimeout(_socket_timeout(guard.deadline))
+    guard.arm(sock)
+    return sock
+
+
+def _connect_one(af, socktype, proto, sa, source_address, guard: _SocketDeadline):
+    sock = socket.socket(af, socktype, proto)
+    try:
+        sock.setblocking(False)
+        if source_address:
+            sock.bind(source_address)
+        in_progress = False
+        try:
+            sock.connect(sa)
+        except InterruptedError:
+            in_progress = True
+        except OSError as exc:
+            if exc.errno == errno.EISCONN:
+                in_progress = False
+            elif exc.errno in _IN_PROGRESS:
+                in_progress = True
+            else:
+                raise
+        if in_progress:
+            _connect_pending(sock, guard)
+        return _finish_connected(sock, guard)
+    except BaseException:
+        sock.close()
+        raise
+
+
 def _connect_bounded(address, timeout, source_address, guard: _SocketDeadline):
     if guard.deadline is None and guard.cancel is None:
         return socket.create_connection(address, timeout, source_address)
-    while True:
-        if guard._due() or (guard.cancel is not None and guard.cancel.is_set()):
-            raise TimeoutError
-        if guard.deadline is None:
-            slice_timeout = _CONNECT_SLICE
-        else:
-            remaining = guard.deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError
-            slice_timeout = min(_CONNECT_SLICE, remaining)
+    host, port = address
+    infos = _lookup(host, port, guard)
+    last = None
+    for af, socktype, proto, _canon, sa in infos:
+        _poll_seconds(guard)
         try:
-            sock = socket.create_connection(address, slice_timeout, source_address)
-        except (TimeoutError, socket.timeout):
-            continue
-        guard.arm(sock)
-        try:
-            inactivity = _socket_timeout(guard.deadline)
+            return _connect_one(af, socktype, proto, sa, source_address, guard)
         except TimeoutError:
-            sock.close()
             raise
-        try:
-            sock.settimeout(inactivity)
-        except OSError:
-            pass
-        return sock
+        except OSError as exc:
+            last = exc
+    if last is not None:
+        raise last
+    raise OSError("getaddrinfo returns an empty list")
 
 
 def _prepare_connect(conn, guard: _SocketDeadline) -> None:
