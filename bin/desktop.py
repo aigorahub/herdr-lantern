@@ -111,7 +111,7 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
                     if not original:
                         raise RuntimeError(f"Legacy terminal {target} changed during the read; retry")
                     row.update({k: original[k] for k in ("agent", "agent_status", "agent_session", "cwd",
-                                                        "name", "state_change_seq") if k in original})
+                                                        "name", "state_change_seq", "completion_seq") if k in original})
                     row.update(legacy_binary=binary, legacy_pane_id=original["pane_id"])
                 elif status.get("app"):
                     row["agent"] = {"claude-code": "claude", "grok-build": "grok", "antigravity-cli": "agy",

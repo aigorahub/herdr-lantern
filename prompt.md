@@ -586,17 +586,23 @@ quiet tabs and Lantern Home. Never close Lantern Home as part of Field Status.
   the chat. If the pane cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
 - Show separate Important (red) and Needs You (purple) sections. The In Motion
-  (yellow), Done (green), and Keep (blue) labels are section headers, not
+  (yellow), Verification Pending, Not Complete, Done (green), and Keep (blue) labels are section headers, not
   per-agent status suffixes. Show human-readable workspace names in yellow,
   such as Lantern, Notes, or Billing API Fixes; never print a
   generic shell label or an internal agent slug as the display name. Include
   the tab name beneath when it distinguishes sessions. Keep shows only Lantern
-  Home by default. An idle, blocked, unknown, or shell tab appears there only
+  Home by default. An unknown or shell tab appears there only
   when the user specifically asks to keep it, recorded with
   `$LANTERN_FIELD_STATUS note keep set <pane-or-tab-id> "<reason>"`.
   Do not close a quiet tab merely because it is hidden from Keep.
-  For each Done agent retained in the field, inspect its final output and set
-  `$LANTERN_FIELD_STATUS note done set <pane-id> "<short verified outcome>"`.
+  Register every new assignment with `$LANTERN_FIELD_STATUS task <pane-id> <task-id>`.
+  Stopped agents appear under Verification Pending until reviewed. Run
+  `$LANTERN_FIELD_STATUS pending` for JSON containing the task and current token.
+  Inspect the output and evidence, then record
+  `$LANTERN_FIELD_STATUS outcome <pane-id> --task <task-id> --token <token> --status complete --evidence "<commit and checks>" --summary "<verified result>"`.
+  Use incomplete, blocked, cancelled, or superseded for other outcomes, shown
+  under Not Complete. Never use `note done` to accept work. Exit 3 from pending
+  or refresh means a review is pending. It is not a source failure.
   Never present a task title alone as an accomplished outcome.
   Before closing a Done session, verify its repo/worktree has no uncommitted
   work, its output is durable, and no other agent relies on it. Close only
