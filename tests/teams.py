@@ -123,7 +123,7 @@ class Mailbox(unittest.TestCase):
         self.invoke("register", "--input", self.fixture(data), "--output", credential, ok=False)
         self.assertEqual(credential.read_bytes(), original)
 
-    def test_post_receive_ack_survives_separate_processes(self):
+    def test_post_receive_ack_migrates_a_legacy_store_without_losing_messages(self):
         driver, helper = self.pair()
         self.post(driver)
         self.assertEqual(self.receive(driver)["messages"], [])
@@ -136,16 +136,23 @@ class Mailbox(unittest.TestCase):
         self.assertNotIn("token", message["sender"])
         self.assertEqual(message["status"], "claimed")
         self.assertRegex(message["receipt"], r"\A[0-9a-f]{48}\Z")
+        self.post(driver, self.message("message-c"))
+        consumed = self.receive(helper)["messages"][0]
+        self.invoke("ack", "--actor", helper, "--message-id", "message-c", "--receipt", consumed["receipt"])
+        self.post(driver, self.message("message-b"))
         with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
             db.execute("DROP INDEX IF EXISTS inbox_recipient_status")
             db.execute("CREATE INDEX IF NOT EXISTS inbox ON messages(recipient,status,created_at)")
             db.execute("UPDATE messages SET created_at=1234.125")
-            before = db.execute("SELECT payload,receipt,status,created_at FROM messages").fetchall()
-        self.assertEqual(self.receive(helper)["messages"], [])
+            before = db.execute("SELECT message_id,payload,receipt,status,created_at FROM messages ORDER BY message_id").fetchall()
+        self.invoke("inspect", "--actor", helper, "--message-id", "message-a")
         with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db:
-            self.assertEqual(db.execute("SELECT payload,receipt,status,created_at FROM messages").fetchall(), before)
+            self.assertEqual(db.execute("SELECT message_id,payload,receipt,status,created_at FROM messages ORDER BY message_id").fetchall(), before)
             self.assertEqual(db.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='inbox'").fetchall(), [])
             self.assertEqual([row[2] for row in db.execute("PRAGMA index_info(inbox_recipient_status)")], ["recipient", "status"])
+        queued = self.receive(helper)["messages"]
+        self.assertEqual([item["message_id"] for item in queued], ["message-b"])
+        self.invoke("ack", "--actor", helper, "--message-id", "message-b", "--receipt", queued[0]["receipt"])
         self.invoke("ack", "--actor", helper, "--message-id", "message-a",
                     "--receipt", message["receipt"])
         self.assertEqual(self.receive(helper)["messages"], [])
