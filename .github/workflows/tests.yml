@@ -4,6 +4,10 @@ permissions:
   contents: read
 jobs:
   diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, integer-time, short-index]
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -13,15 +17,19 @@ jobs:
           python-version: '3.x'
       - name: Inspect fixture failures
         shell: bash
+        env:
+          MAILBOX_VARIANT: ${{ matrix.variant }}
         run: |
           python - <<'PYCODE'
-          import pathlib, sqlite3, sys, subprocess
+          import pathlib, sqlite3, sys, subprocess, os
           print(sys.version, sqlite3.sqlite_version, flush=True)
           p = pathlib.Path('bin/team_mailbox.py')
           text = p.read_text(encoding='utf-8')
           text = text.replace('        # Never emit credentials, input content, or raw SQLite errors.', '        if isinstance(error, sqlite3.Error):\n            import traceback\n            print(type(error).__name__, getattr(error, "sqlite_errorname", None), getattr(error, "sqlite_errorcode", None), str(error), file=sys.stderr)\n            traceback.print_exc()\n        # Fixture-only diagnostic run.')
-          text = text.replace('            box = Mailbox(args.state_dir)', '            box = Mailbox(args.state_dir)\n            integrity = box.db.execute("PRAGMA integrity_check").fetchall()\n            if [r[0] for r in integrity] != ["ok"]:\n                raise sqlite3.DatabaseError("BEFORE " + args.command + ": " + repr([r[0] for r in integrity]))')
-          text = text.replace('        print(encode(result, ascii=True))', '        if box is not None:\n            integrity = box.db.execute("PRAGMA integrity_check").fetchall()\n            if [r[0] for r in integrity] != ["ok"]:\n                raise sqlite3.DatabaseError("AFTER " + args.command + ": " + repr([r[0] for r in integrity]))\n        print(encode(result, ascii=True))')
+          if os.environ['MAILBOX_VARIANT'] == 'integer-time':
+              text = text.replace('now = time.time()', 'now = int(time.time())')
+          if os.environ['MAILBOX_VARIANT'] == 'short-index':
+              text = text.replace('messages(recipient,status,created_at)', 'messages(recipient,status)')
           p.write_text(text, encoding='utf-8')
           p = pathlib.Path('tests/teams.py')
           text = p.read_text(encoding='utf-8').replace('self.assertEqual(result.returncode, 0, value)', 'self.assertEqual(result.returncode, 0, (value, result.stderr))')
