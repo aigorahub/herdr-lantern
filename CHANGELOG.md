@@ -9,7 +9,9 @@ All notable changes to Lantern, by Elves are documented here.
 - Restarting Plan Usage after an update waits for an in-flight read to finish.
   A read blocked in name lookup or a socket call returns when the watcher
   stops, and a Fugu read also returns within its timeout, so the old watcher
-  is replaced instead of staying stopped until the next setup.
+  is replaced instead of staying stopped until the next setup. A watcher
+  already running the previous release cannot abort that read, so the first
+  restart can still leave the pane stopped.
 - An automatic CodexBar install follows the usage read's deadline for the
   whole download, including name lookup, the connection, slow headers, and a
   stalled or trickling body. A second read waiting on the install does not

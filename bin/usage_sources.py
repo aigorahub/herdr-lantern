@@ -525,7 +525,7 @@ def _poll_seconds(guard: _SocketDeadline) -> float:
 def _lookup(host, port, guard: _SocketDeadline):
     # getaddrinfo blocks before a socket exists, so the socket timeout cannot
     # bound it. Abandon the daemon thread at the deadline; the lookup itself
-    # cannot be cancelled.
+    # cannot be cancelled, and a stalled lookup keeps its thread until it returns.
     _poll_seconds(guard)
     outcome = []
     done = threading.Event()
@@ -554,10 +554,12 @@ def _connect_pending(sock: socket.socket, guard: _SocketDeadline) -> None:
     """Wait until this handshake finishes. Leave the socket open across polls."""
     while True:
         try:
-            writable = select.select([], [sock], [], _poll_seconds(guard))[1]
+            # A failed connect is writable on POSIX and only on the exception set
+            # on Windows. A write-only wait spends the deadline and skips the next address.
+            writable, exceptional = select.select([], [sock], [sock], _poll_seconds(guard))[1:]
         except InterruptedError:
             continue
-        if not writable:
+        if sock not in writable and sock not in exceptional:
             continue
         err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
         if not err:

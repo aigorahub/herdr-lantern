@@ -1595,7 +1595,7 @@ for line in sys.stdin:
         # returns before connecting on Windows, so this calls install directly.
         import socket
 
-        def serve(port_box, accepted, done, mode):
+        def serve(port_box, accepted, done, mode, cancel=None):
             server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1613,6 +1613,10 @@ for line in sys.stdin:
                 if conn is None:
                     return
                 accepted.set()
+                # Cancel only after accept. A timer can fire during setup, before
+                # this connection exists, and the accept check then flakes.
+                if cancel is not None:
+                    cancel.set()
                 try:
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 except OSError:
@@ -1659,9 +1663,12 @@ for line in sys.stdin:
             finally:
                 server.close()
 
-        def attempt(mode, delay, cancel_after=None):
+        def attempt(mode, delay, cancel_on_accept=False):
             port_box, accepted, done = [], threading.Event(), threading.Event()
-            thread = threading.Thread(target=serve, args=(port_box, accepted, done, mode), daemon=True)
+            cancel = threading.Event()
+            thread = threading.Thread(target=serve, args=(port_box, accepted, done, mode,
+                                                           cancel if cancel_on_accept else None),
+                                      daemon=True)
             thread.start()
             try:
                 while not port_box and thread.is_alive():
@@ -1684,20 +1691,13 @@ for line in sys.stdin:
                         patch.object(sources, "release_url", return_value=target, create=True), \
                         patch.object(sources.urllib.request, "urlopen", side_effect=redirected):
                     state = Path(temporary) / "herd"
-                    # Arm the stop after the directory and patches exist. Starting
-                    # it earlier can cancel during that setup, before the download connects.
-                    cancel = threading.Event()
                     start = time.monotonic()
-                    if cancel_after is not None:
-                        threading.Thread(target=lambda: (time.sleep(cancel_after), cancel.set()), daemon=True).start()
-                    with self.assertRaisesRegex(RuntimeError, "stopped" if cancel_after is not None else "timed out"):
+                    with self.assertRaisesRegex(RuntimeError, "stopped" if cancel_on_accept else "timed out"):
                         sources.install(state, cancel, start + delay)
                     elapsed = time.monotonic() - start
                 self.assertTrue(accepted.is_set(), "download never connected")
-                if cancel_after is None:
+                if not cancel_on_accept:
                     self.assertGreaterEqual(elapsed, delay * 0.5)
-                else:
-                    self.assertGreaterEqual(elapsed, cancel_after * 0.5)
                 self.assertLess(elapsed, 1.5, f"{mode} install returned after {elapsed:.2f}s")
             finally:
                 done.set()
@@ -1707,7 +1707,7 @@ for line in sys.stdin:
             with self.subTest(mode=mode):
                 attempt(mode, 0.5)
         with self.subTest(mode="cancel"):
-            attempt("stall", 30, cancel_after=0.35)
+            attempt("stall", 30, cancel_on_accept=True)
 
     def test_download_deadline_covers_lookup_and_a_slow_handshake(self):
         # Restarting the handshake every poll slice never finishes a connection
@@ -1854,13 +1854,78 @@ for line in sys.stdin:
             self.assertGreaterEqual(elapsed, 0.08)
             self.assertLess(elapsed, 0.5, f"lookup cancel returned after {elapsed:.2f}s")
 
+    def test_failed_connect_on_the_exception_set_tries_the_next_address(self):
+        # Winsock reports an unsuccessful nonblocking connect on the exception
+        # set. A write-only wait never sees it and spends the deadline there.
+        import errno
+        import select
+        import socket
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        good = server.getsockname()
+        bad = ("127.0.0.1", 1)
+        refused = {}
+        saw_exception = []
+        real_connect = socket.socket.connect
+        real_select = select.select
+        real_getsockopt = socket.socket.getsockopt
+
+        def connect(self, address):
+            if address == bad and self.gettimeout() == 0:
+                refused[id(self)] = errno.ECONNREFUSED
+                raise BlockingIOError(errno.EINPROGRESS, "in progress")
+            return real_connect(self, address)
+
+        def windows_select(rlist, wlist, xlist, timeout=None):
+            pending = [item for item in wlist if id(item) in refused]
+            if not pending:
+                return real_select(rlist, wlist, xlist, timeout)
+            # Failure shows up only through exceptfds, which is how Winsock behaves.
+            reported = [item for item in pending if item in xlist]
+            if not reported:
+                if timeout:
+                    time.sleep(timeout)
+                return [], [], []
+            saw_exception.append(bad)
+            return [], [], reported
+
+        def getsockopt(self, level, option, *args):
+            if option == socket.SO_ERROR and not args and id(self) in refused:
+                return refused.pop(id(self))
+            return real_getsockopt(self, level, option, *args)
+
+        infos = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", bad),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", good),
+        ]
+        guard = sources._SocketDeadline(time.monotonic() + 0.8, None)
+        try:
+            with patch.object(socket, "getaddrinfo", return_value=infos), \
+                    patch.object(socket.socket, "connect", connect), \
+                    patch.object(socket.socket, "getsockopt", getsockopt), \
+                    patch.object(select, "select", windows_select):
+                started = time.monotonic()
+                sock = sources._connect_bounded(("ignored.example", 9), None, None, guard)
+                elapsed = time.monotonic() - started
+            try:
+                self.assertEqual(sock.getpeername(), good)
+            finally:
+                sock.close()
+            self.assertTrue(saw_exception, "failed connect was not reported on the exception set")
+            self.assertLess(elapsed, 0.4, f"fallback connect took {elapsed:.2f}s")
+        finally:
+            guard.stop()
+            server.close()
+
     def test_fugu_read_returns_by_its_deadline_when_the_body_trickles(self):
         # Socket inactivity does not stop a body that keeps arriving, and a
         # stop has to abort the read before that cap as well.
         import socket
         import urllib.request
 
-        def serve(port_box, ready, done):
+        def serve(port_box, ready, done, cancel=None):
             server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1878,6 +1943,9 @@ for line in sys.stdin:
                         continue
                 if conn is None:
                     return
+                # Same as the download test: stop only after accept, not on a timer.
+                if cancel is not None:
+                    cancel.set()
                 try:
                     buf = b""
                     conn.settimeout(1)
@@ -1902,9 +1970,12 @@ for line in sys.stdin:
             finally:
                 server.close()
 
-        def attempt(delay, cancel_after=None):
+        def attempt(delay, cancel_on_accept=False):
             port_box, ready, done = [], threading.Event(), threading.Event()
-            thread = threading.Thread(target=serve, args=(port_box, ready, done), daemon=True)
+            cancel = threading.Event()
+            thread = threading.Thread(target=serve, args=(port_box, ready, done,
+                                                           cancel if cancel_on_accept else None),
+                                      daemon=True)
             thread.start()
             try:
                 self.assertTrue(ready.wait(2))
@@ -1916,15 +1987,14 @@ for line in sys.stdin:
                     return real_open(self, fullurl, *args, **kwargs)
 
                 with patch.object(urllib.request.OpenerDirector, "open", open_local):
-                    # Same as the download test: arm the stop after the patch is in place.
-                    cancel = threading.Event()
                     start = time.monotonic()
-                    if cancel_after is not None:
-                        threading.Thread(target=lambda: (time.sleep(cancel_after), cancel.set()), daemon=True).start()
                     with self.assertRaises((sources.SourceError, ValueError, OSError)):
                         sources.fugu_read({"api_key": "k"}, start + delay, cancel)
                     elapsed = time.monotonic() - start
-                self.assertGreaterEqual(elapsed, (cancel_after or delay) * 0.5)
+                if cancel_on_accept:
+                    self.assertTrue(cancel.is_set(), "fugu read never connected")
+                else:
+                    self.assertGreaterEqual(elapsed, delay * 0.5)
                 self.assertLess(elapsed, 1.5, f"fugu read returned after {elapsed:.2f}s")
             finally:
                 done.set()
@@ -1933,7 +2003,7 @@ for line in sys.stdin:
         with self.subTest(wait="deadline"):
             attempt(0.5)
         with self.subTest(wait="cancel"):
-            attempt(30, cancel_after=0.35)
+            attempt(30, cancel_on_accept=True)
 
     def test_install_lock_wait_returns_by_the_read_deadline(self):
         release, held = threading.Event(), threading.Event()
