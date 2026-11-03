@@ -197,7 +197,29 @@ Monitor events can set or clear notes with `note needs-you set|clear <id>` and
 for the user; noteworthy status or review gates with no user action belong
 under Important. Legacy review-gate notes display under Important until cleared.
 Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
-Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
+Keep entry. A stopped agent appears under Verification Pending. Only a recorded
+review with evidence can move it to Done. An incomplete, blocked, cancelled, or
+superseded outcome appears under Not Complete. Old `note done` text cannot accept
+work.
+
+Register each new assignment with `field-status task <pane-id> <task-id>`. Run
+`field-status pending` to get JSON with the current task and token. Inspect the
+output and record the review:
+
+```sh
+field-status outcome <pane-id> --task <task-id> --token <token> \
+  --status complete --evidence 'commit and check results' --summary 'Verified result'
+```
+
+Use `incomplete`, `blocked`, `cancelled`, or `superseded` for other outcomes.
+Both `pending` and `refresh` return exit code 3 while reviews remain pending.
+`watch` continues to run. Each token binds the task generation, session, terminal,
+pane, tab, provider sequence, and observed work cycle. A new assignment, turn,
+or replacement session invalidates the old review. Herdr versions without
+`completion_seq` use `state_change_seq`. Native terminals use their terminal ID
+and status timestamp. Sources with no sequence or session/terminal identity can
+still display status, but cannot receive an accepted outcome. Lantern keeps the
+Herdr 0.7.5 minimum.
 
 Plan Usage includes plans with an open agent tab anywhere on this Herdr
 server. Idle and Done tabs count. Tabs hidden from Field Status still count.

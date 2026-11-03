@@ -228,8 +228,11 @@ Runtime (injected by launch.sh; do not ignore):
   Reconcile unfinished pack records and review evidence before opening it.
   Use \`note needs-you set/clear\` for exact user actions and
   \`note important set/clear\` for noteworthy status or gates needing no user action.
-  Use \`note keep set/clear\` only for a user-requested Keep entry and
-  \`note done set/clear\` for a verified task outcome. Do not
+  Use \`note keep set/clear\` only for a user-requested Keep entry.
+  Register new work with \`task <pane> <task-id>\`. Read \`pending\` for the
+  current review token, then use \`outcome\` with task, token, status, evidence,
+  and summary. Only a complete outcome permits Done. Exit 3 from refresh or
+  pending means an unreviewed stop. Never use note done to accept work. Do not
   paste Ran command transcripts into the chat. Keep Lantern Home open.
 
 - Plan Usage executable: $LANTERN_PLAN_USAGE
