@@ -92,6 +92,14 @@ elif args[:2] == ["pane", "get"]:
     result = {"pane": data["panes"].get(args[2], {})}
 elif args[:2] == ["pane", "process-info"]:
     pane = flag("--pane")
+    # Ctrl+C does not clear a watcher until interrupt_delay elapses. A usage
+    # read stays in its socket call after the stop, and the pane must show that.
+    # Wall time: each poll is a new process, and monotonic() is process-local
+    # on macOS before Python 3.10.
+    until = (data.get("interrupt_until") or {}).get(pane) or 0
+    if until and time.time() >= until:
+        data.setdefault("processes", {})[pane] = []
+        data["interrupt_until"].pop(pane, None)
     processes = data.get("processes", {}).get(pane, [])
     starting = data.get("starting", {}).get(pane, 0)
     if starting:
@@ -158,7 +166,11 @@ elif args[:2] == ["pane", "run"]:
         json.dumps({"pid": 200, "code": code_stamp(Path(os.environ["VIEWS_ROOT"]))}))
 elif args[:2] == ["pane", "send-keys"]:
     if args[3:] == ["ctrl+c"] and args[2] not in data.get("ignores_interrupt", []):
-        data.setdefault("processes", {})[args[2]] = []
+        delay = data.get("interrupt_delay") or 0
+        if delay:
+            data.setdefault("interrupt_until", {})[args[2]] = time.time() + float(delay)
+        else:
+            data.setdefault("processes", {})[args[2]] = []
     path.write_text(json.dumps(data))
     sys.exit(0)  # Like the installed CLI, a key press prints no body.
 elif args[:2] == ["tab", "rename"]:

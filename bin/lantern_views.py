@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import field_status as field
+import usage_sources as sources
 from usage_runtime import FileLock, private_dir, server_identity
 
 VIEWS = {"field": ("Field Status", "field_status.py"), "usage": ("Plan Usage", "plan_usage.py")}
@@ -324,12 +325,16 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                     or watcher_processes(latest, root, state, kind) != watcher):
                 raise RuntimeError("Readout identity changed before restart")
             call(["pane", "send-keys", pid, "ctrl+c"], end)
-            settle = min(end, time.monotonic() + 3)
+            # The watcher process exits only after its current read returns.
+            # A socket read is aborted when the watcher stops, and a Fugu read
+            # also returns within FUGU_READ_TIMEOUT. A shorter wait reports the
+            # pane stopped and never starts the replacement.
+            settle = min(deadline, time.monotonic() + sources.FUGU_READ_TIMEOUT)
             while occupancy(info, root, state, kind) != "idle":
                 if time.monotonic() >= settle:
                     raise RuntimeError("Outdated readout did not stop")
                 time.sleep(0.1)
-                info = call(["pane", "process-info", "--pane", pid], end).get("process_info", {})
+                info = call(["pane", "process-info", "--pane", pid], deadline).get("process_info", {})
             return "idle"
 
         for kind in requested:
@@ -339,6 +344,8 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                 pane, status = find_target(kind, end)
                 if status == "running":
                     status = stop_outdated(kind, pane, end)
+                    # The stop can use the whole slice. The replacement needs one too.
+                    end = min(deadline, time.monotonic() + max(7, timeout / 2))
                 created = pane is None
                 pane = place(kind, pane, end)
                 tab = {"tab_id": home_tab}

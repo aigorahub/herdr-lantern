@@ -1,15 +1,19 @@
 """Read plan limits from the login profile of an open agent. No model turns."""
 from __future__ import annotations
 
+import errno
 import hashlib
+import http.client
 import json
 import math
 import os
 import platform
 import queue
 import re
+import select
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import tarfile
@@ -400,27 +404,318 @@ def parse_fugu(payload: object, credential: str, observed: float) -> dict:
             "credits": [], "observed_at": observed, "source": "Sakana /v1/usage"}
 
 
+# Absolute cap for one Fugu read. urllib's timeout is inactivity, so a trickle
+# would otherwise run until the body ended. A stopped read is aborted sooner.
+# Setup waits this long for the old watcher to exit.
+FUGU_READ_TIMEOUT = 10
+# A blocked release read uses this unless the usage read's deadline is sooner.
+RELEASE_SOCKET_TIMEOUT = 30
+# How often a handshake or name lookup checks the deadline and a stop.
+# The connecting socket stays open across checks.
+_CONNECT_SLICE = 0.2
+# Non-blocking connect reports these until the handshake finishes.
+_IN_PROGRESS = {errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK, errno.EAGAIN}
+
+
+class _SocketDeadline:
+    """Abort a download when its deadline passes or the watcher stops.
+
+    urllib's timeout resets on every received byte, and one response read can
+    receive several times. Closing urllib's own socket does not cancel the
+    duplicate the response body reads. Shutting down a duplicate we keep
+    aborts every read on that connection.
+    """
+
+    def __init__(self, deadline: float | None, cancel: threading.Event | None):
+        self.deadline = deadline
+        self.cancel = cancel
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._socks: list[socket.socket] = []
+        self._thread: threading.Thread | None = None
+
+    def arm(self, sock: socket.socket) -> None:
+        if self.deadline is None and self.cancel is None:
+            return
+        try:
+            held = sock.dup()
+        except OSError:
+            return
+        with self._lock:
+            if self._stop.is_set():
+                held.close()
+                return
+            self._socks.append(held)
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name="usage-socket-deadline", daemon=True)
+                self._thread.start()
+        if self._due():
+            self._shutdown()
+
+    def _due(self) -> bool:
+        if self._stop.is_set():
+            return False
+        if self.cancel is not None and self.cancel.is_set():
+            return True
+        return self.deadline is not None and time.monotonic() >= self.deadline
+
+    def _shutdown(self) -> None:
+        with self._lock:
+            socks = list(self._socks)
+        for held in socks:
+            try:
+                held.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            if self._due():
+                self._shutdown()
+                return
+            wait = 0.05
+            if self.deadline is not None:
+                remaining = self.deadline - time.monotonic()
+                if remaining <= 0:
+                    if not self._stop.is_set():
+                        self._shutdown()
+                    return
+                wait = min(wait, remaining)
+            if self.cancel is not None:
+                if self.cancel.wait(wait) and not self._stop.is_set():
+                    self._shutdown()
+                    return
+            elif self._stop.wait(wait):
+                return
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(0.2)
+        with self._lock:
+            socks, self._socks = self._socks, []
+        for held in socks:
+            try:
+                held.close()
+            except OSError:
+                pass
+
+
+def _socket_timeout(deadline: float | None) -> float:
+    if deadline is None:
+        return RELEASE_SOCKET_TIMEOUT
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    return min(RELEASE_SOCKET_TIMEOUT, max(0.001, remaining))
+
+
+def _poll_seconds(guard: _SocketDeadline) -> float:
+    """How long the next poll may block. Raises when the read must stop."""
+    if guard.cancel is not None and guard.cancel.is_set():
+        raise TimeoutError
+    if guard.deadline is None:
+        return _CONNECT_SLICE
+    remaining = guard.deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    return min(_CONNECT_SLICE, remaining)
+
+
+def _lookup(host, port, guard: _SocketDeadline):
+    # getaddrinfo blocks before a socket exists, so the socket timeout cannot
+    # bound it. Abandon the daemon thread at the deadline; the lookup itself
+    # cannot be cancelled, and a stalled lookup keeps its thread until it returns.
+    _poll_seconds(guard)
+    outcome = []
+    done = threading.Event()
+
+    def resolve() -> None:
+        try:
+            outcome.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
+        except Exception as exc:
+            outcome.append(exc)
+        finally:
+            done.set()
+
+    threading.Thread(target=resolve, name="usage-dns", daemon=True).start()
+    while not done.is_set():
+        if done.wait(_poll_seconds(guard)):
+            break
+    if not done.is_set():
+        raise TimeoutError
+    found = outcome[0]
+    if isinstance(found, Exception):
+        raise found
+    return found
+
+
+def _connect_pending(sock: socket.socket, guard: _SocketDeadline) -> None:
+    """Wait until this handshake finishes. Leave the socket open across polls."""
+    while True:
+        try:
+            # A failed connect is writable on POSIX and only on the exception set
+            # on Windows. A write-only wait spends the deadline and skips the next address.
+            writable, exceptional = select.select([], [sock], [sock], _poll_seconds(guard))[1:]
+        except InterruptedError:
+            continue
+        if sock not in writable and sock not in exceptional:
+            continue
+        err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+        if not err:
+            return
+        if err not in _IN_PROGRESS:
+            raise OSError(err, os.strerror(err))
+
+
+def _finish_connected(sock: socket.socket, guard: _SocketDeadline) -> socket.socket:
+    sock.settimeout(_socket_timeout(guard.deadline))
+    guard.arm(sock)
+    return sock
+
+
+def _connect_one(af, socktype, proto, sa, source_address, guard: _SocketDeadline):
+    sock = socket.socket(af, socktype, proto)
+    try:
+        sock.setblocking(False)
+        if source_address:
+            sock.bind(source_address)
+        in_progress = False
+        try:
+            sock.connect(sa)
+        except InterruptedError:
+            in_progress = True
+        except OSError as exc:
+            if exc.errno == errno.EISCONN:
+                in_progress = False
+            elif exc.errno in _IN_PROGRESS:
+                in_progress = True
+            else:
+                raise
+        if in_progress:
+            _connect_pending(sock, guard)
+        return _finish_connected(sock, guard)
+    except BaseException:
+        sock.close()
+        raise
+
+
+def _connect_bounded(address, timeout, source_address, guard: _SocketDeadline):
+    if guard.deadline is None and guard.cancel is None:
+        return socket.create_connection(address, timeout, source_address)
+    host, port = address
+    infos = _lookup(host, port, guard)
+    last = None
+    for af, socktype, proto, _canon, sa in infos:
+        _poll_seconds(guard)
+        try:
+            return _connect_one(af, socktype, proto, sa, source_address, guard)
+        except TimeoutError:
+            raise
+        except OSError as exc:
+            last = exc
+    if last is not None:
+        raise last
+    raise OSError("getaddrinfo returns an empty list")
+
+
+def _prepare_connect(conn, guard: _SocketDeadline) -> None:
+    if guard.deadline is None and guard.cancel is None:
+        return
+
+    def create(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+        return _connect_bounded(address, timeout, source_address, guard)
+
+    conn._create_connection = create
+
+
+class _GuardedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *args, guard: _SocketDeadline | None = None, **kwargs):
+        self._guard = guard
+        super().__init__(*args, **kwargs)
+
+    def connect(self):
+        if self._guard is not None:
+            _prepare_connect(self, self._guard)
+        super().connect()
+
+
+class _GuardedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, guard: _SocketDeadline | None = None, **kwargs):
+        self._guard = guard
+        super().__init__(*args, **kwargs)
+
+    def connect(self):
+        if self._guard is not None:
+            _prepare_connect(self, self._guard)
+        super().connect()
+
+
+class _GuardedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, guard: _SocketDeadline):
+        super().__init__()
+        self._guard = guard
+
+    def http_open(self, req):
+        return self.do_open(_GuardedHTTPConnection, req, guard=self._guard)
+
+
+class _GuardedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, guard: _SocketDeadline, context):
+        super().__init__(context=context)
+        self._guard = guard
+
+    def https_open(self, req):
+        return self.do_open(_GuardedHTTPSConnection, req, context=self._context, guard=self._guard)
+
+
+def _bounded_opener(guard: _SocketDeadline, extra=()):
+    return urllib.request.build_opener(*extra, _GuardedHTTPHandler(guard),
+                                       _GuardedHTTPSHandler(guard, runtime.tls_context()))
+
+
+def _raise_download(deadline: float | None, cancel: threading.Event | None, exc: BaseException) -> None:
+    if cancel is not None and cancel.is_set():
+        raise RuntimeError("CodexBar install was stopped") from None
+    reason = getattr(exc, "reason", exc)
+    timed_out = isinstance(reason, (TimeoutError, socket.timeout))
+    if deadline is not None and (time.monotonic() >= deadline or timed_out):
+        raise RuntimeError("CodexBar install timed out") from None
+    raise exc
+
+
+_DOWNLOAD_ERRORS = (OSError, urllib.error.URLError, http.client.HTTPException, TimeoutError)
+
+
 def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
     if cancel.is_set() or time.monotonic() >= deadline:
         raise SourceError("Last update failed")
+    bound = min(deadline, time.monotonic() + FUGU_READ_TIMEOUT)
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
-                                         urllib.request.HTTPSHandler(context=runtime.tls_context()))
+    guard = _SocketDeadline(bound, cancel)
+    opener = _bounded_opener(guard, (urllib.request.ProxyHandler({}), NoRedirect()))
     request = urllib.request.Request("https://api.sakana.ai/v1/usage",
                                      headers={"Authorization": "Bearer " + scope["api_key"],
                                               "Accept": "application/json"})
     try:
-        with opener.open(request, timeout=min(10, max(.1, deadline - time.monotonic()))) as response:
-            raw = response.read(1024 * 1024 + 1)
+        try:
+            response = opener.open(request, timeout=_socket_timeout(bound))
+        except urllib.error.HTTPError as exc:
+            raise SourceError("Sign in required" if exc.code in (401, 403) else "Last update failed") from None
+        except _DOWNLOAD_ERRORS:
+            raise SourceError("Last update failed") from None
+        try:
+            with response:
+                raw = response.read(1024 * 1024 + 1)
+        except _DOWNLOAD_ERRORS:
+            raise SourceError("Last update failed") from None
         if len(raw) > 1024 * 1024 or cancel.is_set():
             raise SourceError("Last update failed")
         return parse_fugu(json.loads(raw), scope["api_key"], time.time())
-    except urllib.error.HTTPError as exc:
-        raise SourceError("Sign in required" if exc.code in (401, 403) else "Last update failed") from None
-    except (urllib.error.URLError, TimeoutError):
-        raise SourceError("Last update failed") from None
+    finally:
+        guard.stop()
 
 
 def parse_agy(payload: object, scope: dict, observed: float) -> dict:
@@ -715,22 +1010,36 @@ def auto_install(state: Path, deadline: float, cancel: threading.Event) -> str:
     install, which shows the error.
     """
     tool = str(tools_dir(state) / "CodexBarCLI")
-    with AUTO_INSTALL_LOCK:
+    # Lock.acquire cannot observe a stop. Wake so this read honors its deadline
+    # and a stop, and so it notices when the install holding the lock finishes.
+    while not AUTO_INSTALL_LOCK.acquire(blocking=False):
+        if cancel.is_set():
+            raise SourceError(CODEXBAR_MISSING)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SourceError("Last update failed")
+        if cancel.wait(min(0.1, remaining)):
+            raise SourceError(CODEXBAR_MISSING)
+    try:
         # A read that waited while the watcher stopped starts no download.
         if cancel.is_set():
             raise SourceError(CODEXBAR_MISSING)
+        if time.monotonic() >= deadline:
+            raise SourceError("Last update failed")
         if usable_codexbar(tool, deadline, cancel):
             return tool
         if tool in AUTO_INSTALL_TRIED:
             raise SourceError(CODEXBAR_MISSING)
         AUTO_INSTALL_TRIED.add(tool)
         try:
-            return str(install(state, cancel))
+            return str(install(state, cancel, deadline))
         except Exception:
             # Any failure leaves CodexBar missing. A stopped watcher's try doesn't count.
             if cancel.is_set():
                 AUTO_INSTALL_TRIED.discard(tool)
             raise SourceError(CODEXBAR_MISSING) from None
+    finally:
+        AUTO_INSTALL_LOCK.release()
 
 
 ASSETS = {
@@ -755,7 +1064,12 @@ def codexbar_asset() -> str:
     raise SourceError(CODEXBAR_PLATFORM)
 
 
-def install(state: Path, cancel: threading.Event | None = None) -> Path:
+def release_url(asset: str) -> str:
+    return (f"https://github.com/steipete/CodexBar/releases/download/v{VERSION}/"
+            f"CodexBarCLI-v{VERSION}-{asset}.tar.gz")
+
+
+def install(state: Path, cancel: threading.Event | None = None, deadline: float | None = None) -> Path:
     """Install the pinned CodexBar CLI into private Lantern state and return its path."""
     asset = codexbar_asset()
     target = tools_dir(state)
@@ -768,26 +1082,61 @@ def install(state: Path, cancel: threading.Event | None = None) -> Path:
             if target.is_symlink():
                 raise RuntimeError("CodexBar install path is a symlink")
             tool = target / "CodexBarCLI"
+            probe = time.monotonic() + 3 if deadline is None else min(deadline, time.monotonic() + 3)
             code, output = runtime.capture([str(tool), "--version"], {"PATH": os.environ.get("PATH", "")},
-                                           time.monotonic() + 3)
+                                           probe, cancel)
             if code == 0 and b"CodexBar 0.74.0" in output:
                 return tool
             raise RuntimeError("Private CodexBar install has the wrong version")
         with tempfile.TemporaryDirectory(prefix=".install-", dir=target.parent) as temporary:
             root = Path(temporary)
             archive = root / "release.tar.gz"
-            url = f"https://github.com/steipete/CodexBar/releases/download/v{VERSION}/CodexBarCLI-v{VERSION}-{asset}.tar.gz"
+            url = release_url(asset)
             digest = hashlib.sha256()
-            with urllib.request.urlopen(url, timeout=30, context=runtime.tls_context()) as response, archive.open("wb") as stream:
-                total = 0
-                while chunk := response.read(65536):
-                    if cancel and cancel.is_set():
-                        raise RuntimeError("CodexBar install was stopped")
-                    total += len(chunk)
-                    if total > 100 * 1024 * 1024:
-                        raise RuntimeError("CodexBar release is too large")
-                    digest.update(chunk)
-                    stream.write(chunk)
+            guard = None
+            try:
+                if cancel is not None and cancel.is_set():
+                    raise RuntimeError("CodexBar install was stopped")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise RuntimeError("CodexBar install timed out")
+                # No deadline and no stop: keep the plain urlopen path. Callers
+                # such as `plan-usage install` have nothing to abort early.
+                if deadline is None and cancel is None:
+                    remote = urllib.request.urlopen(url, timeout=RELEASE_SOCKET_TIMEOUT,
+                                                    context=runtime.tls_context())
+                else:
+                    guard = _SocketDeadline(deadline, cancel)
+                    try:
+                        remote = _bounded_opener(guard).open(url, timeout=_socket_timeout(deadline))
+                    except _DOWNLOAD_ERRORS as exc:
+                        _raise_download(deadline, cancel, exc)
+                with remote, archive.open("wb") as stream:
+                    total = 0
+                    while True:
+                        if cancel is not None and cancel.is_set():
+                            raise RuntimeError("CodexBar install was stopped")
+                        if deadline is not None and time.monotonic() >= deadline:
+                            raise RuntimeError("CodexBar install timed out")
+                        try:
+                            # read() fills its buffer, so a slow trickle would
+                            # not return until the chunk was full.
+                            chunk = remote.read1(65536)
+                        except _DOWNLOAD_ERRORS as exc:
+                            _raise_download(deadline, cancel, exc)
+                        if not chunk:
+                            if cancel is not None and cancel.is_set():
+                                raise RuntimeError("CodexBar install was stopped")
+                            if deadline is not None and time.monotonic() >= deadline:
+                                raise RuntimeError("CodexBar install timed out")
+                            break
+                        total += len(chunk)
+                        if total > 100 * 1024 * 1024:
+                            raise RuntimeError("CodexBar release is too large")
+                        digest.update(chunk)
+                        stream.write(chunk)
+            finally:
+                if guard is not None:
+                    guard.stop()
             if digest.hexdigest() != ASSETS[asset]:
                 raise RuntimeError("CodexBar release digest mismatch")
             unpacked = runtime.private_dir(root / "files")
@@ -810,7 +1159,8 @@ def install(state: Path, cancel: threading.Event | None = None) -> Path:
                     elif not member.issym() and not member.islnk():
                         raise RuntimeError("CodexBar archive entry is invalid")
             cli = unpacked / "CodexBarCLI"
-            code, output = runtime.capture([str(cli), "--version"], {"PATH": os.environ.get("PATH", "")}, time.monotonic() + 3)
+            probe = time.monotonic() + 3 if deadline is None else min(deadline, time.monotonic() + 3)
+            code, output = runtime.capture([str(cli), "--version"], {"PATH": os.environ.get("PATH", "")}, probe, cancel)
             if code or b"CodexBar 0.74.0" not in output:
                 raise RuntimeError("CodexBar release version mismatch")
             os.replace(unpacked, target)

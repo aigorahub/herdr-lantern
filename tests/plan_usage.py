@@ -1140,7 +1140,7 @@ for line in sys.stdin:
         def resolve(state, cancel=None):
             return sources.resolve_codexbar(state, time.monotonic() + 5, cancel or threading.Event())
 
-        def fake_install(state, cancel=None):
+        def fake_install(state, cancel=None, deadline=None):
             tool = sources.tools_dir(state) / "CodexBarCLI"
             tool.parent.mkdir(parents=True)
             tool.write_text("#!/bin/sh\necho 'CodexBar 0.74.0'\n")
@@ -1175,7 +1175,7 @@ for line in sys.stdin:
         with tempfile.TemporaryDirectory() as temporary:
             stopped = threading.Event()
 
-            def stopped_once(state, cancel=None):
+            def stopped_once(state, cancel=None, deadline=None):
                 if not stopped.is_set():
                     stopped.set()
                     raise RuntimeError("CodexBar install was stopped")
@@ -1193,7 +1193,7 @@ for line in sys.stdin:
         with tempfile.TemporaryDirectory() as temporary:
             started, release, found = threading.Event(), threading.Event(), []
 
-            def slow_install(state, cancel=None):
+            def slow_install(state, cancel=None, deadline=None):
                 started.set()
                 release.wait(5)
                 return fake_install(state)
@@ -1406,13 +1406,20 @@ for line in sys.stdin:
                 with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
                     sources.install(Path(temporary) / "herd")
             self.assertIs(opened.call_args.kwargs["context"], context)
+            seen = []
+            real_init = sources.urllib.request.HTTPSHandler.__init__
+
+            def spy(self, *args, **kwargs):
+                seen.append(kwargs.get("context"))
+                return real_init(self, *args, **kwargs)
+
             opener = Mock()
             opener.open.side_effect = urllib.error.URLError("offline")
-            with patch.object(sources.urllib.request, "HTTPSHandler") as handler, \
+            with patch.object(sources.urllib.request.HTTPSHandler, "__init__", spy), \
                     patch.object(sources.urllib.request, "build_opener", return_value=opener):
                 with self.assertRaisesRegex(sources.SourceError, "Last update failed"):
                     sources.fugu_read({"api_key": "private-key"}, time.monotonic() + 5, threading.Event())
-            handler.assert_called_once_with(context=context)
+            self.assertEqual(seen, [context])
 
     def test_watchers_record_the_code_they_run(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1581,6 +1588,491 @@ for line in sys.stdin:
                 with self.assertRaisesRegex(RuntimeError, "archive path"):
                     sources.install(state)
             self.assertFalse((Path(temporary) / "tools/codexbar/escape").exists())
+
+    def test_codexbar_download_returns_by_the_read_deadline(self):
+        # The deadline covers the whole request: a stall, a trickle, headers
+        # that arrive slower than the deadline, and chunk framing. resolve_codexbar
+        # returns before connecting on Windows, so this calls install directly.
+        import socket
+
+        def serve(port_box, accepted, done, mode, cancel=None):
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(("127.0.0.1", 0))
+                server.listen(1)
+                port_box.append(server.getsockname()[1])
+                server.settimeout(0.2)
+                conn = None
+                opened = time.monotonic()
+                while conn is None and time.monotonic() - opened < 5 and not done.is_set():
+                    try:
+                        conn, _ = server.accept()
+                    except socket.timeout:
+                        continue
+                if conn is None:
+                    return
+                accepted.set()
+                # Cancel only after accept. A timer can fire during setup, before
+                # this connection exists, and the accept check then flakes.
+                if cancel is not None:
+                    cancel.set()
+                try:
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except OSError:
+                    pass
+                try:
+                    buf = b""
+                    conn.settimeout(1)
+                    while b"\r\n\r\n" not in buf and len(buf) < 65536 and not done.is_set():
+                        try:
+                            piece = conn.recv(4096)
+                        except socket.timeout:
+                            break
+                        if not piece:
+                            return
+                        buf += piece
+                    head = b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\n"
+                    # Keep the socket open well past the deadline so a client that
+                    # only has an inactivity timeout cannot return in time.
+                    end = time.monotonic() + 3
+                    if mode == "headers":
+                        payload = head + b"x" * 64
+                        for byte in payload:
+                            if done.is_set() or time.monotonic() >= end:
+                                return
+                            conn.sendall(bytes([byte]))
+                            if done.wait(0.04):
+                                return
+                        return
+                    if mode == "chunked":
+                        conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+                    else:
+                        conn.sendall(head)
+                    while time.monotonic() < end and not done.is_set():
+                        if mode in ("trickle", "chunked"):
+                            # No newline: a chunk-size line never completes, and a
+                            # body byte arrives before an inactivity timeout.
+                            conn.sendall(b"1" if mode == "chunked" else b"x")
+                        if done.wait(0.04):
+                            return
+                except OSError:
+                    return
+                finally:
+                    conn.close()
+            finally:
+                server.close()
+
+        def attempt(mode, delay, cancel_on_accept=False):
+            port_box, accepted, done = [], threading.Event(), threading.Event()
+            cancel = threading.Event()
+            thread = threading.Thread(target=serve, args=(port_box, accepted, done, mode,
+                                                           cancel if cancel_on_accept else None),
+                                      daemon=True)
+            thread.start()
+            try:
+                while not port_box and thread.is_alive():
+                    time.sleep(0.01)
+                self.assertTrue(port_box)
+                target = f"http://127.0.0.1:{port_box[0]}/release.tar.gz"
+                real_open = sources.urllib.request.urlopen
+
+                def redirected(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, *, context=None, **kwargs):
+                    # Older install() calls urlopen directly. Keep that path on
+                    # the local server so the real response parser still runs.
+                    if context is None:
+                        return real_open(target, data, timeout)
+                    return real_open(target, data, timeout, context=context)
+
+                with tempfile.TemporaryDirectory() as temporary, \
+                        patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary, "NO_PROXY": "*", "no_proxy": "*"}), \
+                        patch.object(sources.platform, "system", return_value="Darwin"), \
+                        patch.object(sources.platform, "machine", return_value="arm64"), \
+                        patch.object(sources, "release_url", return_value=target, create=True), \
+                        patch.object(sources.urllib.request, "urlopen", side_effect=redirected):
+                    state = Path(temporary) / "herd"
+                    start = time.monotonic()
+                    with self.assertRaisesRegex(RuntimeError, "stopped" if cancel_on_accept else "timed out"):
+                        sources.install(state, cancel, start + delay)
+                    elapsed = time.monotonic() - start
+                self.assertTrue(accepted.is_set(), "download never connected")
+                if not cancel_on_accept:
+                    self.assertGreaterEqual(elapsed, delay * 0.5)
+                self.assertLess(elapsed, 1.5, f"{mode} install returned after {elapsed:.2f}s")
+            finally:
+                done.set()
+                thread.join(2)
+
+        for mode in ("stall", "trickle", "headers", "chunked"):
+            with self.subTest(mode=mode):
+                attempt(mode, 0.5)
+        with self.subTest(mode="cancel"):
+            attempt("stall", 30, cancel_on_accept=True)
+
+    def test_download_deadline_covers_lookup_and_a_slow_handshake(self):
+        # Restarting the handshake every poll slice never finishes a connection
+        # that needs longer than one slice. Name lookup blocks before a socket
+        # exists, so the same deadline has to bound that wait.
+        import errno
+        import select
+        import socket
+
+        def run_install(deadline_in, cancel_after=None, target="http://127.0.0.1:9/release.tar.gz"):
+            cancel = threading.Event()
+            caught = []
+            with tempfile.TemporaryDirectory() as temporary, \
+                    patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary, "NO_PROXY": "*", "no_proxy": "*"}), \
+                    patch.object(sources.platform, "system", return_value="Darwin"), \
+                    patch.object(sources.platform, "machine", return_value="arm64"), \
+                    patch.object(sources, "release_url", return_value=target, create=True):
+                state = Path(temporary) / "herd"
+                start = time.monotonic()
+                if cancel_after is not None:
+                    threading.Thread(target=lambda: (time.sleep(cancel_after), cancel.set()), daemon=True).start()
+                try:
+                    sources.install(state, cancel, start + deadline_in)
+                except BaseException as exc:
+                    caught.append(exc)
+                elapsed = time.monotonic() - start
+            self.assertTrue(caught, "install returned a CodexBar path")
+            return elapsed, caught[0]
+
+        with self.subTest(wait="handshake"):
+            needed = sources._CONNECT_SLICE + 0.15
+            port_box, accepted, done = [], threading.Event(), threading.Event()
+
+            def serve():
+                server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    server.bind(("127.0.0.1", 0))
+                    server.listen(1)
+                    port_box.append(server.getsockname()[1])
+                    server.settimeout(0.2)
+                    conn = None
+                    opened = time.monotonic()
+                    while conn is None and time.monotonic() - opened < 5 and not done.is_set():
+                        try:
+                            conn, _ = server.accept()
+                        except socket.timeout:
+                            continue
+                    if conn is None:
+                        return
+                    accepted.set()
+                    try:
+                        conn.settimeout(1)
+                        buf = b""
+                        while b"\r\n\r\n" not in buf and len(buf) < 65536 and not done.is_set():
+                            piece = conn.recv(4096)
+                            if not piece:
+                                return
+                            buf += piece
+                        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")
+                    except OSError:
+                        return
+                    finally:
+                        conn.close()
+                finally:
+                    server.close()
+
+            thread = threading.Thread(target=serve, daemon=True)
+            thread.start()
+            try:
+                while not port_box and thread.is_alive():
+                    time.sleep(0.01)
+                self.assertTrue(port_box)
+                pending = {}
+                real_connect = socket.socket.connect
+                real_select = select.select
+
+                def slow_connect(self, address):
+                    timeout = self.gettimeout()
+                    if timeout == 0:
+                        pending[id(self)] = (time.monotonic() + needed, address)
+                        raise BlockingIOError(errno.EINPROGRESS, "in progress")
+                    if timeout is not None and timeout < needed:
+                        time.sleep(max(0, timeout))
+                        raise socket.timeout("timed out")
+                    time.sleep(needed)
+                    return real_connect(self, address)
+
+                def complete(sock, address):
+                    pending.pop(id(sock), None)
+                    sock.settimeout(None)
+                    real_connect(sock, address)
+
+                def slow_select(rlist, wlist, xlist, timeout=None):
+                    tracked = [item for item in wlist if id(item) in pending]
+                    if not tracked:
+                        return real_select(rlist, wlist, xlist, timeout)
+                    now = time.monotonic()
+                    ready_at = min(pending[id(item)][0] for item in tracked)
+                    limit = now + needed if timeout is None else now + max(0.0, timeout)
+                    pause = min(ready_at, limit) - now
+                    if pause > 0:
+                        time.sleep(pause)
+                    now = time.monotonic()
+                    ready = []
+                    for item in tracked:
+                        at, address = pending[id(item)]
+                        if now + 1e-3 < at:
+                            continue
+                        complete(item, address)
+                        ready.append(item)
+                    return [], ready, []
+
+                target = f"http://127.0.0.1:{port_box[0]}/release.tar.gz"
+                with patch.object(socket.socket, "connect", slow_connect), \
+                        patch.object(select, "select", slow_select):
+                    elapsed, exc = run_install(needed + 2.0, target=target)
+                self.assertIsInstance(exc, RuntimeError, exc)
+                self.assertIn("digest mismatch", str(exc), f"{exc!r} after {elapsed:.2f}s")
+                self.assertTrue(accepted.is_set(), "slow handshake never completed")
+                self.assertGreaterEqual(elapsed, needed * 0.5)
+                self.assertLess(elapsed, needed + 1.2, f"handshake install returned after {elapsed:.2f}s")
+            finally:
+                done.set()
+                thread.join(2)
+
+        def slow_dns(*_args, **_kwargs):
+            time.sleep(0.8)
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 9))]
+
+        with self.subTest(wait="lookup-deadline"):
+            with patch.object(socket, "getaddrinfo", slow_dns):
+                elapsed, exc = run_install(0.15)
+            self.assertIsInstance(exc, RuntimeError, exc)
+            self.assertIn("timed out", str(exc), f"{exc!r} after {elapsed:.2f}s")
+            self.assertGreaterEqual(elapsed, 0.08)
+            self.assertLess(elapsed, 0.45, f"lookup returned after {elapsed:.2f}s")
+
+        with self.subTest(wait="lookup-cancel"):
+            with patch.object(socket, "getaddrinfo", slow_dns):
+                elapsed, exc = run_install(30, cancel_after=0.15)
+            self.assertIsInstance(exc, RuntimeError, exc)
+            self.assertIn("stopped", str(exc), f"{exc!r} after {elapsed:.2f}s")
+            self.assertGreaterEqual(elapsed, 0.08)
+            self.assertLess(elapsed, 0.5, f"lookup cancel returned after {elapsed:.2f}s")
+
+    def test_failed_connect_on_the_exception_set_tries_the_next_address(self):
+        # Winsock reports an unsuccessful nonblocking connect on the exception
+        # set. A write-only wait never sees it and spends the deadline there.
+        import errno
+        import select
+        import socket
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        good = server.getsockname()
+        bad = ("127.0.0.1", 1)
+        refused = {}
+        saw_exception = []
+        real_connect = socket.socket.connect
+        real_select = select.select
+        real_getsockopt = socket.socket.getsockopt
+
+        def connect(self, address):
+            if address == bad and self.gettimeout() == 0:
+                refused[id(self)] = errno.ECONNREFUSED
+                raise BlockingIOError(errno.EINPROGRESS, "in progress")
+            return real_connect(self, address)
+
+        def windows_select(rlist, wlist, xlist, timeout=None):
+            pending = [item for item in wlist if id(item) in refused]
+            if not pending:
+                return real_select(rlist, wlist, xlist, timeout)
+            # Failure shows up only through exceptfds, which is how Winsock behaves.
+            reported = [item for item in pending if item in xlist]
+            if not reported:
+                if timeout:
+                    time.sleep(timeout)
+                return [], [], []
+            saw_exception.append(bad)
+            return [], [], reported
+
+        def getsockopt(self, level, option, *args):
+            if option == socket.SO_ERROR and not args and id(self) in refused:
+                return refused.pop(id(self))
+            return real_getsockopt(self, level, option, *args)
+
+        infos = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", bad),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", good),
+        ]
+        guard = sources._SocketDeadline(time.monotonic() + 0.8, None)
+        try:
+            with patch.object(socket, "getaddrinfo", return_value=infos), \
+                    patch.object(socket.socket, "connect", connect), \
+                    patch.object(socket.socket, "getsockopt", getsockopt), \
+                    patch.object(select, "select", windows_select):
+                started = time.monotonic()
+                sock = sources._connect_bounded(("ignored.example", 9), None, None, guard)
+                elapsed = time.monotonic() - started
+            try:
+                self.assertEqual(sock.getpeername(), good)
+            finally:
+                sock.close()
+            self.assertTrue(saw_exception, "failed connect was not reported on the exception set")
+            self.assertLess(elapsed, 0.4, f"fallback connect took {elapsed:.2f}s")
+        finally:
+            guard.stop()
+            server.close()
+
+    def test_fugu_read_returns_by_its_deadline_when_the_body_trickles(self):
+        # Socket inactivity does not stop a body that keeps arriving, and a
+        # stop has to abort the read before that cap as well.
+        import socket
+        import urllib.request
+
+        def serve(port_box, ready, done, cancel=None):
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(("127.0.0.1", 0))
+                server.listen(1)
+                port_box.append(server.getsockname()[1])
+                ready.set()
+                server.settimeout(0.2)
+                conn = None
+                opened = time.monotonic()
+                while conn is None and time.monotonic() - opened < 5 and not done.is_set():
+                    try:
+                        conn, _ = server.accept()
+                    except socket.timeout:
+                        continue
+                if conn is None:
+                    return
+                # Same as the download test: stop only after accept, not on a timer.
+                if cancel is not None:
+                    cancel.set()
+                try:
+                    buf = b""
+                    conn.settimeout(1)
+                    while b"\r\n\r\n" not in buf and not done.is_set():
+                        try:
+                            piece = conn.recv(4096)
+                        except socket.timeout:
+                            break
+                        if not piece:
+                            return
+                        buf += piece
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\n")
+                    end = time.monotonic() + 3
+                    while time.monotonic() < end and not done.is_set():
+                        conn.sendall(b"x")
+                        if done.wait(0.03):
+                            return
+                except OSError:
+                    return
+                finally:
+                    conn.close()
+            finally:
+                server.close()
+
+        def attempt(delay, cancel_on_accept=False):
+            port_box, ready, done = [], threading.Event(), threading.Event()
+            cancel = threading.Event()
+            thread = threading.Thread(target=serve, args=(port_box, ready, done,
+                                                           cancel if cancel_on_accept else None),
+                                      daemon=True)
+            thread.start()
+            try:
+                self.assertTrue(ready.wait(2))
+                real_open = urllib.request.OpenerDirector.open
+
+                def open_local(self, fullurl, *args, **kwargs):
+                    if isinstance(fullurl, urllib.request.Request):
+                        fullurl.full_url = f"http://127.0.0.1:{port_box[0]}/v1/usage"
+                    return real_open(self, fullurl, *args, **kwargs)
+
+                with patch.object(urllib.request.OpenerDirector, "open", open_local):
+                    start = time.monotonic()
+                    with self.assertRaises((sources.SourceError, ValueError, OSError)):
+                        sources.fugu_read({"api_key": "k"}, start + delay, cancel)
+                    elapsed = time.monotonic() - start
+                if cancel_on_accept:
+                    self.assertTrue(cancel.is_set(), "fugu read never connected")
+                else:
+                    self.assertGreaterEqual(elapsed, delay * 0.5)
+                self.assertLess(elapsed, 1.5, f"fugu read returned after {elapsed:.2f}s")
+            finally:
+                done.set()
+                thread.join(2)
+
+        with self.subTest(wait="deadline"):
+            attempt(0.5)
+        with self.subTest(wait="cancel"):
+            attempt(30, cancel_on_accept=True)
+
+    def test_install_lock_wait_returns_by_the_read_deadline(self):
+        release, held = threading.Event(), threading.Event()
+
+        def hold():
+            with sources.AUTO_INSTALL_LOCK:
+                held.set()
+                release.wait()
+
+        holder = threading.Thread(target=hold)
+        holder.start()
+        self.assertTrue(held.wait(2), "lock holder did not start")
+        workers = []
+        try:
+            with tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(sources.urllib.request, "urlopen", side_effect=OSError("offline")):
+                state = Path(temporary) / "herd"
+                tool = str(sources.tools_dir(state) / "CodexBarCLI")
+
+                def attempt(delay, cancel_after=None):
+                    box = []
+
+                    def run():
+                        # The deadline starts with the attempt. A clock started
+                        # earlier fails when the worker is scheduled late.
+                        started = time.monotonic()
+                        cancel = threading.Event()
+                        if cancel_after is not None:
+                            threading.Thread(target=lambda: (time.sleep(cancel_after), cancel.set()),
+                                             daemon=True).start()
+                        try:
+                            sources.auto_install(state, started + delay, cancel)
+                        except BaseException as exc:
+                            box.append((time.monotonic() - started, exc))
+                        else:
+                            box.append((time.monotonic() - started, None))
+
+                    worker = threading.Thread(target=run)
+                    workers.append(worker)
+                    worker.start()
+                    worker.join(1.5)
+                    self.assertTrue(box, "lock wait produced no result")
+                    return worker, box[0][0], box[0][1]
+
+                try:
+                    with self.subTest(wait="deadline"):
+                        worker, elapsed, exc = attempt(0.4)
+                        self.assertFalse(worker.is_alive(), f"lock wait still blocked after {elapsed:.2f}s")
+                        self.assertGreaterEqual(elapsed, 0.3)
+                        self.assertLess(elapsed, 1.5, f"lock wait returned after {elapsed:.2f}s")
+                        self.assertIsInstance(exc, sources.SourceError)
+                        self.assertEqual(exc.state, "Last update failed")
+                        self.assertNotIn(tool, sources.AUTO_INSTALL_TRIED)
+                    with self.subTest(wait="cancel"):
+                        worker, elapsed, exc = attempt(30, cancel_after=0.25)
+                        self.assertFalse(worker.is_alive(), f"cancelled lock wait still blocked after {elapsed:.2f}s")
+                        self.assertGreaterEqual(elapsed, 0.2)
+                        self.assertLess(elapsed, 1.5, f"cancelled lock wait returned after {elapsed:.2f}s")
+                        self.assertIsInstance(exc, sources.SourceError)
+                        self.assertEqual(exc.state, sources.CODEXBAR_MISSING)
+                        self.assertNotIn(tool, sources.AUTO_INSTALL_TRIED)
+                finally:
+                    release.set()
+                    holder.join(2)
+                    for worker in workers:
+                        worker.join(2)
+        finally:
+            release.set()
+            holder.join(2)
 
     def test_installer_stops_when_the_watcher_stops(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1827,6 +2319,23 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(self.setup_views()["errors"], [])
         self.assertFalse(any(c[:2] in (["pane", "send-keys"], ["pane", "run"]) for c in self.data()["calls"][start:]))
         self.assert_layout()
+
+    def test_outdated_watcher_that_stops_slowly_is_replaced(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        entry = field.read_json(self.state / "views.json", {})["views"]["usage"]
+        field.write_json(self.state / "usage-watcher.json", {"pid": 200, "code": "older release"})
+        data = self.data()
+        # Past the old 3s stop, and past the 7.5s slice of a 15s setup budget.
+        data["interrupt_delay"] = 8
+        self.save(data)
+        start = len(self.data()["calls"])
+        result = self.setup_views("usage")
+        self.assertEqual(result["errors"], [])
+        calls = self.data()["calls"][start:]
+        runs = [c for c in calls if c[:2] == ["pane", "run"]]
+        self.assertEqual(runs, [["pane", "run", entry["pane_id"], entry["command"]]])
+        self.assertLess(calls.index(["pane", "send-keys", entry["pane_id"], "ctrl+c"]), calls.index(runs[0]))
+        self.assertFalse(any(c[:2] in (["pane", "split"], ["pane", "close"]) for c in calls))
 
     def test_outdated_watcher_that_keeps_running_gets_no_input(self):
         self.assertEqual(self.setup_views()["errors"], [])
