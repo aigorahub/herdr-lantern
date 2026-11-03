@@ -13,6 +13,7 @@ import sys
 import uuid
 
 import field_status as field
+import usage_runtime as runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 KINDS = ("claude", "codex", "cursor", "grok")
@@ -92,10 +93,14 @@ def main() -> int:
     start.add_argument("--route", required=True)
     start.add_argument("--context-file", type=Path, required=True)
     args = parser.parse_args()
+    lock = None
     try:
         if not args.state_dir:
             raise ValueError("--state-dir or LANTERN_HERD_STATE_DIR is required")
         state = Path(args.state_dir)
+        lock = runtime.FileLock(state / "switch.lock")
+        if not lock.acquire():
+            raise ValueError("Another provider switch command is active; retry after it completes")
         config_path = state / "switch-routes.json"
         config = field.read_json(config_path, {"routes": {}})
         routes = config["routes"]
@@ -120,7 +125,8 @@ def main() -> int:
                 entry = {"route": name, **route, "quota": "unknown"}
                 try:
                     resolved, availability = resolve(route)
-                    entry.update(model=resolved["model"], available=availability["available"])
+                    entry.update(model=resolved["model"], available=availability["available"],
+                                 resolved=resolved)
                     if resolved["kind"] == "claude" and availability.get("quota") != "unknown":
                         entry["quota"] = "available" if availability["available"] else "unavailable"
                     if availability.get("reason"):
@@ -147,6 +153,10 @@ def main() -> int:
         resolved, availability = resolve(route)
         if not availability.get("available"):
             raise ValueError(availability.get("reason", "Selected route is unavailable"))
+        selected = next((item for item in offered.get("alternatives", [])
+                         if item.get("route") == args.route), {})
+        if selected.get("resolved") != resolved:
+            raise ValueError("Resolved route changed; inspect a new offer before selecting a model")
         cwd = workspace.get("cwd") or tab.get("cwd")
         if not isinstance(cwd, str) or not cwd:
             raise ValueError("Source workspace has no working directory")
@@ -171,9 +181,12 @@ def main() -> int:
                           "route": args.route, "model": resolved["model"],
                           "original_preserved": True}))
         return 0
-    except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
+    except (ValueError, OSError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return 2
+    finally:
+        if lock is not None:
+            lock.close()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'bin'))
 import agent_switch as switch
+from usage_runtime import FileLock
 
 
 class ProviderSwitch(unittest.TestCase):
@@ -50,8 +51,11 @@ print(json.dumps({'result': value}))
             self.herdr = self.root / 'herdr'
             self.herdr.write_text(f'#!{sys.executable}\nexec(compile(open({str(fake)!r}).read(), {str(fake)!r}, "exec"))\n')
             self.herdr.chmod(0o700)
-        (self.root / 'bin' / 'model-route.py').write_text('''import json
-print(json.dumps({'kind': 'codex', 'model': 'test-model', 'effort': 'high', 'argv': ['-m', 'test-model']}))
+        (self.root / 'bin' / 'model-route.py').write_text('''import json, os
+from pathlib import Path
+fixture = json.loads(Path(os.environ['SWITCH_FIXTURE']).read_text())
+model = fixture.get('model', 'test-model')
+print(json.dumps({'kind': 'codex', 'model': model, 'effort': 'high', 'argv': ['-m', model]}))
 ''')
         (self.root / 'bin' / 'model-preflight.py').write_text('''import json, os, sys
 from pathlib import Path
@@ -111,6 +115,27 @@ sys.exit(0 if fixture['available'] else 3)
         self.assertIn(self.context.read_text(), prompt[3])
         self.assertFalse(any('close' in row or 'stop' in row for row in commands))
         self.assertNotEqual(self.start(offer)[0], 0)
+
+    def test_catalog_change_requires_a_new_explicit_model_selection(self):
+        offer = self.configure_offer()
+        self.change(model='different-model')
+        code, value = self.start(offer)
+        self.assertNotEqual(code, 0, value)
+        self.assertIn('Resolved route changed', value['error'])
+        self.assertFalse(any(row[:2] == ['tab', 'create'] for row in self.commands()))
+
+    def test_concurrent_start_does_not_create_another_tab(self):
+        offer = self.configure_offer()
+        lock = FileLock(self.state / 'switch.lock')
+        self.assertTrue(lock.acquire())
+        try:
+            code, value = self.start(offer)
+            self.assertNotEqual(code, 0, value)
+            self.assertIn('active', value['error'])
+        finally:
+            lock.close()
+        self.assertFalse(any(row[:2] == ['tab', 'create'] for row in self.commands()))
+        self.assertEqual(self.start(offer)[0], 0)
 
     def test_limit_session_change_and_working_source_fail_before_tab_creation(self):
         for changed in ({'session': 'replacement'}, {'status': 'working'}, {'available': False}):
