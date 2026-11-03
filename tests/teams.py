@@ -136,7 +136,16 @@ class Mailbox(unittest.TestCase):
         self.assertNotIn("token", message["sender"])
         self.assertEqual(message["status"], "claimed")
         self.assertRegex(message["receipt"], r"\A[0-9a-f]{48}\Z")
+        with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db, db:
+            db.execute("DROP INDEX IF EXISTS inbox_recipient_status")
+            db.execute("CREATE INDEX IF NOT EXISTS inbox ON messages(recipient,status,created_at)")
+            db.execute("UPDATE messages SET created_at=1234.125")
+            before = db.execute("SELECT payload,receipt,status,created_at FROM messages").fetchall()
         self.assertEqual(self.receive(helper)["messages"], [])
+        with closing(sqlite3.connect(self.state / "mailbox.sqlite3")) as db:
+            self.assertEqual(db.execute("SELECT payload,receipt,status,created_at FROM messages").fetchall(), before)
+            self.assertEqual(db.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='inbox'").fetchall(), [])
+            self.assertEqual([row[2] for row in db.execute("PRAGMA index_info(inbox_recipient_status)")], ["recipient", "status"])
         self.invoke("ack", "--actor", helper, "--message-id", "message-a",
                     "--receipt", message["receipt"])
         self.assertEqual(self.receive(helper)["messages"], [])
