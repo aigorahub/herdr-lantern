@@ -31,6 +31,15 @@ launcher. Windows also needs Git for Windows. See [Windows](#windows).
 | CodexBar CLI 0.74.0 | Claude and Grok usage rows | Plan Usage installs it once by itself. If that fails, the row says to ask Lantern to install it. |
 | The Fugu profile's API key | the Fugu usage row | The row says the Sakana API key is missing. |
 
+## Community explainer
+
+[Watch the community explainer](https://github.com/user-attachments/assets/97e63ab1-f1c0-47db-8e22-41e8237bfe07)
+by [salmonumbrella](https://github.com/salmonumbrella). It covers the Herdr
+workspace model, Lantern readouts, agent routing, teams, and daily workflows.
+The video describes version 0.18.0. Its plan usage values are illustrative.
+See [the contribution](https://github.com/aigorahub/herdr-lantern/issues/77)
+for context. Use the current instructions below for setup.
+
 ## Herdr desktop app
 
 The desktop app uses `hc` and `herdr-app`. It has a separate Lantern entry
