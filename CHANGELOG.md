@@ -8,6 +8,10 @@ All notable changes to Lantern, by Elves are documented here.
 
 - Add Claude status hooks to native desktop chat launches. Herdr can show
   working, blocked, idle, and done states (issue #78).
+- Replace the mailbox timestamp index with a recipient/status index to avoid
+  a reproduced Windows SQLite index error during message status updates.
+  Existing messages and receipts stay intact.
+
 ### Added
 
 - Explicit Gemini seats with a static package inventory, dated lifecycle policy,
