@@ -158,6 +158,22 @@ For a request such as "have Codex review battle-paddle #166":
 
 ### Model phrase parsing and defaults
 
+Gemini is an explicit seat option, not a default. Require an exact current ID
+and run `model-route gemini "<exact-id> [thinking-level]"`, then preflight.
+Never select Flash, another model, or another provider implicitly. Gemini
+preflight is static package/lifecycle evidence: `available: null` and
+`launchable: true` do not establish account access or successful inference.
+The CLI may remap/fallback even with explicit `--model`; never promise strict
+backend identity. Require the user's acknowledgement before setting
+`LANTERN_GEMINI_ACK_NATIVE_ROUTING=1`; do not set it just to pass a check.
+Effort requires the owner-installed native settings bridge and launcher
+capability check. Pass returned argv unchanged after Herdr `--`, including
+private `--thinking-level` only when configured. Never invent `--effort`.
+The target pane must resolve canonical `gemini` to that launcher; controller
+PATH/environment is not evidence about another pane. Unverified target setup
+is a rollout gap to report. See `docs/gemini-routing.md`. This does not change
+Lantern's own helper harness or canonical driver ownership.
+
 A model phrase has separate family, effort, and fast parts. Never pass the
 whole phrase as one model slug. Before a Codex, Claude, Cursor, or Grok seat, run
 `$HERDR_PLUGIN_ROOT/bin/model-route <codex|claude|cursor|grok> "<model phrase>"`.
