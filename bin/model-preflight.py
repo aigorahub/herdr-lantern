@@ -345,6 +345,14 @@ def fugu_models() -> dict[str, set[str]]:
 
 
 def check(kind: str, model: str, effort: str) -> int:
+    if kind == "gemini":
+        try:
+            payload = model_catalog.gemini_route_info(model + (" " + effort if effort else ""))
+        except (ValueError, OSError) as error:
+            return report_unavailable(kind, model, str(error), None)
+        payload.update(available=None, launchable=True, substitute=None, quota="unknown")
+        print(json.dumps(payload, separators=(",", ":")))
+        return 0
     if kind == "fugu":
         models = fugu_models()
         if model not in models:
@@ -440,8 +448,8 @@ def check(kind: str, model: str, effort: str) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) not in {3, 4} or sys.argv[1] not in {"claude", "cursor", "grok", "codex", "fugu"}:
-        print("usage: model-preflight <claude|cursor|grok|codex|fugu> <model> [effort]", file=sys.stderr)
+    if len(sys.argv) not in {3, 4} or sys.argv[1] not in {"claude", "cursor", "grok", "codex", "fugu", "gemini"}:
+        print("usage: model-preflight <claude|cursor|grok|codex|fugu|gemini> <model> [effort]", file=sys.stderr)
         return 2
     try:
         return check(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else "")
