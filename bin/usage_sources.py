@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -401,31 +402,237 @@ def parse_fugu(payload: object, credential: str, observed: float) -> dict:
             "credits": [], "observed_at": observed, "source": "Sakana /v1/usage"}
 
 
-# urllib stays in the socket call until this elapses. A stop is noticed after it.
+# Absolute cap for one Fugu read. urllib's timeout is inactivity, so a trickle
+# would otherwise run until the body ended. A stopped read is aborted sooner.
+# Setup waits this long for the old watcher to exit.
 FUGU_READ_TIMEOUT = 10
+# A blocked release read uses this unless the usage read's deadline is sooner.
+RELEASE_SOCKET_TIMEOUT = 30
+# create_connection returns only after the handshake. Retry in slices so a
+# stop or deadline is noticed during connect, before the socket exists to abort.
+_CONNECT_SLICE = 0.2
+
+
+class _SocketDeadline:
+    """Abort a download when its deadline passes or the watcher stops.
+
+    urllib's timeout resets on every received byte, and one response read can
+    receive several times. Closing urllib's own socket does not cancel the
+    duplicate the response body reads. Shutting down a duplicate we keep
+    aborts every read on that connection.
+    """
+
+    def __init__(self, deadline: float | None, cancel: threading.Event | None):
+        self.deadline = deadline
+        self.cancel = cancel
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._socks: list[socket.socket] = []
+        self._thread: threading.Thread | None = None
+
+    def arm(self, sock: socket.socket) -> None:
+        if self.deadline is None and self.cancel is None:
+            return
+        try:
+            held = sock.dup()
+        except OSError:
+            return
+        with self._lock:
+            if self._stop.is_set():
+                held.close()
+                return
+            self._socks.append(held)
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name="usage-socket-deadline", daemon=True)
+                self._thread.start()
+        if self._due():
+            self._shutdown()
+
+    def _due(self) -> bool:
+        if self._stop.is_set():
+            return False
+        if self.cancel is not None and self.cancel.is_set():
+            return True
+        return self.deadline is not None and time.monotonic() >= self.deadline
+
+    def _shutdown(self) -> None:
+        with self._lock:
+            socks = list(self._socks)
+        for held in socks:
+            try:
+                held.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            if self._due():
+                self._shutdown()
+                return
+            wait = 0.05
+            if self.deadline is not None:
+                remaining = self.deadline - time.monotonic()
+                if remaining <= 0:
+                    if not self._stop.is_set():
+                        self._shutdown()
+                    return
+                wait = min(wait, remaining)
+            if self.cancel is not None:
+                if self.cancel.wait(wait) and not self._stop.is_set():
+                    self._shutdown()
+                    return
+            elif self._stop.wait(wait):
+                return
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(0.2)
+        with self._lock:
+            socks, self._socks = self._socks, []
+        for held in socks:
+            try:
+                held.close()
+            except OSError:
+                pass
+
+
+def _socket_timeout(deadline: float | None) -> float:
+    if deadline is None:
+        return RELEASE_SOCKET_TIMEOUT
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    return min(RELEASE_SOCKET_TIMEOUT, max(0.001, remaining))
+
+
+def _connect_bounded(address, timeout, source_address, guard: _SocketDeadline):
+    if guard.deadline is None and guard.cancel is None:
+        return socket.create_connection(address, timeout, source_address)
+    while True:
+        if guard._due() or (guard.cancel is not None and guard.cancel.is_set()):
+            raise TimeoutError
+        if guard.deadline is None:
+            slice_timeout = _CONNECT_SLICE
+        else:
+            remaining = guard.deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            slice_timeout = min(_CONNECT_SLICE, remaining)
+        try:
+            sock = socket.create_connection(address, slice_timeout, source_address)
+        except (TimeoutError, socket.timeout):
+            continue
+        guard.arm(sock)
+        try:
+            inactivity = _socket_timeout(guard.deadline)
+        except TimeoutError:
+            sock.close()
+            raise
+        try:
+            sock.settimeout(inactivity)
+        except OSError:
+            pass
+        return sock
+
+
+def _prepare_connect(conn, guard: _SocketDeadline) -> None:
+    if guard.deadline is None and guard.cancel is None:
+        return
+
+    def create(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+        return _connect_bounded(address, timeout, source_address, guard)
+
+    conn._create_connection = create
+
+
+class _GuardedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *args, guard: _SocketDeadline | None = None, **kwargs):
+        self._guard = guard
+        super().__init__(*args, **kwargs)
+
+    def connect(self):
+        if self._guard is not None:
+            _prepare_connect(self, self._guard)
+        super().connect()
+
+
+class _GuardedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, guard: _SocketDeadline | None = None, **kwargs):
+        self._guard = guard
+        super().__init__(*args, **kwargs)
+
+    def connect(self):
+        if self._guard is not None:
+            _prepare_connect(self, self._guard)
+        super().connect()
+
+
+class _GuardedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, guard: _SocketDeadline):
+        super().__init__()
+        self._guard = guard
+
+    def http_open(self, req):
+        return self.do_open(_GuardedHTTPConnection, req, guard=self._guard)
+
+
+class _GuardedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, guard: _SocketDeadline, context):
+        super().__init__(context=context)
+        self._guard = guard
+
+    def https_open(self, req):
+        return self.do_open(_GuardedHTTPSConnection, req, context=self._context, guard=self._guard)
+
+
+def _bounded_opener(guard: _SocketDeadline, extra=()):
+    return urllib.request.build_opener(*extra, _GuardedHTTPHandler(guard),
+                                       _GuardedHTTPSHandler(guard, runtime.tls_context()))
+
+
+def _raise_download(deadline: float | None, cancel: threading.Event | None, exc: BaseException) -> None:
+    if cancel is not None and cancel.is_set():
+        raise RuntimeError("CodexBar install was stopped") from None
+    reason = getattr(exc, "reason", exc)
+    timed_out = isinstance(reason, (TimeoutError, socket.timeout))
+    if deadline is not None and (time.monotonic() >= deadline or timed_out):
+        raise RuntimeError("CodexBar install timed out") from None
+    raise exc
+
+
+_DOWNLOAD_ERRORS = (OSError, urllib.error.URLError, http.client.HTTPException, TimeoutError)
 
 
 def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
     if cancel.is_set() or time.monotonic() >= deadline:
         raise SourceError("Last update failed")
+    bound = min(deadline, time.monotonic() + FUGU_READ_TIMEOUT)
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
-                                         urllib.request.HTTPSHandler(context=runtime.tls_context()))
+    guard = _SocketDeadline(bound, cancel)
+    opener = _bounded_opener(guard, (urllib.request.ProxyHandler({}), NoRedirect()))
     request = urllib.request.Request("https://api.sakana.ai/v1/usage",
                                      headers={"Authorization": "Bearer " + scope["api_key"],
                                               "Accept": "application/json"})
     try:
-        with opener.open(request, timeout=min(FUGU_READ_TIMEOUT, max(.1, deadline - time.monotonic()))) as response:
-            raw = response.read(1024 * 1024 + 1)
+        try:
+            response = opener.open(request, timeout=_socket_timeout(bound))
+        except urllib.error.HTTPError as exc:
+            raise SourceError("Sign in required" if exc.code in (401, 403) else "Last update failed") from None
+        except _DOWNLOAD_ERRORS:
+            raise SourceError("Last update failed") from None
+        try:
+            with response:
+                raw = response.read(1024 * 1024 + 1)
+        except _DOWNLOAD_ERRORS:
+            raise SourceError("Last update failed") from None
         if len(raw) > 1024 * 1024 or cancel.is_set():
             raise SourceError("Last update failed")
         return parse_fugu(json.loads(raw), scope["api_key"], time.time())
-    except urllib.error.HTTPError as exc:
-        raise SourceError("Sign in required" if exc.code in (401, 403) else "Last update failed") from None
-    except (urllib.error.URLError, TimeoutError):
-        raise SourceError("Last update failed") from None
+    finally:
+        guard.stop()
 
 
 def parse_agy(payload: object, scope: dict, observed: float) -> dict:
@@ -774,37 +981,9 @@ def codexbar_asset() -> str:
     raise SourceError(CODEXBAR_PLATFORM)
 
 
-# A blocked release read uses this unless the usage read's deadline is sooner.
-RELEASE_SOCKET_TIMEOUT = 30
-
-
-def _socket_timeout(deadline: float | None) -> float:
-    if deadline is None:
-        return RELEASE_SOCKET_TIMEOUT
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise RuntimeError("CodexBar install timed out")
-    return min(RELEASE_SOCKET_TIMEOUT, remaining)
-
-
-def _limit_response(response, deadline: float | None) -> None:
-    """Shrink the next socket read to the time the usage read has left.
-
-    urlopen keeps the timeout it was opened with, so a later chunk can block
-    for that full interval after the deadline has moved closer.
-    """
-    fp = getattr(response, "fp", None)
-    raw = getattr(fp, "raw", None)
-    sock = getattr(raw, "_sock", None)
-    if sock is None:
-        inner = getattr(fp, "fp", None)
-        sock = getattr(getattr(inner, "raw", None), "_sock", None)
-    if sock is None:
-        return
-    try:
-        sock.settimeout(_socket_timeout(deadline))
-    except OSError:
-        pass
+def release_url(asset: str) -> str:
+    return (f"https://github.com/steipete/CodexBar/releases/download/v{VERSION}/"
+            f"CodexBarCLI-v{VERSION}-{asset}.tar.gz")
 
 
 def install(state: Path, cancel: threading.Event | None = None, deadline: float | None = None) -> Path:
@@ -829,42 +1008,52 @@ def install(state: Path, cancel: threading.Event | None = None, deadline: float 
         with tempfile.TemporaryDirectory(prefix=".install-", dir=target.parent) as temporary:
             root = Path(temporary)
             archive = root / "release.tar.gz"
-            url = f"https://github.com/steipete/CodexBar/releases/download/v{VERSION}/CodexBarCLI-v{VERSION}-{asset}.tar.gz"
+            url = release_url(asset)
             digest = hashlib.sha256()
+            guard = None
             try:
-                remote = urllib.request.urlopen(url, timeout=_socket_timeout(deadline), context=runtime.tls_context())
-            except (TimeoutError, socket.timeout):
-                if deadline is not None:
-                    raise RuntimeError("CodexBar install timed out") from None
-                raise
-            except urllib.error.URLError as exc:
-                if deadline is not None and isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
-                    raise RuntimeError("CodexBar install timed out") from None
-                raise
-            with remote, archive.open("wb") as stream:
-                total = 0
-                while True:
-                    if cancel and cancel.is_set():
-                        raise RuntimeError("CodexBar install was stopped")
-                    if deadline is not None and time.monotonic() >= deadline:
-                        raise RuntimeError("CodexBar install timed out")
-                    _limit_response(remote, deadline)
+                if cancel is not None and cancel.is_set():
+                    raise RuntimeError("CodexBar install was stopped")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise RuntimeError("CodexBar install timed out")
+                # No deadline and no stop: keep the plain urlopen path. Callers
+                # such as `plan-usage install` have nothing to abort early.
+                if deadline is None and cancel is None:
+                    remote = urllib.request.urlopen(url, timeout=RELEASE_SOCKET_TIMEOUT,
+                                                    context=runtime.tls_context())
+                else:
+                    guard = _SocketDeadline(deadline, cancel)
                     try:
-                        # read() fills its buffer, so a slow trickle would not
-                        # return until the chunk was full. read1 comes back
-                        # after one socket read and the deadline can be checked.
-                        chunk = remote.read1(65536)
-                    except (TimeoutError, socket.timeout):
-                        if deadline is None:
-                            raise
-                        raise RuntimeError("CodexBar install timed out") from None
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > 100 * 1024 * 1024:
-                        raise RuntimeError("CodexBar release is too large")
-                    digest.update(chunk)
-                    stream.write(chunk)
+                        remote = _bounded_opener(guard).open(url, timeout=_socket_timeout(deadline))
+                    except _DOWNLOAD_ERRORS as exc:
+                        _raise_download(deadline, cancel, exc)
+                with remote, archive.open("wb") as stream:
+                    total = 0
+                    while True:
+                        if cancel is not None and cancel.is_set():
+                            raise RuntimeError("CodexBar install was stopped")
+                        if deadline is not None and time.monotonic() >= deadline:
+                            raise RuntimeError("CodexBar install timed out")
+                        try:
+                            # read() fills its buffer, so a slow trickle would
+                            # not return until the chunk was full.
+                            chunk = remote.read1(65536)
+                        except _DOWNLOAD_ERRORS as exc:
+                            _raise_download(deadline, cancel, exc)
+                        if not chunk:
+                            if cancel is not None and cancel.is_set():
+                                raise RuntimeError("CodexBar install was stopped")
+                            if deadline is not None and time.monotonic() >= deadline:
+                                raise RuntimeError("CodexBar install timed out")
+                            break
+                        total += len(chunk)
+                        if total > 100 * 1024 * 1024:
+                            raise RuntimeError("CodexBar release is too large")
+                        digest.update(chunk)
+                        stream.write(chunk)
+            finally:
+                if guard is not None:
+                    guard.stop()
             if digest.hexdigest() != ASSETS[asset]:
                 raise RuntimeError("CodexBar release digest mismatch")
             unpacked = runtime.private_dir(root / "files")

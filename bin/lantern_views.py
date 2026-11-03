@@ -325,9 +325,10 @@ def setup(state: Path, root: Path, binary: str, workspace: str, home: str,
                     or watcher_processes(latest, root, state, kind) != watcher):
                 raise RuntimeError("Readout identity changed before restart")
             call(["pane", "send-keys", pid, "ctrl+c"], end)
-            # The watcher exits only after its current read returns. Fugu stays
-            # in the socket call until FUGU_READ_TIMEOUT, so a shorter wait
-            # reports the pane stopped and never starts the replacement.
+            # The watcher process exits only after its current read returns.
+            # A socket read is aborted when the watcher stops, and a Fugu read
+            # also returns within FUGU_READ_TIMEOUT. A shorter wait reports the
+            # pane stopped and never starts the replacement.
             settle = min(deadline, time.monotonic() + sources.FUGU_READ_TIMEOUT)
             while occupancy(info, root, state, kind) != "idle":
                 if time.monotonic() >= settle:
