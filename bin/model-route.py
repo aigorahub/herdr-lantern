@@ -418,9 +418,18 @@ def fugu_route(phrase: str) -> dict[str, object]:
     return fugu_result(model, fugu_effort(model, effort))
 
 
+def gemini_route(phrase: str) -> dict[str, object]:
+    try:
+        if phrase == "list":
+            return model_catalog.gemini_inventory()
+        return model_catalog.gemini_route_info(phrase)
+    except (ValueError, OSError) as error:
+        fail(str(error))
+
+
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] not in {"codex", "claude", "cursor", "grok", "fugu"}:
-        print("usage: model-route <codex|claude|cursor|grok|fugu> <spoken model phrase|default>", file=sys.stderr)
+    if len(sys.argv) < 3 or sys.argv[1] not in {"codex", "claude", "cursor", "grok", "fugu", "gemini"}:
+        print("usage: model-route <codex|claude|cursor|grok|fugu|gemini> <spoken model phrase|default>", file=sys.stderr)
         return 2
     phrase = " ".join(sys.argv[2:]).strip()
     try:
@@ -430,6 +439,7 @@ def main() -> int:
             "cursor": cursor_route,
             "grok": grok_route,
             "fugu": fugu_route,
+            "gemini": gemini_route,
         }
         route = routes[sys.argv[1]](phrase)
     except RouteError as error:

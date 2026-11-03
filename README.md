@@ -31,6 +31,15 @@ launcher. Windows also needs Git for Windows. See [Windows](#windows).
 | CodexBar CLI 0.74.0 | Claude and Grok usage rows | Plan Usage installs it once by itself. If that fails, the row says to ask Lantern to install it. |
 | The Fugu profile's API key | the Fugu usage row | The row says the Sakana API key is missing. |
 
+## Community explainer
+
+[Watch the community explainer](https://github.com/user-attachments/assets/97e63ab1-f1c0-47db-8e22-41e8237bfe07)
+by [salmonumbrella](https://github.com/salmonumbrella). It covers the Herdr
+workspace model, Lantern readouts, agent routing, teams, and daily workflows.
+The video describes version 0.18.0. Its plan usage values are illustrative.
+See [the contribution](https://github.com/aigorahub/herdr-lantern/issues/77)
+for context. Use the current instructions below for setup.
+
 ## Herdr desktop app
 
 The desktop app uses `hc` and `herdr-app`. It has a separate Lantern entry
@@ -55,6 +64,13 @@ Herdr retain their legacy action targets and appear in the readouts.
 read model adapter is read only. Lantern uses `herdr-app` and `hc` to change
 native work. It uses legacy commands only for legacy sessions. Do not stop
 the old Herdr server while those sessions are connected.
+
+Claude chat launches add status hooks to their private workdir settings. They report
+idle at session start, working for prompts and tools, blocked for permission
+requests, and done when a response stops. The hooks write to the agent's
+terminal and do nothing outside Herdr. A done status means the response
+stopped; it does not prove task completion. Other helpers keep their own
+status reporting. Restart an existing Claude chat to load these hooks.
 
 Desktop readouts currently show local spaces. They omit remote app spaces
 and keep local work visible. The legacy plugin keeps its remote support.
@@ -181,7 +197,29 @@ Monitor events can set or clear notes with `note needs-you set|clear <id>` and
 for the user; noteworthy status or review gates with no user action belong
 under Important. Legacy review-gate notes display under Important until cleared.
 Use `note keep set|clear <pane-or-tab-id>` only for an explicitly requested
-Keep entry, and `note done set|clear <pane-id>` for a verified short outcome.
+Keep entry. A stopped agent appears under Verification Pending. Only a recorded
+review with evidence can move it to Done. An incomplete, blocked, cancelled, or
+superseded outcome appears under Not Complete. Old `note done` text cannot accept
+work.
+
+Register each new assignment with `field-status task <pane-id> <task-id>`. Run
+`field-status pending` to get JSON with the current task and token. Inspect the
+output and record the review:
+
+```sh
+field-status outcome <pane-id> --task <task-id> --token <token> \
+  --status complete --evidence 'commit and check results' --summary 'Verified result'
+```
+
+Use `incomplete`, `blocked`, `cancelled`, or `superseded` for other outcomes.
+Both `pending` and `refresh` return exit code 3 while reviews remain pending.
+`watch` continues to run. Each token binds the task generation, session, terminal,
+pane, tab, provider sequence, and observed work cycle. A new assignment, turn,
+or replacement session invalidates the old review. Herdr versions without
+`completion_seq` use `state_change_seq`. Native terminals use their terminal ID
+and status timestamp. Sources with no sequence or session/terminal identity can
+still display status, but cannot receive an accepted outcome. Lantern keeps the
+Herdr 0.7.5 minimum.
 
 Plan Usage includes plans with an open agent tab anywhere on this Herdr
 server. Idle and Done tabs count. Tabs hidden from Field Status still count.
@@ -562,6 +600,9 @@ Reopen Lantern after an upgrade to load it.
 
 `bin/model-route` reads the installed catalogs and returns separate argv.
 `bin/model-preflight` checks the resolved route before a herd change.
+Gemini seats use exact IDs and a guarded native thinking bridge, with no default
+model or Lantern substitution. Static package evidence is separate from account
+access; native CLI remapping remains explicit. See [Gemini routing](docs/gemini-routing.md).
 
 - Codex: `astra`, `gpt-6 astra`, and `astra high` select `gpt-6-astra`.
   The default is live Astra at its catalog effort, currently medium, with

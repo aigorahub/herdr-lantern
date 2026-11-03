@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import hashlib
+import uuid
 import json
 import os
 import re
@@ -13,6 +15,7 @@ import sys
 import tempfile
 import textwrap
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -247,14 +250,88 @@ def rows_for(tabs: list[dict], agents: list[dict], workspaces: list[dict]) -> li
                 "agent": clean(agent_name),
                 "raw_status": raw_status,
                 "state_change_seq": agent.get("state_change_seq"),
+                "completion_seq": agent.get("completion_seq"),
+                "agent_session": agent.get("agent_session"),
+                "has_agent": bool(agent),
                 "sort_index": index * 1000 + occupant_index,
             })
     return rows
 
 
 def reconcile(live: list[dict], previous: dict, now: datetime) -> list[dict]:
-    # Closing a verified completed session removes it from the field at once.
-    return list(live)
+    old = {row.get("pane_id"): row for row in previous.get("rows", [])}
+    for row in live:
+        prior = old.get(row.get("pane_id"), {})
+        same_session = all(row.get(key) == prior.get(key) for key in
+                           ("tab_id", "terminal_id", "agent_session", "agent"))
+        epoch = prior.get("work_epoch", 0) if same_session else 0
+        if not same_session or (row["raw_status"] == "working" and prior.get("raw_status") != "working"):
+            epoch += 1
+        row["work_epoch"] = epoch
+        row["session_epoch"] = prior.get("session_epoch") if same_session else None
+        if not row["session_epoch"]:
+            row["session_epoch"] = uuid.uuid4().hex
+    return live
+
+
+def acceptance_state(state_dir: Path) -> dict:
+    data = read_json(state_dir / "field-status-outcomes.json", {"tasks": {}, "outcomes": {}})
+    if not isinstance(data.get("tasks"), dict) or not isinstance(data.get("outcomes"), dict):
+        raise ValueError("invalid field status outcomes")
+    return data
+
+
+def outcome_token(row: dict, task: dict) -> str:
+    # Bind to both the provider turn and the observed work cycle. New task
+    # registrations invalidate an outcome even when the provider stays idle.
+    identity = {key: row.get(key) for key in ("tab_id", "pane_id", "terminal_id", "agent_session",
+                "agent", "state_change_seq", "completion_seq", "work_epoch", "session_epoch", "raw_status")}
+    identity["task"] = task
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+def apply_outcomes(rows: list[dict], data: dict) -> None:
+    for row in rows:
+        task = data["tasks"].get(row.get("pane_id"), {})
+        row["task"] = task.get("id")
+        row["outcome_token"] = outcome_token(row, task)
+        row["outcome"] = None
+        outcome = data["outcomes"].get(row.get("pane_id"), {})
+        if outcome.get("token") == row["outcome_token"]:
+            row["outcome"] = outcome
+
+
+def pending_rows(rows: list[dict], home_pane_id: str = "") -> list[dict]:
+    return [{"pane_id": row["pane_id"], "tab_id": row["tab_id"], "task": row.get("task"),
+             "token": row["outcome_token"], "state": row["raw_status"]} for row in rows
+            if section_for(row, {}, home_pane_id) == "VERIFICATION PENDING"]
+
+
+def find_agent(rows: list[dict], pane: str) -> dict:
+    matches = [row for row in rows if row.get("pane_id") == pane and row.get("has_agent")]
+    if len(matches) != 1:
+        raise ValueError(f"live agent {pane!r} unavailable")
+    return matches[0]
+
+
+def record_outcome(row: dict, data: dict, task_id: str, token: str,
+                   status: str, evidence: str, summary: str) -> None:
+    task = data["tasks"].get(row["pane_id"], {})
+    if task.get("id") != task_id or not task_id:
+        raise ValueError("task is not registered for this pane")
+    if row["raw_status"] not in ("done", "idle", "blocked"):
+        raise ValueError("agent has not stopped")
+    if status == "complete" and row["raw_status"] == "blocked":
+        raise ValueError("a blocked agent cannot be complete")
+    if not (row.get("terminal_id") or row.get("agent_session")) or all(
+            row.get(key) is None for key in ("completion_seq", "state_change_seq")):
+        raise ValueError("source cannot identify the stopped turn; keep verification pending")
+    if token != outcome_token(row, task):
+        raise ValueError("stale outcome token; read pending again")
+    if not evidence.strip() or not summary.strip():
+        raise ValueError("outcome requires evidence and summary")
+    data["outcomes"][row["pane_id"]] = {"token": token, "task": task_id, "status": status,
+                                        "evidence": evidence.strip(), "summary": clean(summary, 180)}
 
 
 def notes(state_dir: Path) -> dict:
@@ -318,8 +395,13 @@ def section_for(row: dict, note_data: dict, home_pane_id: str) -> str | None:
         return None
     if row.get("raw_status") == "working":
         return "IN MOTION"
-    if row.get("raw_status") == "done":
-        return "DONE"
+    if row.get("has_agent") and row.get("raw_status") in ("done", "idle", "blocked"):
+        outcome = row.get("outcome") or {}
+        if outcome.get("status") == "complete":
+            return "DONE"
+        if outcome:
+            return "NOT COMPLETE"
+        return "VERIFICATION PENDING"
     keep = note_data.get("keep", {})
     if row.get("pane_id") in keep or row.get("tab_id") in keep:
         return "KEEP"
@@ -327,10 +409,8 @@ def section_for(row: dict, note_data: dict, home_pane_id: str) -> str | None:
 
 
 def done_summary(row: dict, note_data: dict) -> str:
-    item = note_data.get("done", {}).get(row.get("pane_id"))
-    if isinstance(item, dict) and item.get("identity") == row_identity(row):
-        return clean(item.get("summary"), 180)
-    return "Outcome not yet verified"
+    outcome = row.get("outcome") or {}
+    return clean(outcome.get("summary"), 180) or "Outcome not yet verified"
 
 
 def append_note_section(lines: list[str], title: str, actions: dict, shade: str,
@@ -360,6 +440,8 @@ def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True
     ordered = sorted(rows, key=lambda item: (ORDER.get(item["raw_status"], 4), item["sort_index"]))
     for title, shade, selected in (
         ("IN MOTION", "yellow", [row for row in ordered if section_for(row, note_data, home_pane_id) == "IN MOTION"]),
+        ("VERIFICATION PENDING", "yellow", [row for row in ordered if section_for(row, note_data, home_pane_id) == "VERIFICATION PENDING"]),
+        ("NOT COMPLETE", "red", [row for row in ordered if section_for(row, note_data, home_pane_id) == "NOT COMPLETE"]),
         ("DONE", "green", [row for row in ordered if section_for(row, note_data, home_pane_id) == "DONE"]),
         ("KEEP", "blue", [row for row in ordered if section_for(row, note_data, home_pane_id) == "KEEP"]),
     ):
@@ -372,19 +454,40 @@ def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True
             tab = clean(row.get("tab"))
             if useful_tab_detail(tab, name):
                 lines.append("  " + fit(tab, width - 2))
-            if title == "DONE":
+            if title in ("DONE", "NOT COMPLETE", "VERIFICATION PENDING"):
                 lines.extend(textwrap.wrap("  " + done_summary(row, note_data), width=width,
                                            subsequent_indent="  ", break_long_words=False))
         lines.append("")
     return "\n".join(lines) + "\n"
 
 
+@contextmanager
+def state_lock(state_dir: Path):
+    from usage_runtime import FileLock
+    lock = FileLock(state_dir / "field-status.lock")
+    try:
+        deadline = time.monotonic() + 5
+        while not lock.acquire():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Field Status state is busy; retry")
+            time.sleep(0.05)
+        yield
+    finally:
+        lock.close()
+
+
 def refresh(state_dir: Path, binary: str, timeout: float, now: datetime, colors: bool) -> str:
+    with state_lock(state_dir):
+        return refresh_locked(state_dir, binary, timeout, now, colors)
+
+
+def refresh_locked(state_dir: Path, binary: str, timeout: float, now: datetime, colors: bool) -> str:
     tabs, agents, workspaces = snapshot(binary, timeout)
     path = state_dir / "field-status-rows.json"
     previous = read_json(path, {"rows": []})
     live = rows_for(tabs, agents, workspaces)
     rows = reconcile(live, previous, now)
+    apply_outcomes(rows, acceptance_state(state_dir))
     note_data = notes(state_dir)
     pane_record = read_json(state_dir / "views.json", {})
     home_pane_id = clean(pane_record.get("home_pane_id"))
@@ -401,6 +504,17 @@ def main() -> int:
     parser.add_argument("--plain", action="store_true", help="omit ANSI colors")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("refresh", help="refresh and print compact field view")
+    sub.add_parser("pending", help="list stopped agents without a current outcome; exit 3 when any")
+    task = sub.add_parser("task", help="register new work and invalidate the previous outcome")
+    task.add_argument("pane")
+    task.add_argument("task_id")
+    outcome = sub.add_parser("outcome", help="record a review against a live stopped turn")
+    outcome.add_argument("pane")
+    outcome.add_argument("--task", required=True)
+    outcome.add_argument("--token", required=True)
+    outcome.add_argument("--status", choices=("complete", "incomplete", "blocked", "cancelled", "superseded"), required=True)
+    outcome.add_argument("--evidence", required=True)
+    outcome.add_argument("--summary", required=True)
     pane = sub.add_parser("pane", help="open or reuse the Field Status pane")
     pane.add_argument("--setup-timeout", type=float, default=15)
     watch = sub.add_parser("watch", help="redraw only when live field or notes change")
@@ -416,6 +530,8 @@ def main() -> int:
     state_dir = Path(args.state_dir)
     try:
         if args.command == "note":
+            if args.kind == "done" and args.operation == "set":
+                raise ValueError("note done cannot accept a task; use task, pending, and outcome with evidence")
             if args.operation == "set" and not clean(args.text):
                 parser.error("note set requires text")
             data = notes(state_dir)
@@ -450,6 +566,26 @@ def main() -> int:
             print(f"Field Status pane {pane_id} {'opened' if created else 'reused'}")
             return 0
         binary = resolve_herdr(args.herdr)
+        if args.command in ("task", "outcome", "pending"):
+            with state_lock(state_dir):
+                refresh_locked(state_dir, binary, args.timeout, datetime.now(timezone.utc), False)
+                rows = read_json(state_dir / "field-status-rows.json", {"rows": []})["rows"]
+                data = acceptance_state(state_dir)
+                if args.command == "pending":
+                    home = clean(read_json(state_dir / "views.json", {}).get("home_pane_id"))
+                    pending = pending_rows(rows, home)
+                    print(json.dumps(pending, sort_keys=True))
+                    return 3 if pending else 0
+                row = find_agent(rows, args.pane)
+                if args.command == "task":
+                    if not args.task_id.strip():
+                        raise ValueError("task ID must not be empty")
+                    data["tasks"][args.pane] = {"id": args.task_id, "generation": uuid.uuid4().hex}
+                    data["outcomes"].pop(args.pane, None)
+                else:
+                    record_outcome(row, data, args.task, args.token, args.status, args.evidence, args.summary)
+                write_json(state_dir / "field-status-outcomes.json", data)
+                return 0
         if args.command == "watch":
             if args.interval <= 0:
                 parser.error("--interval must be positive")
@@ -471,6 +607,10 @@ def main() -> int:
                     screen.wait(args.interval)
         else:
             print(refresh(state_dir, binary, args.timeout, datetime.now(timezone.utc), not args.plain), end="")
+            rows = read_json(state_dir / "field-status-rows.json", {"rows": []})["rows"]
+            home = clean(read_json(state_dir / "views.json", {}).get("home_pane_id"))
+            if pending_rows(rows, home):
+                return 3
         return 0
     except KeyboardInterrupt:
         return 0

@@ -158,6 +158,22 @@ For a request such as "have Codex review battle-paddle #166":
 
 ### Model phrase parsing and defaults
 
+Gemini is an explicit seat option, not a default. Require an exact current ID
+and run `model-route gemini "<exact-id> [thinking-level]"`, then preflight.
+Never select Flash, another model, or another provider implicitly. Gemini
+preflight is static package/lifecycle evidence: `available: null` and
+`launchable: true` do not establish account access or successful inference.
+The CLI may remap/fallback even with explicit `--model`; never promise strict
+backend identity. Require the user's acknowledgement before setting
+`LANTERN_GEMINI_ACK_NATIVE_ROUTING=1`; do not set it just to pass a check.
+Effort requires the owner-installed native settings bridge and launcher
+capability check. Pass returned argv unchanged after Herdr `--`, including
+private `--thinking-level` only when configured. Never invent `--effort`.
+The target pane must resolve canonical `gemini` to that launcher; controller
+PATH/environment is not evidence about another pane. Unverified target setup
+is a rollout gap to report. See `docs/gemini-routing.md`. This does not change
+Lantern's own helper harness or canonical driver ownership.
+
 A model phrase has separate family, effort, and fast parts. Never pass the
 whole phrase as one model slug. Before a Codex, Claude, Cursor, or Grok seat, run
 `$HERDR_PLUGIN_ROOT/bin/model-route <codex|claude|cursor|grok> "<model phrase>"`.
@@ -586,17 +602,23 @@ quiet tabs and Lantern Home. Never close Lantern Home as part of Field Status.
   the chat. If the pane cannot be opened, give the compact plain result in
   the chat and say why the pane is unavailable.
 - Show separate Important (red) and Needs You (purple) sections. The In Motion
-  (yellow), Done (green), and Keep (blue) labels are section headers, not
+  (yellow), Verification Pending, Not Complete, Done (green), and Keep (blue) labels are section headers, not
   per-agent status suffixes. Show human-readable workspace names in yellow,
   such as Lantern, Notes, or Billing API Fixes; never print a
   generic shell label or an internal agent slug as the display name. Include
   the tab name beneath when it distinguishes sessions. Keep shows only Lantern
-  Home by default. An idle, blocked, unknown, or shell tab appears there only
+  Home by default. An unknown or shell tab appears there only
   when the user specifically asks to keep it, recorded with
   `$LANTERN_FIELD_STATUS note keep set <pane-or-tab-id> "<reason>"`.
   Do not close a quiet tab merely because it is hidden from Keep.
-  For each Done agent retained in the field, inspect its final output and set
-  `$LANTERN_FIELD_STATUS note done set <pane-id> "<short verified outcome>"`.
+  Register every new assignment with `$LANTERN_FIELD_STATUS task <pane-id> <task-id>`.
+  Stopped agents appear under Verification Pending until reviewed. Run
+  `$LANTERN_FIELD_STATUS pending` for JSON containing the task and current token.
+  Inspect the output and evidence, then record
+  `$LANTERN_FIELD_STATUS outcome <pane-id> --task <task-id> --token <token> --status complete --evidence "<commit and checks>" --summary "<verified result>"`.
+  Use incomplete, blocked, cancelled, or superseded for other outcomes, shown
+  under Not Complete. Never use `note done` to accept work. Exit 3 from pending
+  or refresh means a review is pending. It is not a source failure.
   Never present a task title alone as an accomplished outcome.
   Before closing a Done session, verify its repo/worktree has no uncommitted
   work, its output is durable, and no other agent relies on it. Close only

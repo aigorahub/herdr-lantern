@@ -36,7 +36,7 @@ def field(agent_status="working", include_done=True):
     ]
     if include_done:
         tabs.append({"tab_id": "review", "workspace_id": "w3", "label": "Review", "agent_status": agent_status})
-        agents.append({"tab_id": "review", "pane_id": "w3:p1", "agent": "codex", "name": "Sol Reviewer", "agent_status": agent_status})
+        agents.append({"tab_id": "review", "pane_id": "w3:p1", "agent": "codex", "name": "Sol Reviewer", "terminal_id": "term3", "agent_session": "session3", "state_change_seq": 1, "completion_seq": 1, "agent_status": agent_status})
     workspaces = [
         {"workspace_id": "w1", "label": "🔥 lantern"},
         {"workspace_id": "w2", "label": "Notes"},
@@ -51,8 +51,8 @@ class FieldStatusTests(unittest.TestCase):
         self.assertEqual([row["agent"] for row in rows], ["lantern", "notes", "Sol Reviewer"])
         output = status.render(rows, {"important": {}, "needs_you": {}}, NOW, False)
         self.assertIn("KEEP\n• Lantern", output)
-        self.assertNotIn("Notes", output)
-        self.assertNotIn("Plugin Update", output)
+        self.assertIn("VERIFICATION PENDING\n• Notes", output)
+        self.assertIn("Plugin Update", output)
         self.assertNotIn("shell", output)
         self.assertNotIn("codex  ", output)
         self.assertNotIn("Closed", output)
@@ -116,7 +116,7 @@ class FieldStatusTests(unittest.TestCase):
                                       "important": {}}, NOW, False, width=38)
         self.assertLessEqual(len(output.splitlines()[0]), 38)
         self.assertIn("ET", output.splitlines()[0])
-        self.assertIn("DONE\n• Plugin Update\n  Review\n  Outcome not yet verified", output)
+        self.assertIn("VERIFICATION PENDING\n• Plugin Update\n  Review\n  Outcome not yet verified", output)
         self.assertIn("• Choose whether to merge", output)
         self.assertIn("  update", output)
         with patch.dict(os.environ, {"LANTERN_VIEW_SCOPE": "local"}):
@@ -294,16 +294,86 @@ class FieldStatusTests(unittest.TestCase):
         self.assertNotIn("  1\n", output)
         self.assertNotIn("shell", output)
 
-    def test_done_summary_requires_matching_agent_identity(self):
+    def test_legacy_done_note_cannot_accept_an_unreviewed_turn(self):
         rows = status.rows_for(*field("done"))
-        done = next(row for row in rows if row["tab_id"] == "review")
-        notes = {"done": {"w3:p1": {"identity": status.row_identity(done),
-                                      "summary": "Reviewed the plugin update; tests passed."}}}
-        output = status.render(rows, notes, NOW, False)
-        self.assertIn("Reviewed the plugin update; tests passed.", output)
-        changed = [dict(row) for row in rows]
-        changed[-1]["state_change_seq"] = 99
-        self.assertIn("Outcome not yet verified", status.render(changed, notes, NOW, False))
+        row = rows[-1]
+        notes = {"done": {"w3:p1": {"identity": status.row_identity(row), "summary": "Old success"}}}
+        self.assertNotIn("Old success", status.render(rows, notes, NOW, False))
+        self.assertEqual(status.section_for(row, notes, ""), "VERIFICATION PENDING")
+
+    def test_outcome_requires_current_turn_and_task_generation(self):
+        rows = status.reconcile(status.rows_for(*field("done")), {}, NOW)
+        row = rows[-1]
+        data = {"tasks": {"w3:p1": {"id": "issue75", "generation": "one"}}, "outcomes": {}}
+        status.apply_outcomes(rows, data)
+        token = row["outcome_token"]
+        status.record_outcome(row, data, "issue75", token, "complete", "commit abc, checks passed", "Fixed")
+        status.apply_outcomes(rows, data)
+        self.assertEqual(status.section_for(row, {}, ""), "DONE")
+        for field_name, new_value in (("completion_seq", 2), ("state_change_seq", 3),
+                                      ("agent_session", "new"), ("terminal_id", "new"),
+                                      ("work_epoch", 9), ("session_epoch", "new")):
+            changed = dict(row, **{field_name: new_value})
+            status.apply_outcomes([changed], data)
+            self.assertEqual(status.section_for(changed, {}, ""), "VERIFICATION PENDING")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                status.record_outcome(changed, data, "issue75", token, "complete", "proof", "Fixed")
+        data["tasks"]["w3:p1"]["generation"] = "two"
+        status.apply_outcomes(rows, data)
+        self.assertEqual(status.section_for(row, {}, ""), "VERIFICATION PENDING")
+
+    def test_fallback_sequence_and_incomplete_outcome(self):
+        row = status.reconcile(status.rows_for(*field("done")), {}, NOW)[-1]
+        row["agent_session"] = None
+        row["completion_seq"] = None
+        data = {"tasks": {"w3:p1": {"id": "task", "generation": "one"}}, "outcomes": {}}
+        token = status.outcome_token(row, data["tasks"]["w3:p1"])
+        status.record_outcome(row, data, "task", token, "incomplete", "review found missing output", "Missing output")
+        status.apply_outcomes([row], data)
+        self.assertEqual(status.section_for(row, {}, ""), "NOT COMPLETE")
+        row["state_change_seq"] = None
+        with self.assertRaisesRegex(ValueError, "cannot identify"):
+            status.record_outcome(row, data, "task", token, "complete", "proof", "Fixed")
+
+    def test_cli_pending_and_live_outcome_reject_stale_turn(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            source = root / "source.json"
+            live = dict(zip(("tabs", "agents", "workspaces"), field("done")))
+            source.write_text(json.dumps(live), encoding="utf-8")
+            reader = root / "reader.py"
+            reader.write_text("import json,sys\nfrom pathlib import Path\nk=sys.argv[2]+'s'\nprint(json.dumps({'result': {k:json.loads(Path(sys.argv[1]).read_text())[k]}}))\n")
+            fake = root / "herdr"
+            fake.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(x) for x in
+                            (sys.executable, str(reader), str(source))) + ' "$1"\n')
+            fake.chmod(0o755)
+            base = [sys.executable, str(BIN / "field_status.py"), "--state-dir", str(root / "state"),
+                    "--herdr", str(fake), "--plain"]
+            def run(*args):
+                return subprocess.run([*base, *args], capture_output=True, text=True, encoding="utf-8", timeout=10)
+            self.assertEqual(run("task", "w3:p1", "task75").returncode, 0)
+            pending = run("pending")
+            self.assertEqual(pending.returncode, 3, pending.stderr)
+            item = next(x for x in json.loads(pending.stdout) if x["pane_id"] == "w3:p1")
+            args = ["outcome", "w3:p1", "--task", "task75", "--token", item["token"],
+                    "--status", "complete", "--evidence", "commit abc; tests passed", "--summary", "Fixed output"]
+            accepted = run(*args)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            self.assertIn("DONE\n• Plugin Update\n  Review\n  Fixed output", run("refresh").stdout)
+            live["agents"][-1]["completion_seq"] = 2
+            source.write_text(json.dumps(live), encoding="utf-8")
+            rejected = run(*args)
+            self.assertEqual(rejected.returncode, 1)
+            self.assertIn("stale outcome token", rejected.stderr)
+            self.assertNotIn("Fixed output", run("refresh").stdout)
+
+    def test_work_cycle_and_removed_session_invalidate_old_outcomes(self):
+        stopped = status.reconcile(status.rows_for(*field("done")), {}, NOW)
+        working = status.reconcile(status.rows_for(*field("working")), {"rows": stopped}, NOW)
+        again = status.reconcile(status.rows_for(*field("done")), {"rows": working}, NOW)
+        self.assertNotEqual(status.outcome_token(stopped[-1], {}), status.outcome_token(again[-1], {}))
+        replacement = status.reconcile(status.rows_for(*field("done")), {"rows": []}, NOW)
+        self.assertNotEqual(status.outcome_token(stopped[-1], {}), status.outcome_token(replacement[-1], {}))
 
     def test_lantern_home_always_keep_even_when_done(self):
         rows = status.rows_for(*field("done"))
@@ -312,24 +382,23 @@ class FieldStatusTests(unittest.TestCase):
         self.assertIn("KEEP\n• Lantern", output)
         self.assertNotIn("DONE\n• Lantern", output)
 
-    def test_keep_and_done_note_commands_validate_live_rows(self):
+    def test_keep_note_and_rejection_of_legacy_done_write(self):
         with tempfile.TemporaryDirectory() as root:
             state_dir = Path(root)
             status.write_json(state_dir / "field-status-rows.json", {"schema": 1, "rows": status.rows_for(*field("done"))})
             script = str(BIN / "field_status.py")
             for command in (
                 ["note", "keep", "set", "w2:p1", "Keep Notes"],
-                ["note", "done", "set", "w3:p1", "Reviewed plugin update; tests passed"],
             ):
                 proc = subprocess.run([sys.executable, script, "--state-dir", root, *command],
                                       capture_output=True, text=True, check=False)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
             data = status.notes(state_dir)
             self.assertEqual(data["keep"], {"w2:p1": "Keep Notes"})
-            self.assertEqual(data["done"]["w3:p1"]["summary"], "Reviewed plugin update; tests passed")
+            self.assertEqual(data["done"], {})
             output = status.render(status.rows_for(*field("done")), data, NOW, False)
-            self.assertIn("KEEP\n• Lantern\n  Lantern Home\n• Notes", output)
-            self.assertIn("Reviewed plugin update; tests passed", output)
+            self.assertIn("KEEP\n• Lantern\n  Lantern Home", output)
+            self.assertIn("VERIFICATION PENDING", output)
             proc = subprocess.run([sys.executable, script, "--state-dir", root,
                                    "note", "done", "set", "w2:p1", "Not done"],
                                   capture_output=True, text=True, check=False)
