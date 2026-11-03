@@ -1,0 +1,9 @@
+#!/bin/sh
+set -u
+switch_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+. "$switch_root/lib.sh"
+switch_python=$(helper_detect_python) || exit 127
+if [ "$switch_python" = 'py -3' ]; then
+    exec py -3 "$switch_root/bin/agent_switch.py" "$@"
+fi
+exec "$switch_python" "$switch_root/bin/agent_switch.py" "$@"

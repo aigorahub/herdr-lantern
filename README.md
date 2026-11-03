@@ -831,3 +831,45 @@ WhatsApp, and Slack with the same lantern. It was removed in 0.8.0: an
 allowlisted sender got a shell on the machine running it, a fair trade for
 one person on their own machine and not one for a team. The reasoning is
 recorded in [plans/slack-app-discontinued.md](plans/slack-app-discontinued.md).
+
+
+### Continue after a provider limit
+
+Lantern can start a chosen alternative in a new tab in the same workspace.
+It keeps the source agent and its transcript. It never selects another
+provider or model on its own.
+
+Save each alternative once with a name and model phrase:
+
+```sh
+sh "$HERDR_PLUGIN_ROOT/bin/agent-switch" configure backup --kind codex --model "astra high"
+```
+
+When an agent hits a limit, inspect that pane and record the observed limit:
+
+```sh
+sh "$HERDR_PLUGIN_ROOT/bin/agent-switch" offer --pane <pane-id> --reason "Session limit reached"
+```
+
+The JSON result lists configured alternatives and a token bound to the source
+agent. Each alternative reports route availability and quota. Quota stays
+`unknown` when the provider has no supported quota reading. A valid model
+catalog does not prove that quota remains.
+
+After the user chooses a listed route, write the current task, progress,
+remaining work, and required source paths to a private context file. Review
+that file before sending it to the chosen provider. Then run:
+
+```sh
+sh "$HERDR_PLUGIN_ROOT/bin/agent-switch" start --pane <pane-id> --token <offer-token> --route backup --context-file <private-task-file>
+```
+
+The command checks the route again before it creates a tab. It refuses a
+working source agent, a changed source session, a changed configured route,
+a used offer, or an unavailable route. The command keeps an exact private copy of the task context and sends a
+single-line file reference to the new agent. This preserves multiline text
+across Windows command wrappers. The original transcript stays in its original tab. The command does
+not send that full transcript to another provider.
+
+State uses `LANTERN_HERD_STATE_DIR`. Outside Lantern, pass `--state-dir <path>`
+before the command. Use `--herdr <path>` to select the Herdr wrapper.

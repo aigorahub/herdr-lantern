@@ -404,14 +404,17 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                     self.assertEqual(code, expected_code)
                     if expected_code == 3:
                         self.assertIn(expected, payload["reason"])
+                        self.assertEqual(payload["quota"], "unavailable")
                     elif expected is None:
                         self.assertTrue(payload["available"])
-                        self.assertNotIn("quota", payload)
+                        self.assertEqual(payload["quota"], "available")
                     else:
                         self.assertTrue(payload["available"])
                         self.assertEqual(payload["quota"], expected)
                         self.assertEqual(self.check("claude", "sonnet", "max")[0], 3)
-                        self.assertEqual(self.check("claude", "invented", "high")[0], 3)
+                        unavailable_code, unavailable = self.check("claude", "invented", "high")
+                        self.assertEqual(unavailable_code, 3)
+                        self.assertNotIn("quota", unavailable)
 
     def test_claude_catalog_keeps_optional_account_metadata_optional(self):
         for account in (None, {}, {"tokenSource": None}, {"tokenSource": True}, "invalid"):
