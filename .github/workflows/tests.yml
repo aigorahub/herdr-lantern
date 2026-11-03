@@ -19,7 +19,7 @@ jobs:
           print(sys.version, sqlite3.sqlite_version, flush=True)
           p = pathlib.Path('bin/team_mailbox.py')
           text = p.read_text(encoding='utf-8')
-          text = text.replace('        # Never emit credentials, input content, or raw SQLite errors.', '        print(type(error).__name__, getattr(error, "sqlite_errorname", None), getattr(error, "sqlite_errorcode", None), str(error), file=sys.stderr)\n        # Fixture-only diagnostic run.')
+          text = text.replace('        # Never emit credentials, input content, or raw SQLite errors.', '        if isinstance(error, sqlite3.Error):\n            import traceback\n            print(type(error).__name__, getattr(error, "sqlite_errorname", None), getattr(error, "sqlite_errorcode", None), str(error), file=sys.stderr)\n            traceback.print_exc()\n        # Fixture-only diagnostic run.')
           p.write_text(text, encoding='utf-8')
           p = pathlib.Path('tests/teams.py')
           text = p.read_text(encoding='utf-8').replace('self.assertEqual(result.returncode, 0, value)', 'self.assertEqual(result.returncode, 0, (value, result.stderr))')
