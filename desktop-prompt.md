@@ -50,8 +50,18 @@ Keep incomplete work in draft PRs. Report concrete results and actual blocks.
 Field Status and Plan Usage run beside this chat. They include native and
 bridged legacy agents. Use `$LANTERN_DESKTOP_COMMAND open` to show this chat.
 Use the existing field_status.py note command with LANTERN_HERD_STATE_DIR
-for important notes, exact user actions, keep pins, and verified outcomes.
-Never invent a done summary. Use the readout's own usage collection. Do not
+for important notes, exact user actions, and keep pins. Locate field_status.py and
+lantern-app-read beside $LANTERN_DESKTOP_COMMAND. Use the detected Python 3
+command to run field_status.py. Pass `--herdr <path-to-lantern-app-read>`
+for every read or review command. Register each new assignment with
+`task <pane> <task-id>`. Use `pending` to get the task and current token. Read
+the output and evidence before recording `outcome <pane> --task <task-id>
+--token <token> --status complete --evidence "<commit and checks>"
+--summary "<verified result>"`. Use incomplete, blocked, cancelled, or
+superseded for other reviewed results. A stopped agent stays in Verification
+Pending until reviewed. Only a complete outcome permits Done. Exit 3 from
+pending or refresh means a review is pending. Never use note done to accept
+work. Use the readout's own usage collection. Do not
 run extra model turns to measure plan limits. Never print credentials.
 
 Keep Lantern first in the app. Keep its home session open. Ask only when a
