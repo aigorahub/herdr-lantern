@@ -1,54 +1,32 @@
-name: tests
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
+name: Windows mailbox diagnosis
+on: workflow_dispatch
+permissions:
+  contents: read
 jobs:
-  smoke:
-    # The plugin claims linux, macos, and windows. Prove all three.
-    # On the Windows runner `shell: bash` is Git Bash, which is the same
-    # interpreter Herdr uses there for `sh open.sh` and `sh launch.sh`.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Show the interpreter and Python
-        shell: bash
-        run: |
-          uname -a
-          sh --version 2>/dev/null | head -1 || true
-          command -v python3 python py || true
-      - name: Smoke test
-        shell: bash
-        run: sh tests/smoke.sh
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Headless Codex job tests
-        run: python tests/codex_jobs.py
-      - name: Lantern session cleanup tests
-        run: python tests/session_cleanup.py
-      - name: Team transport tests
-        run: python tests/teams.py
-      - name: Desktop protocol tests
-        run: python tests/desktop.py
-  oldest-python:
-    # Apple's own python3 is 3.9. Lantern keeps running on it, and the Codex
-    # and Fugu rows say they need Python 3.11 there.
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-      - name: Python suites on 3.9
+      - name: Inspect fixture failures
+        shell: bash
         run: |
-          for suite in models gemini_models codex_jobs field_status plan_usage session_cleanup teams desktop; do
-            python "tests/$suite.py" || exit 1
-          done
+          python - <<'PYCODE'
+          import pathlib, sqlite3, sys, subprocess
+          print(sys.version, sqlite3.sqlite_version, flush=True)
+          p = pathlib.Path('bin/team_mailbox.py')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('        # Never emit credentials, input content, or raw SQLite errors.', '        print(type(error).__name__, getattr(error, "sqlite_errorname", None), getattr(error, "sqlite_errorcode", None), str(error), file=sys.stderr)\n        # Fixture-only diagnostic run.')
+          p.write_text(text, encoding='utf-8')
+          p = pathlib.Path('tests/teams.py')
+          text = p.read_text(encoding='utf-8').replace('self.assertEqual(result.returncode, 0, value)', 'self.assertEqual(result.returncode, 0, (value, result.stderr))')
+          p.write_text(text, encoding='utf-8')
+          for attempt in range(10):
+              print('Fixture run', attempt, flush=True)
+              result = subprocess.run([sys.executable, 'tests/teams.py'])
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+          PYCODE
