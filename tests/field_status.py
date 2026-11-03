@@ -350,7 +350,7 @@ class FieldStatusTests(unittest.TestCase):
             base = [sys.executable, str(BIN / "field_status.py"), "--state-dir", str(root / "state"),
                     "--herdr", str(fake), "--plain"]
             def run(*args):
-                return subprocess.run([*base, *args], capture_output=True, text=True, timeout=10)
+                return subprocess.run([*base, *args], capture_output=True, text=True, encoding="utf-8", timeout=10)
             self.assertEqual(run("task", "w3:p1", "task75").returncode, 0)
             pending = run("pending")
             self.assertEqual(pending.returncode, 3, pending.stderr)
