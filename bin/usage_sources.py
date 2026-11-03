@@ -10,6 +10,7 @@ import queue
 import re
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import tarfile
@@ -400,6 +401,10 @@ def parse_fugu(payload: object, credential: str, observed: float) -> dict:
             "credits": [], "observed_at": observed, "source": "Sakana /v1/usage"}
 
 
+# urllib stays in the socket call until this elapses. A stop is noticed after it.
+FUGU_READ_TIMEOUT = 10
+
+
 def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
     if cancel.is_set() or time.monotonic() >= deadline:
         raise SourceError("Last update failed")
@@ -412,7 +417,7 @@ def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
                                      headers={"Authorization": "Bearer " + scope["api_key"],
                                               "Accept": "application/json"})
     try:
-        with opener.open(request, timeout=min(10, max(.1, deadline - time.monotonic()))) as response:
+        with opener.open(request, timeout=min(FUGU_READ_TIMEOUT, max(.1, deadline - time.monotonic()))) as response:
             raw = response.read(1024 * 1024 + 1)
         if len(raw) > 1024 * 1024 or cancel.is_set():
             raise SourceError("Last update failed")
@@ -715,22 +720,36 @@ def auto_install(state: Path, deadline: float, cancel: threading.Event) -> str:
     install, which shows the error.
     """
     tool = str(tools_dir(state) / "CodexBarCLI")
-    with AUTO_INSTALL_LOCK:
+    # Lock.acquire cannot observe a stop. Wake so this read honors its deadline
+    # and a stop, and so it notices when the install holding the lock finishes.
+    while not AUTO_INSTALL_LOCK.acquire(blocking=False):
+        if cancel.is_set():
+            raise SourceError(CODEXBAR_MISSING)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SourceError("Last update failed")
+        if cancel.wait(min(0.1, remaining)):
+            raise SourceError(CODEXBAR_MISSING)
+    try:
         # A read that waited while the watcher stopped starts no download.
         if cancel.is_set():
             raise SourceError(CODEXBAR_MISSING)
+        if time.monotonic() >= deadline:
+            raise SourceError("Last update failed")
         if usable_codexbar(tool, deadline, cancel):
             return tool
         if tool in AUTO_INSTALL_TRIED:
             raise SourceError(CODEXBAR_MISSING)
         AUTO_INSTALL_TRIED.add(tool)
         try:
-            return str(install(state, cancel))
+            return str(install(state, cancel, deadline))
         except Exception:
             # Any failure leaves CodexBar missing. A stopped watcher's try doesn't count.
             if cancel.is_set():
                 AUTO_INSTALL_TRIED.discard(tool)
             raise SourceError(CODEXBAR_MISSING) from None
+    finally:
+        AUTO_INSTALL_LOCK.release()
 
 
 ASSETS = {
@@ -755,7 +774,40 @@ def codexbar_asset() -> str:
     raise SourceError(CODEXBAR_PLATFORM)
 
 
-def install(state: Path, cancel: threading.Event | None = None) -> Path:
+# A blocked release read uses this unless the usage read's deadline is sooner.
+RELEASE_SOCKET_TIMEOUT = 30
+
+
+def _socket_timeout(deadline: float | None) -> float:
+    if deadline is None:
+        return RELEASE_SOCKET_TIMEOUT
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError("CodexBar install timed out")
+    return min(RELEASE_SOCKET_TIMEOUT, remaining)
+
+
+def _limit_response(response, deadline: float | None) -> None:
+    """Shrink the next socket read to the time the usage read has left.
+
+    urlopen keeps the timeout it was opened with, so a later chunk can block
+    for that full interval after the deadline has moved closer.
+    """
+    fp = getattr(response, "fp", None)
+    raw = getattr(fp, "raw", None)
+    sock = getattr(raw, "_sock", None)
+    if sock is None:
+        inner = getattr(fp, "fp", None)
+        sock = getattr(getattr(inner, "raw", None), "_sock", None)
+    if sock is None:
+        return
+    try:
+        sock.settimeout(_socket_timeout(deadline))
+    except OSError:
+        pass
+
+
+def install(state: Path, cancel: threading.Event | None = None, deadline: float | None = None) -> Path:
     """Install the pinned CodexBar CLI into private Lantern state and return its path."""
     asset = codexbar_asset()
     target = tools_dir(state)
@@ -768,8 +820,9 @@ def install(state: Path, cancel: threading.Event | None = None) -> Path:
             if target.is_symlink():
                 raise RuntimeError("CodexBar install path is a symlink")
             tool = target / "CodexBarCLI"
+            probe = time.monotonic() + 3 if deadline is None else min(deadline, time.monotonic() + 3)
             code, output = runtime.capture([str(tool), "--version"], {"PATH": os.environ.get("PATH", "")},
-                                           time.monotonic() + 3)
+                                           probe, cancel)
             if code == 0 and b"CodexBar 0.74.0" in output:
                 return tool
             raise RuntimeError("Private CodexBar install has the wrong version")
@@ -778,11 +831,35 @@ def install(state: Path, cancel: threading.Event | None = None) -> Path:
             archive = root / "release.tar.gz"
             url = f"https://github.com/steipete/CodexBar/releases/download/v{VERSION}/CodexBarCLI-v{VERSION}-{asset}.tar.gz"
             digest = hashlib.sha256()
-            with urllib.request.urlopen(url, timeout=30, context=runtime.tls_context()) as response, archive.open("wb") as stream:
+            try:
+                remote = urllib.request.urlopen(url, timeout=_socket_timeout(deadline), context=runtime.tls_context())
+            except (TimeoutError, socket.timeout):
+                if deadline is not None:
+                    raise RuntimeError("CodexBar install timed out") from None
+                raise
+            except urllib.error.URLError as exc:
+                if deadline is not None and isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
+                    raise RuntimeError("CodexBar install timed out") from None
+                raise
+            with remote, archive.open("wb") as stream:
                 total = 0
-                while chunk := response.read(65536):
+                while True:
                     if cancel and cancel.is_set():
                         raise RuntimeError("CodexBar install was stopped")
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RuntimeError("CodexBar install timed out")
+                    _limit_response(remote, deadline)
+                    try:
+                        # read() fills its buffer, so a slow trickle would not
+                        # return until the chunk was full. read1 comes back
+                        # after one socket read and the deadline can be checked.
+                        chunk = remote.read1(65536)
+                    except (TimeoutError, socket.timeout):
+                        if deadline is None:
+                            raise
+                        raise RuntimeError("CodexBar install timed out") from None
+                    if not chunk:
+                        break
                     total += len(chunk)
                     if total > 100 * 1024 * 1024:
                         raise RuntimeError("CodexBar release is too large")
@@ -810,7 +887,8 @@ def install(state: Path, cancel: threading.Event | None = None) -> Path:
                     elif not member.issym() and not member.islnk():
                         raise RuntimeError("CodexBar archive entry is invalid")
             cli = unpacked / "CodexBarCLI"
-            code, output = runtime.capture([str(cli), "--version"], {"PATH": os.environ.get("PATH", "")}, time.monotonic() + 3)
+            probe = time.monotonic() + 3 if deadline is None else min(deadline, time.monotonic() + 3)
+            code, output = runtime.capture([str(cli), "--version"], {"PATH": os.environ.get("PATH", "")}, probe, cancel)
             if code or b"CodexBar 0.74.0" not in output:
                 raise RuntimeError("CodexBar release version mismatch")
             os.replace(unpacked, target)

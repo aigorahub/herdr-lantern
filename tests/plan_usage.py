@@ -1140,7 +1140,7 @@ for line in sys.stdin:
         def resolve(state, cancel=None):
             return sources.resolve_codexbar(state, time.monotonic() + 5, cancel or threading.Event())
 
-        def fake_install(state, cancel=None):
+        def fake_install(state, cancel=None, deadline=None):
             tool = sources.tools_dir(state) / "CodexBarCLI"
             tool.parent.mkdir(parents=True)
             tool.write_text("#!/bin/sh\necho 'CodexBar 0.74.0'\n")
@@ -1175,7 +1175,7 @@ for line in sys.stdin:
         with tempfile.TemporaryDirectory() as temporary:
             stopped = threading.Event()
 
-            def stopped_once(state, cancel=None):
+            def stopped_once(state, cancel=None, deadline=None):
                 if not stopped.is_set():
                     stopped.set()
                     raise RuntimeError("CodexBar install was stopped")
@@ -1193,7 +1193,7 @@ for line in sys.stdin:
         with tempfile.TemporaryDirectory() as temporary:
             started, release, found = threading.Event(), threading.Event(), []
 
-            def slow_install(state, cancel=None):
+            def slow_install(state, cancel=None, deadline=None):
                 started.set()
                 release.wait(5)
                 return fake_install(state)
@@ -1582,6 +1582,156 @@ for line in sys.stdin:
                     sources.install(state)
             self.assertFalse((Path(temporary) / "tools/codexbar/escape").exists())
 
+    def test_codexbar_download_returns_by_the_read_deadline(self):
+        # A stalled body and a trickle both have to finish when the read's
+        # deadline passes. The old socket timeout waited the server out.
+        import socket
+
+        def serve(port_box, accepted, done, trickle):
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(("127.0.0.1", 0))
+                server.listen(1)
+                port_box.append(server.getsockname()[1])
+                server.settimeout(0.2)
+                conn = None
+                opened = time.monotonic()
+                while conn is None and time.monotonic() - opened < 5 and not done.is_set():
+                    try:
+                        conn, _ = server.accept()
+                    except socket.timeout:
+                        continue
+                if conn is None:
+                    return
+                accepted.set()
+                try:
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except OSError:
+                    pass
+                try:
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\n")
+                    end = time.monotonic() + 3
+                    while time.monotonic() < end and not done.is_set():
+                        if trickle:
+                            conn.sendall(b"x")
+                        if done.wait(0.15):
+                            return
+                except OSError:
+                    return
+                finally:
+                    conn.close()
+            finally:
+                server.close()
+
+        def attempt(trickle):
+            port_box, accepted, done = [], threading.Event(), threading.Event()
+            thread = threading.Thread(target=serve, args=(port_box, accepted, done, trickle), daemon=True)
+            thread.start()
+            try:
+                while not port_box and thread.is_alive():
+                    time.sleep(0.01)
+                self.assertTrue(port_box)
+                real_open = sources.urllib.request.urlopen
+
+                def redirected(url, data=None, timeout=None, *, context=None, **kwargs):
+                    target = f"http://127.0.0.1:{port_box[0]}/release.tar.gz"
+                    if timeout is None:
+                        return real_open(target, data=data)
+                    return real_open(target, data=data, timeout=timeout)
+
+                with tempfile.TemporaryDirectory() as temporary, \
+                        patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": temporary}), \
+                        patch.object(sources.platform, "system", return_value="Darwin"), \
+                        patch.object(sources.platform, "machine", return_value="arm64"), \
+                        patch.object(sources.shutil, "which", return_value=None), \
+                        patch.object(sources.urllib.request, "urlopen", side_effect=redirected):
+                    os.environ.pop("LANTERN_CODEXBAR_BIN", None)
+                    state = Path(temporary) / "herd"
+                    sources.AUTO_INSTALL_TRIED.discard(str(sources.tools_dir(state) / "CodexBarCLI"))
+                    start = time.monotonic()
+                    with self.assertRaises(sources.SourceError):
+                        sources.resolve_codexbar(state, time.monotonic() + 0.6, threading.Event())
+                    elapsed = time.monotonic() - start
+                self.assertTrue(accepted.is_set(), "download never connected")
+                self.assertLess(elapsed, 1.5, f"install returned after {elapsed:.2f}s")
+            finally:
+                done.set()
+                thread.join(2)
+
+        for trickle in (False, True):
+            with self.subTest(trickle=trickle):
+                attempt(trickle)
+
+    def test_install_lock_wait_returns_by_the_read_deadline(self):
+        release, held = threading.Event(), threading.Event()
+
+        def hold():
+            with sources.AUTO_INSTALL_LOCK:
+                held.set()
+                release.wait()
+
+        holder = threading.Thread(target=hold)
+        holder.start()
+        self.assertTrue(held.wait(2), "lock holder did not start")
+        workers = []
+        try:
+            with tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(sources.urllib.request, "urlopen", side_effect=OSError("offline")):
+                state = Path(temporary) / "herd"
+                tool = str(sources.tools_dir(state) / "CodexBarCLI")
+
+                def attempt(deadline, cancel):
+                    box = []
+
+                    def run():
+                        try:
+                            sources.auto_install(state, deadline, cancel)
+                        except BaseException as exc:
+                            box.append(exc)
+                        else:
+                            box.append(None)
+
+                    worker = threading.Thread(target=run)
+                    workers.append(worker)
+                    started = time.monotonic()
+                    worker.start()
+                    worker.join(1.5)
+                    return worker, time.monotonic() - started, box
+
+                try:
+                    with self.subTest(wait="deadline"):
+                        worker, elapsed, box = attempt(time.monotonic() + 0.4, threading.Event())
+                        self.assertFalse(worker.is_alive(), f"lock wait still blocked after {elapsed:.2f}s")
+                        self.assertGreaterEqual(elapsed, 0.3)
+                        self.assertLess(elapsed, 1.5, f"lock wait returned after {elapsed:.2f}s")
+                        self.assertIsInstance(box[0], sources.SourceError)
+                        self.assertEqual(box[0].state, "Last update failed")
+                        self.assertNotIn(tool, sources.AUTO_INSTALL_TRIED)
+                    cancel = threading.Event()
+
+                    def trip():
+                        time.sleep(0.25)
+                        cancel.set()
+
+                    threading.Thread(target=trip, daemon=True).start()
+                    with self.subTest(wait="cancel"):
+                        worker, elapsed, box = attempt(time.monotonic() + 30, cancel)
+                        self.assertFalse(worker.is_alive(), f"cancelled lock wait still blocked after {elapsed:.2f}s")
+                        self.assertGreaterEqual(elapsed, 0.2)
+                        self.assertLess(elapsed, 1.5, f"cancelled lock wait returned after {elapsed:.2f}s")
+                        self.assertIsInstance(box[0], sources.SourceError)
+                        self.assertEqual(box[0].state, sources.CODEXBAR_MISSING)
+                        self.assertNotIn(tool, sources.AUTO_INSTALL_TRIED)
+                finally:
+                    release.set()
+                    holder.join(2)
+                    for worker in workers:
+                        worker.join(2)
+        finally:
+            release.set()
+            holder.join(2)
+
     def test_installer_stops_when_the_watcher_stops(self):
         with tempfile.TemporaryDirectory() as temporary:
             stop = threading.Event()
@@ -1827,6 +1977,23 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(self.setup_views()["errors"], [])
         self.assertFalse(any(c[:2] in (["pane", "send-keys"], ["pane", "run"]) for c in self.data()["calls"][start:]))
         self.assert_layout()
+
+    def test_outdated_watcher_that_stops_slowly_is_replaced(self):
+        self.assertEqual(self.setup_views()["errors"], [])
+        entry = field.read_json(self.state / "views.json", {})["views"]["usage"]
+        field.write_json(self.state / "usage-watcher.json", {"pid": 200, "code": "older release"})
+        data = self.data()
+        # Past the old 3s stop, and past the 7.5s slice of a 15s setup budget.
+        data["interrupt_delay"] = 8
+        self.save(data)
+        start = len(self.data()["calls"])
+        result = self.setup_views("usage")
+        self.assertEqual(result["errors"], [])
+        calls = self.data()["calls"][start:]
+        runs = [c for c in calls if c[:2] == ["pane", "run"]]
+        self.assertEqual(runs, [["pane", "run", entry["pane_id"], entry["command"]]])
+        self.assertLess(calls.index(["pane", "send-keys", entry["pane_id"], "ctrl+c"]), calls.index(runs[0]))
+        self.assertFalse(any(c[:2] in (["pane", "split"], ["pane", "close"]) for c in calls))
 
     def test_outdated_watcher_that_keeps_running_gets_no_input(self):
         self.assertEqual(self.setup_views()["errors"], [])
