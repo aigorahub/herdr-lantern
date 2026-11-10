@@ -4,8 +4,27 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-10
+
 ### Fixed
 
+- In the Herdr desktop app, Plan Usage no longer stops at "Herdr server
+  status timed out". Both readouts read the app and `hc` in their own
+  process instead of starting the read-model command for every list and
+  process check: Field Status reads once per check, and Plan Usage reads
+  twice, confirming every agent's process on a fresh read. The read finds
+  `hc` and `herdr-app` in the usual user folders when PATH lacks them.
+- When Herdr is slow or unavailable after a verified scan, Plan Usage keeps
+  its last table, marked out of date, instead of a one-line error. Values
+  it never verified stay hidden, and an account whose login changed during
+  a failed scan stays hidden.
+- Services waiting for fresh limits share one note.
+- A desktop agent that stopped with an error is listed in Verification
+  Pending, can switch providers, and can't be marked complete.
+- A desktop pane whose program ended no longer makes both readouts fail.
+- The desktop chat follows the legacy rules for closing completed sessions,
+  creates GitHub repositories as private, and rebuilds closed readouts with
+  `lantern-app open`.
 - Restarting Plan Usage after an update waits for an in-flight read to finish.
   A read blocked in name lookup or a socket call returns when the watcher
   stops, and a Fugu read also returns within its timeout, so the old watcher
