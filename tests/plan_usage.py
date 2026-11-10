@@ -1070,12 +1070,12 @@ with Readout() as r:
 
             def wait(self, _):
                 pass
-        agents = [{"agent": "claude", "tab_id": "a", "pane_id": "p1"}, {"agent": "codex", "tab_id": "b", "pane_id": "p2"}]
-        scopes = {"p1": {"key": "claude-key", "provider": "claude"}, "p2": {"key": "codex-key", "provider": "codex"}}
+        agents = [{"agent": "fugu", "tab_id": "a", "pane_id": "p1"}, {"agent": "codex", "tab_id": "b", "pane_id": "p2"}]
+        scopes = {"p1": {"key": "fugu-key", "provider": "fugu"}, "p2": {"key": "codex-key", "provider": "codex"}}
         xdg = root / "xdg"
         with patch.dict(os.environ, {"XDG_STATE_HOME": str(xdg)}):
             field.write_json(runtime.shared_dir(server) / "snapshot.json", {"server": server, "bindings": {
-                "claude-key": {"state": "Measured", "result": dict(measured(), provider="claude", account="c"),
+                "fugu-key": {"state": "Measured", "result": dict(measured(), provider="fugu", account="f"),
                                "next_at": time.time() + 600},
                 "codex-key": {"state": "Measured", "result": measured(), "next_at": time.time() + 600}}})
             with patch.object(runtime, "server_identity",
@@ -1089,8 +1089,8 @@ with Readout() as r:
         self.assertIn("%*", draws[1])
         waiting = [line for line in draws[1].splitlines() if "Waiting for fresh limits" in line]
         self.assertEqual(len(waiting), 1)
-        self.assertIn("Claude", waiting[0])
         self.assertIn("OpenAI", waiting[0])
+        self.assertIn("Fugu", waiting[0])
 
     def test_server_status_timeout_marks_collected_limits_stale_then_recovers(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -2162,7 +2162,10 @@ for line in sys.stdin:
             self.assertEqual(opened.call_args.args[-1], 15)
 
 
-def desktop_world(agents=("claude",), argv=None, bridge=None, server=None):
+HERE = str(Path(__file__).resolve().parent)
+
+
+def desktop_world(agents=("codex",), argv=None, bridge=None, server=None):
     """One desktop read: tab t<i> holds agent pane p<i>, whose program is pid 100+i."""
     rows, terminals = [], {}
     for index, agent in enumerate(agents):
@@ -2170,8 +2173,8 @@ def desktop_world(agents=("claude",), argv=None, bridge=None, server=None):
         if bridge:
             row.update(legacy_binary=bridge[0], legacy_pane_id=bridge[1])
         rows.append(row)
-        terminals[row["terminal_id"]] = {"pid": 10 + index, "cwd": "/", "foreground": {
-            "pid": 100 + index, "argv": list(argv or [agent]), "cwd": "/"}}
+        terminals[row["terminal_id"]] = {"pid": 10 + index, "cwd": HERE, "foreground": {
+            "pid": 100 + index, "argv": list(argv or [agent]), "cwd": HERE}}
     view = {"workspaces": [], "tabs": [{"tab_id": row["tab_id"]} for row in rows], "agents": rows, "panes": rows}
     return usage.desktop.World(server or {"key": "core", "lifetime": "one"}, view, terminals)
 
@@ -2211,7 +2214,7 @@ class DesktopScanTests(unittest.TestCase):
 
             def read_world(seconds=5):
                 reads.append(seconds)
-                return desktop_world(("claude",) * count)
+                return desktop_world(("codex",) * count)
 
             def status(timeout):
                 statuses.append(timeout)
@@ -2242,11 +2245,11 @@ class DesktopScanTests(unittest.TestCase):
                     patch.object(usage, "Readout", Screen):
                 usage.run(self.root / "state", self.reader, True, threading.Event(), 5)
                 self.assertEqual((len(statuses), len(reads)), (1, 2))
-                self.assertIn("Claude", draws[0])
+                self.assertIn("OpenAI", draws[0])
 
     def test_process_changed_between_the_two_reads_is_account_unknown(self):
         for change in ("argv", "start", "stamp"):
-            reads = [desktop_world(), desktop_world(argv=["claude", "--resume"]) if change == "argv" else desktop_world()]
+            reads = [desktop_world(), desktop_world(argv=["codex", "resume"]) if change == "argv" else desktop_world()]
             starts = iter(["first", "second"]) if change == "start" else None
             stamps = iter(["changed"]) if change == "stamp" else None
             collector = self.collector()
@@ -2255,24 +2258,24 @@ class DesktopScanTests(unittest.TestCase):
                     patch.object(usage.desktop, "read_world", side_effect=reads):
                 collector.scan()
                 self.assertEqual(collector.bindings, {})
-                self.assertEqual(collector.notices, {("claude", "Account unknown"): {"t0"}})
+                self.assertEqual(collector.notices, {("codex", "Account unknown"): {"t0"}})
 
     def test_failed_second_read_hides_an_account_whose_login_changed(self):
         collector = self.collector()
-        with logins(), patch.object(usage.desktop, "read_world", side_effect=[desktop_world(("claude", "codex"))] * 2):
+        with logins(), patch.object(usage.desktop, "read_world", side_effect=[desktop_world(("codex", "codex"))] * 2):
             collector.scan()
         # A configured login has no tab to check, and an inherited reading has no binding yet.
         collector.bindings["configured"] = {"scope": {"key": "configured", "provider": "fugu"}, "tabs": set()}
-        for key in ("claude-100", "codex-101", "configured", "inherited"):
+        for key in ("codex-100", "codex-101", "configured", "inherited"):
             collector.cache[key] = {"state": "Measured", "result": dict(measured(), account=key), "next_at": time.time() + 60}
 
         def relogged(provider, process, env):
-            # The Claude login changed after the last scan; the Codex one did not.
-            suffix = "-new" if provider == "claude" else ""
+            # The first tab's login changed after the last scan; the second tab's did not.
+            suffix = "-new" if process["pid"] == 100 else ""
             return {"key": f"{provider}-{process['pid']}{suffix}", "provider": provider, "stamp": "stamp"}
         with logins(), patch.object(sources, "scope_for", side_effect=relogged), \
                 patch.object(usage.desktop, "read_world", side_effect=[
-                    desktop_world(("claude", "codex")), RuntimeError("Herdr desktop read timed out")]):
+                    desktop_world(("codex", "codex")), RuntimeError("Herdr desktop read timed out")]):
             collector.scan()
         self.assertTrue(collector.scan_error)
         self.assertEqual(sorted(collector.bindings), ["codex-101", "configured"])
@@ -2313,7 +2316,7 @@ class DesktopScanTests(unittest.TestCase):
             with self.subTest(save=saving.__name__), \
                     patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / saving.__name__)}):
                 field.write_json(runtime.shared_dir(server) / "snapshot.json", {"server": server, "bindings": {
-                    "claude-100": {"state": "Measured", "result": dict(measured(), provider="claude", account="c"),
+                    "codex-100": {"state": "Measured", "result": dict(measured(), account="c"),
                                    "next_at": time.time() + 600}}})
                 with logins(), patch.object(field, "write_json", side_effect=saving), \
                         patch.object(usage.desktop, "read_world", side_effect=[desktop_world()] * 3 + [restarted]), \
@@ -2334,7 +2337,7 @@ class DesktopScanTests(unittest.TestCase):
             def control(binary, args, timeout):
                 calls.append((binary, args[-1]))
                 return {"process_info": {"shell_pid": 10, "foreground_processes": [
-                    {"pid": 100, "argv": ["claude"], "cwd": "/"}]}}
+                    {"pid": 100, "argv": ["codex"], "cwd": HERE}]}}
             collector = self.collector()
             with self.subTest(second=second), logins(), patch.object(field, "control", side_effect=control), \
                     patch.object(usage.desktop, "read_world", side_effect=[
