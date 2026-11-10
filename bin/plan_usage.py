@@ -190,9 +190,9 @@ class Collector:
                 # The first read already showed which accounts may have changed. Hide those
                 # before keeping the rest as stale; untabbed bindings had no check this pass.
                 inspected = {result["scope"]["key"] for result in results if not isinstance(result, Exception)}
-                self.bindings = {key: entry for key, entry in self.bindings.items()
-                                 if key in inspected or not entry["tabs"]}
-                self.cache = {key: value for key, value in self.cache.items() if key in self.bindings}
+                dropped = {key for key, entry in self.bindings.items() if entry["tabs"] and key not in inspected}
+                self.bindings = {key: entry for key, entry in self.bindings.items() if key not in dropped}
+                self.cache = {key: value for key, value in self.cache.items() if key not in dropped}
                 self.scan_error = True
                 return
             results = [result if isinstance(result, Exception) else

@@ -2261,7 +2261,9 @@ class DesktopScanTests(unittest.TestCase):
         collector = self.collector()
         with logins(), patch.object(usage.desktop, "read_world", side_effect=[desktop_world(("claude", "codex"))] * 2):
             collector.scan()
-        for key in ("claude-100", "codex-101"):
+        # A configured login has no tab to check, and an inherited reading has no binding yet.
+        collector.bindings["configured"] = {"scope": {"key": "configured", "provider": "fugu"}, "tabs": set()}
+        for key in ("claude-100", "codex-101", "configured", "inherited"):
             collector.cache[key] = {"state": "Measured", "result": dict(measured(), account=key), "next_at": time.time() + 60}
 
         def relogged(provider, process, env):
@@ -2273,11 +2275,11 @@ class DesktopScanTests(unittest.TestCase):
                     desktop_world(("claude", "codex")), RuntimeError("Herdr desktop read timed out")]):
             collector.scan()
         self.assertTrue(collector.scan_error)
-        self.assertEqual(sorted(collector.bindings), ["codex-101"])
-        self.assertEqual(sorted(collector.cache), ["codex-101"])
+        self.assertEqual(sorted(collector.bindings), ["codex-101", "configured"])
+        self.assertEqual(sorted(collector.cache), ["codex-101", "configured", "inherited"])
         snapshot = collector.write()
         self.assertTrue(snapshot["scan_failed"])
-        self.assertEqual([row.get("account") for row in snapshot["rows"]], ["codex-101"])
+        self.assertEqual(sorted(row.get("account") for row in snapshot["rows"]), ["codex-101", "configured"])
 
     def test_core_restart_between_the_reads_hides_every_old_measurement(self):
         server = {"key": "core", "lifetime": "one"}
