@@ -108,6 +108,10 @@ class DesktopTests(unittest.TestCase):
             with self.subTest(message=message), patch.object(desktop.subprocess, "run", side_effect=reply), \
                     self.assertRaisesRegex(RuntimeError, message):
                 desktop.read_world()
+        no_pid = self.core_replies('{"id": 1, "result": {"pid": null, "core": {"id": "c"}}}')
+        with patch.object(desktop.subprocess, "run", side_effect=no_pid), \
+                self.assertRaisesRegex(RuntimeError, "identity unavailable"):
+            desktop.server_identity(2)
 
     def test_desktop_tools_are_found_when_path_lacks_the_user_folders(self):
         with tempfile.TemporaryDirectory() as home:

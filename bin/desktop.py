@@ -110,6 +110,10 @@ def reads(binary: str) -> bool:
 
 
 def core_start(status: dict) -> str:
+    # process_start passes the pid to ctypes, whose ArgumentError would escape every
+    # read-error handler, so a malformed pid stops here.
+    if type(status["pid"]) is not int:
+        raise RuntimeError("Herdr core identity unavailable")
     started = runtime.process_start(status["pid"])
     if not started:
         raise RuntimeError("Cannot identify this core's lifetime")
