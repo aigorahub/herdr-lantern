@@ -2281,39 +2281,48 @@ class DesktopScanTests(unittest.TestCase):
 
     def test_core_restart_between_the_reads_hides_every_old_measurement(self):
         server = {"key": "core", "lifetime": "one"}
-        draws = []
+        save = field.write_json
 
-        class Screen:
-            def __init__(self, stop):
-                self.stop = stop
+        def full_disk(path, data):
+            if path.name == "snapshot.json" and data["server"]["lifetime"] == "two":
+                raise OSError("No space left on device")
+            save(path, data)
+        for saving in (save, full_disk):
+            draws = []
 
-            def __enter__(self):
-                return self
+            class Screen:
+                def __init__(self, stop):
+                    self.stop = stop
 
-            def __exit__(self, *_):
-                pass
+                def __enter__(self):
+                    return self
 
-            def draw(self, output):
-                draws.append(output)
-                if len(draws) == 3:
-                    self.stop.set()
+                def __exit__(self, *_):
+                    pass
 
-            def wait(self, _):
-                pass
-        restarted = desktop_world(server={"key": "core", "lifetime": "two"})
-        with patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "xdg")}):
-            field.write_json(runtime.shared_dir(server) / "snapshot.json", {"server": server, "bindings": {
-                "claude-100": {"state": "Measured", "result": dict(measured(), provider="claude", account="c"),
-                               "next_at": time.time() + 600}}})
-            with logins(), patch.object(usage.desktop, "read_world", side_effect=[desktop_world()] * 3 + [restarted]), \
-                    patch.object(usage.desktop, "server_identity",
-                                 side_effect=[server, server, RuntimeError("Herdr desktop read timed out")]), \
-                    patch.object(sources, "fetch", side_effect=sources.SourceError("Limits unavailable")), \
-                    patch.object(usage, "Readout", Screen):
-                usage.run(self.root / "state", self.reader, True, threading.Event(), 5)
-        self.assertIn("79%", draws[0])
-        self.assertNotIn("79%", draws[1])
-        self.assertEqual(draws[2], "Plan Usage\nHerdr desktop read timed out\n")
+                def draw(self, output):
+                    draws.append(output)
+                    if len(draws) == 3:
+                        self.stop.set()
+
+                def wait(self, _):
+                    pass
+            restarted = desktop_world(server={"key": "core", "lifetime": "two"})
+            with self.subTest(save=saving.__name__), \
+                    patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / saving.__name__)}):
+                field.write_json(runtime.shared_dir(server) / "snapshot.json", {"server": server, "bindings": {
+                    "claude-100": {"state": "Measured", "result": dict(measured(), provider="claude", account="c"),
+                                   "next_at": time.time() + 600}}})
+                with logins(), patch.object(field, "write_json", side_effect=saving), \
+                        patch.object(usage.desktop, "read_world", side_effect=[desktop_world()] * 3 + [restarted]), \
+                        patch.object(usage.desktop, "server_identity",
+                                     side_effect=[server, server, RuntimeError("Herdr desktop read timed out")]), \
+                        patch.object(sources, "fetch", side_effect=sources.SourceError("Limits unavailable")), \
+                        patch.object(usage, "Readout", Screen):
+                    usage.run(self.root / "state", self.reader, True, threading.Event(), 5)
+                self.assertIn("79%", draws[0])
+                self.assertNotIn("79%", draws[1])
+                self.assertEqual(draws[2], "Plan Usage\nHerdr desktop read timed out\n")
 
     def test_bridged_pane_is_checked_on_its_legacy_pane_and_fails_closed_when_the_bridge_moves(self):
         legacy = ("/opt/herdr/bin/herdr", "w1:p3")

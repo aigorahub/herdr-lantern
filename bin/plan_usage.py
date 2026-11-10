@@ -576,6 +576,8 @@ def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: 
                         # A closure or auth change during the fetch must remove it.
                         collector.scan()
                         collector.drain()
+                    # A failed save must not bring back a table this scan replaced.
+                    shown = None
                     snapshot = collector.write()
                     shown = snapshot if collector.validated else None
                 else:
