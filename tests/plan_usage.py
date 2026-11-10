@@ -2279,6 +2279,42 @@ class DesktopScanTests(unittest.TestCase):
         self.assertTrue(snapshot["scan_failed"])
         self.assertEqual([row.get("account") for row in snapshot["rows"]], ["codex-101"])
 
+    def test_core_restart_between_the_reads_hides_every_old_measurement(self):
+        server = {"key": "core", "lifetime": "one"}
+        draws = []
+
+        class Screen:
+            def __init__(self, stop):
+                self.stop = stop
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+            def draw(self, output):
+                draws.append(output)
+                if len(draws) == 3:
+                    self.stop.set()
+
+            def wait(self, _):
+                pass
+        restarted = desktop_world(server={"key": "core", "lifetime": "two"})
+        with patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "xdg")}):
+            field.write_json(runtime.shared_dir(server) / "snapshot.json", {"server": server, "bindings": {
+                "claude-100": {"state": "Measured", "result": dict(measured(), provider="claude", account="c"),
+                               "next_at": time.time() + 600}}})
+            with logins(), patch.object(usage.desktop, "read_world", side_effect=[desktop_world()] * 3 + [restarted]), \
+                    patch.object(usage.desktop, "server_identity",
+                                 side_effect=[server, server, RuntimeError("Herdr desktop read timed out")]), \
+                    patch.object(sources, "fetch", side_effect=sources.SourceError("Limits unavailable")), \
+                    patch.object(usage, "Readout", Screen):
+                usage.run(self.root / "state", self.reader, True, threading.Event(), 5)
+        self.assertIn("79%", draws[0])
+        self.assertNotIn("79%", draws[1])
+        self.assertEqual(draws[2], "Plan Usage\nHerdr desktop read timed out\n")
+
     def test_bridged_pane_is_checked_on_its_legacy_pane_and_fails_closed_when_the_bridge_moves(self):
         legacy = ("/opt/herdr/bin/herdr", "w1:p3")
         for second, bound in ((legacy, True), (("/opt/herdr/bin/herdr", "w1:p9"), False), (None, False)):

@@ -104,13 +104,6 @@ def attempt(action):
         return exc
 
 
-def reread(first: desktop.World) -> desktop.World:
-    second = desktop.read_world()
-    if second.server != first.server:
-        raise RuntimeError("Herdr server changed during the scan")
-    return second
-
-
 def confirm_on(second: desktop.World, first: desktop.World, pane: str, checked: dict) -> dict:
     """Confirm a desktop check on a fresh read of the same pane, terminal, and legacy bridge."""
     def read_after() -> dict:
@@ -162,13 +155,7 @@ class Collector:
                 current = world.server
             else:
                 current = runtime.server_identity(self.binary, 2)
-            if current != self.server:
-                self.bindings, self.notices, self.cache = {}, {}, {}
-                self.prior_rows, self.prior_membership = [], []
-                self.validated = False
-                if current["key"] != self.server["key"]:
-                    raise RuntimeError("Herdr endpoint changed")
-                self.server = current
+            self.adopt(current)
             if world is not None:
                 tabs, agents = world.view["tabs"], world.view["agents"]
             else:
@@ -193,7 +180,12 @@ class Collector:
             # Every first check runs on one read; one fresh read then confirms them all.
             results = [attempt(lambda p=provider, a=agent: inspect_process(p, desktop.process_info(world, a["pane_id"], 2)))
                        for provider, agent in checks]
-            second = attempt(lambda: reread(world))
+            second = attempt(desktop.read_world)
+            if not isinstance(second, Exception) and second.server != world.server:
+                # The core changed between the reads, so nothing measured under the old one may stay.
+                attempt(lambda: self.adopt(second.server))
+                self.scan_error = True
+                return
             if isinstance(second, Exception):
                 # The first read already showed which accounts may have changed. Hide those
                 # before keeping the rest as stale; untabbed bindings had no check this pass.
@@ -224,6 +216,17 @@ class Collector:
         self.cache = {key: self.cache[key] for key in bindings if key in self.cache}
         self.validated, self.scan_error = True, False
         self.prior_rows, self.prior_membership = [], []
+
+    def adopt(self, current: dict) -> None:
+        """Forget every binding when the core's lifetime changes; refuse another endpoint."""
+        if current == self.server:
+            return
+        self.bindings, self.notices, self.cache = {}, {}, {}
+        self.prior_rows, self.prior_membership = [], []
+        self.validated = False
+        if current["key"] != self.server["key"]:
+            raise RuntimeError("Herdr endpoint changed")
+        self.server = current
 
     def drain(self) -> None:
         for key, item in list(self.pending.items()):
