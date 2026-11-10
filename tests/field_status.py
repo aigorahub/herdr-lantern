@@ -136,6 +136,15 @@ class FieldStatusTests(unittest.TestCase):
                     status.refresh(state_dir, "herdr", 1, NOW, False)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), data)
 
+    def test_desktop_refresh_reads_the_desktop_once(self):
+        import desktop
+        tabs, agents, workspaces = field("done")
+        world = desktop.World({}, {"tabs": tabs, "agents": agents, "workspaces": workspaces, "panes": agents}, {})
+        with tempfile.TemporaryDirectory() as root, patch.object(desktop, "read_world", return_value=world) as read:
+            output = status.refresh(Path(root), str(desktop.READER), 5, NOW, False)
+        read.assert_called_once_with(5)
+        self.assertIn("Plugin Update", output)
+
     def test_refresh_keeps_notes_and_removes_closed_agent(self):
         with tempfile.TemporaryDirectory() as root:
             state_dir = Path(root)
@@ -321,6 +330,20 @@ class FieldStatusTests(unittest.TestCase):
         data["tasks"]["w3:p1"]["generation"] = "two"
         status.apply_outcomes(rows, data)
         self.assertEqual(status.section_for(row, {}, ""), "VERIFICATION PENDING")
+
+    def test_agent_stopped_with_an_error_waits_for_review_and_cannot_be_complete(self):
+        rows = status.reconcile(status.rows_for(*field("error")), {}, NOW)
+        row = rows[-1]
+        data = {"tasks": {"w3:p1": {"id": "task", "generation": "one"}}, "outcomes": {}}
+        status.apply_outcomes(rows, data)
+        self.assertEqual(status.section_for(row, {}, ""), "VERIFICATION PENDING")
+        self.assertIn("w3:p1", [pending["pane_id"] for pending in status.pending_rows(rows)])
+        self.assertIn("Plugin Update\n  Review\n  Stopped with an error", status.render(rows, {}, NOW, False))
+        with self.assertRaisesRegex(ValueError, "cannot be complete"):
+            status.record_outcome(row, data, "task", row["outcome_token"], "complete", "proof", "Fixed")
+        for result in ("blocked", "incomplete"):
+            status.record_outcome(row, data, "task", row["outcome_token"], result, "error output read", "Stopped early")
+            self.assertEqual(data["outcomes"]["w3:p1"]["status"], result)
 
     def test_fallback_sequence_and_incomplete_outcome(self):
         row = status.reconcile(status.rows_for(*field("done")), {}, NOW)[-1]

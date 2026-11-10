@@ -93,7 +93,16 @@ class FileLock:
         self.held = False
 
 
+def core_identity(identity: object, started: object) -> dict:
+    if not isinstance(identity, str) or not identity or not isinstance(started, str) or not started:
+        raise RuntimeError("Herdr core identity unavailable")
+    return {"key": digest(["herdr-core", identity]), "lifetime": digest([identity, started])}
+
+
 def server_identity(binary: str, timeout: float) -> dict:
+    import desktop
+    if desktop.reads(binary):
+        return desktop.server_identity(timeout)
     try:
         proc = subprocess.run(field.herdr_command(binary, ["status", "--json"]),
                               env=field.herdr_environment(binary), capture_output=True,
@@ -107,10 +116,7 @@ def server_identity(binary: str, timeout: float) -> dict:
         raise RuntimeError("Herdr server status unavailable")
     server = json.loads(proc.stdout).get("server", {})
     if server.get("running") and server.get("transport") == "herdr-core":
-        identity, started = server.get("id"), server.get("started_at")
-        if not isinstance(identity, str) or not identity or not isinstance(started, str) or not started:
-            raise RuntimeError("Herdr core identity unavailable")
-        return {"key": digest(["herdr-core", identity]), "lifetime": digest([identity, started])}
+        return core_identity(server.get("id"), server.get("started_at"))
     endpoint = server.get("socket")
     if not server.get("running") or not isinstance(endpoint, str) or not endpoint:
         raise RuntimeError("Herdr server endpoint unavailable")

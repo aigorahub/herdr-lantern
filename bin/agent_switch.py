@@ -52,7 +52,7 @@ def target(binary: str, pane: str) -> tuple[dict, dict, dict]:
     workspace = next((row for row in workspaces if tab and row.get("workspace_id") == tab.get("workspace_id")), None)
     if not tab or not workspace:
         raise ValueError("Source workspace is unavailable")
-    if agent.get("agent_status") not in ("blocked", "idle", "done"):
+    if agent.get("agent_status") not in field.STOPPED:
         raise ValueError("Source agent must be stopped before a provider switch")
     return agent, tab, workspace
 

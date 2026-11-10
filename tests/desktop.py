@@ -53,6 +53,76 @@ class DesktopTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             desktop.snapshot(self.inventory(), {}, {})
 
+    def core_replies(self, *responses):
+        def run(argv, **kwargs):
+            if argv[1:] == ["ls"]:
+                return subprocess.CompletedProcess(argv, 0, json.dumps(self.inventory()), "")
+            requests = [json.loads(line) for line in kwargs["input"].splitlines()]
+            results = {"server.status": {"pid": os.getpid(), "core": {"id": "core-1"}},
+                       "terminal.list": {"terminals": [dict(t, address=a) for a, t in self.terminals().items()]}}
+            # Answer in reverse order: replies are matched by id, not by position.
+            lines = [json.dumps({"id": r["id"], "result": results[r["method"]]}) for r in reversed(requests)]
+            return subprocess.CompletedProcess(argv, 0, "\n".join(responses or lines) + "\n", "")
+        return run
+
+    def test_world_read_and_status_read_report_the_same_core(self):
+        with patch.object(desktop.subprocess, "run", side_effect=self.core_replies()):
+            world = desktop.read_world()
+            self.assertEqual(world.server, desktop.server_identity(2))
+        self.assertEqual([agent["pane_id"] for agent in world.view["agents"]], ["p1"])
+
+    def test_finished_pane_is_left_out_and_an_unknown_terminal_still_fails_the_read(self):
+        inventory = self.inventory()
+        inventory["spaces"][0]["tabs"].append({"id": "tab2", "name": "ended", "terminals": [
+            {"pane": "p3", "terminal": "t3", "app": "codex"}]})
+        for known, reply in ((True, {"address": "t3", "state": "finished", "status": None}),
+                             (False, {"code": -32000, "data": {"kind": "not_found"}, "message": "no terminal"})):
+            def run(argv, **kwargs):
+                if argv[1:] == ["ls"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(inventory), "")
+                lines = []
+                for request in map(json.loads, kwargs["input"].splitlines()):
+                    if request["method"] == "terminal.get":
+                        self.assertEqual(request["params"], {"terminal": "t3"})
+                        lines.append({"id": request["id"], "result" if known else "error": reply})
+                    elif request["method"] == "server.status":
+                        lines.append({"id": request["id"], "result": {"pid": os.getpid(), "core": {"id": "core-1"}}})
+                    else:
+                        lines.append({"id": request["id"], "result": {"terminals": [
+                            dict(t, address=a) for a, t in self.terminals().items()]}})
+                return subprocess.CompletedProcess(argv, 0, "".join(json.dumps(line) + "\n" for line in lines), "")
+            with self.subTest(known=known), patch.object(desktop.subprocess, "run", side_effect=run):
+                if known:
+                    world = desktop.read_world()
+                    self.assertEqual([agent["pane_id"] for agent in world.view["agents"]], ["p1"])
+                    self.assertEqual([tab["tab_id"] for tab in world.view["tabs"]], ["tab1", "tab2"])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "t3 changed during the read"):
+                        desktop.read_world()
+
+    def test_slow_or_malformed_desktop_reply_is_an_ordinary_read_error(self):
+        def slow(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        for reply, message in ((slow, "timed out"), (self.core_replies("not json"), "unexpected reply"),
+                               (self.core_replies('{"id": 1, "result": {}}'), "unexpected reply")):
+            with self.subTest(message=message), patch.object(desktop.subprocess, "run", side_effect=reply), \
+                    self.assertRaisesRegex(RuntimeError, message):
+                desktop.read_world()
+        no_pid = self.core_replies('{"id": 1, "result": {"pid": null, "core": {"id": "c"}}}')
+        with patch.object(desktop.subprocess, "run", side_effect=no_pid), \
+                self.assertRaisesRegex(RuntimeError, "identity unavailable"):
+            desktop.server_identity(2)
+
+    def test_desktop_tools_are_found_when_path_lacks_the_user_folders(self):
+        with tempfile.TemporaryDirectory() as home:
+            folder = Path(home) / ".local" / "bin"
+            folder.mkdir(parents=True)
+            tool = folder / ("hc.exe" if os.name == "nt" else "hc")
+            tool.write_text("")
+            tool.chmod(0o700)
+            with patch.dict(os.environ, {"HOME": home, "USERPROFILE": home, "PATH": os.defpath}):
+                self.assertEqual(Path(desktop.tool("hc")), tool)
+
     def test_config_is_data_and_never_runs_shell_substitutions(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "must-not-exist"

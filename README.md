@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.18.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.18.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -61,7 +61,10 @@ uses the app's own spaces and terminals. Existing direct connections to old
 Herdr retain their legacy action targets and appear in the readouts.
 
 `sh bin/lantern-app snapshot` reports native and bridged agent IDs. The
-read model adapter is read only. Lantern uses `herdr-app` and `hc` to change
+read model adapter is read only. The readouts read the app and `hc` in their
+own process: Field Status once per check, and Plan Usage twice, since it
+confirms each agent's process on a fresh read. Other tools keep using
+`bin/lantern-app-read`. Lantern uses `herdr-app` and `hc` to change
 native work. It uses legacy commands only for legacy sessions. Do not stop
 the old Herdr server while those sessions are connected.
 
@@ -186,7 +189,10 @@ sessions disappear immediately after closure. Lantern Home is never closed
 by this view. The watcher redraws when field state or
 notes change and leaves command transcripts out of the chat. Both readouts
 stay within the pane. Use Up/Down or Page Up/Page Down to scroll. Press q
-to close a readout. A later Lantern open restores it.
+to close a readout. A later Lantern open restores it. In the desktop app, an
+agent that stopped with an error waits in Verification Pending like a
+blocked one, and can't be marked complete. A pane whose program ended
+doesn't count as an agent until it is closed.
 
 Lantern keeps Field Status rows and notes in `$LANTERN_HERD_STATE_DIR`, outside
 the repo. The runtime prompt calls the detected Python 3 command with
@@ -252,7 +258,9 @@ NO_COLOR disables color. Plain snapshots have no color.
 
 The watcher scans tabs every five seconds and reads usage every 60 seconds.
 All usage panes share one collector. A changed login hides prior values.
-Ordinary read failures keep the last measured value with a warning.
+Ordinary read failures keep the last measured value with a warning. When
+Herdr is slow or unavailable after a verified scan, the table stays, marked
+out of date; before the first verified scan, the pane shows the error.
 Values become stale after 120 seconds. Missing values show --.
 
 Antigravity reads `agy -p /usage --output-format json`. It extracts the

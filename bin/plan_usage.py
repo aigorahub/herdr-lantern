@@ -10,9 +10,11 @@ import signal
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 
+import desktop
 import field_status as field
 import usage_runtime as runtime
 import usage_sources as sources
@@ -33,9 +35,21 @@ def eligible(tabs: list[dict], agents: list[dict]) -> dict[str, list[dict]]:
     return result
 
 
-def verified_scope(binary: str, provider: str, agent: dict) -> dict:
-    pane = agent["pane_id"]
-    before = field.control(binary, ["pane", "process-info", "--pane", pane], 2).get("process_info", {})
+@contextmanager
+def routed(hint: str):
+    """File a failed check under the service the agent's arguments name, such as Fugu."""
+    try:
+        yield
+    except sources.SourceError as exc:
+        if hint == "fugu":
+            exc.provider = "fugu"
+        raise
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        raise sources.SourceError("Account unknown", provider=hint) from None
+
+
+def inspect_process(provider: str, before: dict) -> dict:
+    """Pick the pane's one agent process and read its account scope."""
     matching = [p for p in before.get("foreground_processes", []) if isinstance(p, dict)
                 and isinstance(p.get("pid"), int) and isinstance(p.get("argv"), list) and p["argv"]
                 and provider in Path(str(p["argv"][0])).name.lower()]
@@ -46,32 +60,57 @@ def verified_scope(binary: str, provider: str, agent: dict) -> dict:
         raise sources.SourceError("Account unknown")
     process = candidates[0]
     hint = sources.route_hint(provider, process["argv"])
-    try:
-        return verified_process_scope(binary, provider, pane, process)
-    except sources.SourceError as exc:
-        if hint == "fugu":
-            exc.provider = "fugu"
-        raise
-    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
-        raise sources.SourceError("Account unknown", provider=hint) from None
+    with routed(hint):
+        pid = process["pid"]
+        start = runtime.process_start(pid)
+        if not start:
+            raise sources.SourceError("Account unknown")
+        env = runtime.process_environment(pid)
+        process = dict(process, executable=runtime.process_executable(pid))
+        scope = sources.scope_for(provider, process, env)
+        del env
+    return {"process": process, "start": start, "scope": scope, "hint": hint}
 
 
-def verified_process_scope(binary: str, provider: str, pane: str, process: dict) -> dict:
-    pid = process["pid"]
-    start = runtime.process_start(pid)
-    if not start:
-        raise sources.SourceError("Account unknown")
-    env = runtime.process_environment(pid)
-    process = dict(process, executable=runtime.process_executable(pid))
-    scope = sources.scope_for(provider, process, env)
-    del env
-    after = field.control(binary, ["pane", "process-info", "--pane", pane], 2).get("process_info", {})
-    current = next((p for p in after.get("foreground_processes", []) if p.get("pid") == pid), {})
-    if (current.get("argv") != process["argv"] or runtime.process_start(pid) != start
-            or runtime.process_executable(pid) != process["executable"]
-            or sources.current_stamp(scope) != scope["stamp"]):
-        raise sources.SourceError("Account unknown")
+def confirm_process(checked: dict, read_after) -> dict:
+    """Accept a scope only if a later read still shows the same process and account files."""
+    process, scope, pid = checked["process"], checked["scope"], checked["process"]["pid"]
+    with routed(checked["hint"]):
+        after = read_after()
+        current = next((p for p in after.get("foreground_processes", []) if p.get("pid") == pid), {})
+        if (current.get("argv") != process["argv"] or runtime.process_start(pid) != checked["start"]
+                or runtime.process_executable(pid) != process["executable"]
+                or sources.current_stamp(scope) != scope["stamp"]):
+            raise sources.SourceError("Account unknown")
     return scope
+
+
+def verified_scope(binary: str, provider: str, agent: dict) -> dict:
+    pane = agent["pane_id"]
+
+    def read() -> dict:
+        return field.control(binary, ["pane", "process-info", "--pane", pane], 2).get("process_info", {})
+    return confirm_process(inspect_process(provider, read()), read)
+
+
+CHECK_ERRORS = (sources.SourceError, OSError, RuntimeError, ValueError, TypeError, KeyError)
+
+
+def attempt(action):
+    """The action's result, or the error a failed account check raised."""
+    try:
+        return action()
+    except CHECK_ERRORS as exc:
+        return exc
+
+
+def confirm_on(second: desktop.World, first: desktop.World, pane: str, checked: dict) -> dict:
+    """Confirm a desktop check on a fresh read of the same pane, terminal, and legacy bridge."""
+    def read_after() -> dict:
+        if desktop.pane_route(second, pane) != desktop.pane_route(first, pane):
+            raise RuntimeError("The pane's terminal changed during the scan")
+        return desktop.process_info(second, pane, 2)
+    return confirm_process(checked, read_after)
 
 
 class Collector:
@@ -108,20 +147,23 @@ class Collector:
                                                   "server": server, "observed_at": time.time()})
 
     def scan(self) -> None:
+        world = None
         try:
-            current = runtime.server_identity(self.binary, 2)
-            if current != self.server:
-                self.bindings, self.notices, self.cache = {}, {}, {}
-                self.prior_rows, self.prior_membership = [], []
-                self.validated = False
-                if current["key"] != self.server["key"]:
-                    raise RuntimeError("Herdr endpoint changed")
-                self.server = current
-            tabs, agents, _ = field.snapshot(self.binary, 2)
+            if desktop.reads(self.binary):
+                # One in-process read gives this scan its identity and its rows.
+                world = desktop.read_world()
+                current = world.server
+            else:
+                current = runtime.server_identity(self.binary, 2)
+            self.adopt(current)
+            if world is not None:
+                tabs, agents = world.view["tabs"], world.view["agents"]
+            else:
+                tabs, agents, _ = field.snapshot(self.binary, 2)
         except (RuntimeError, OSError, ValueError):
             self.scan_error = True
             return
-        bindings, notices = {}, {}
+        bindings, notices, checks = {}, {}, []
         for provider, rows in eligible(tabs, agents).items():
             # This branch must precede every process and dependency inspection.
             if provider not in sources.SUPPORTED:
@@ -131,16 +173,38 @@ class Collector:
             if os.name == "nt" and provider in ("claude", "grok"):
                 notices[(provider, sources.CODEXBAR_WINDOWS)] = {row["tab_id"] for row in rows}
                 continue
-            for agent in rows:
-                try:
-                    scope = verified_scope(self.binary, provider, agent)
-                except sources.SourceError as exc:
-                    notices.setdefault((exc.provider or provider, exc.state), set()).add(agent["tab_id"])
-                    continue
-                except (OSError, RuntimeError, ValueError, TypeError, KeyError):
-                    notices.setdefault((provider, "Account unknown"), set()).add(agent["tab_id"])
-                    continue
-                entry = bindings.setdefault(scope["key"], {"scope": scope, "tabs": set()})
+            checks += [(provider, agent) for agent in rows]
+        if world is None:
+            results = [attempt(lambda p=provider, a=agent: verified_scope(self.binary, p, a)) for provider, agent in checks]
+        else:
+            # Every first check runs on one read; one fresh read then confirms them all.
+            results = [attempt(lambda p=provider, a=agent: inspect_process(p, desktop.process_info(world, a["pane_id"], 2)))
+                       for provider, agent in checks]
+            second = attempt(desktop.read_world)
+            if not isinstance(second, Exception) and second.server != world.server:
+                # The core changed between the reads, so nothing measured under the old one may stay.
+                attempt(lambda: self.adopt(second.server))
+                self.scan_error = True
+                return
+            if isinstance(second, Exception):
+                # The first read already showed which accounts may have changed. Hide those
+                # before keeping the rest as stale; untabbed bindings had no check this pass.
+                inspected = {result["scope"]["key"] for result in results if not isinstance(result, Exception)}
+                dropped = {key for key, entry in self.bindings.items() if entry["tabs"] and key not in inspected}
+                self.bindings = {key: entry for key, entry in self.bindings.items() if key not in dropped}
+                self.cache = {key: value for key, value in self.cache.items() if key not in dropped}
+                self.scan_error = True
+                return
+            results = [result if isinstance(result, Exception) else
+                       attempt(lambda a=agent, r=result: confirm_on(second, world, a["pane_id"], r))
+                       for (_, agent), result in zip(checks, results)]
+        for (provider, agent), result in zip(checks, results):
+            if isinstance(result, sources.SourceError):
+                notices.setdefault((result.provider or provider, result.state), set()).add(agent["tab_id"])
+            elif isinstance(result, Exception):
+                notices.setdefault((provider, "Account unknown"), set()).add(agent["tab_id"])
+            else:
+                entry = bindings.setdefault(result["key"], {"scope": result, "tabs": set()})
                 entry["tabs"].add(agent["tab_id"])
         try:
             configured = sources.configured_fugu_scope(os.environ)
@@ -152,6 +216,17 @@ class Collector:
         self.cache = {key: self.cache[key] for key in bindings if key in self.cache}
         self.validated, self.scan_error = True, False
         self.prior_rows, self.prior_membership = [], []
+
+    def adopt(self, current: dict) -> None:
+        """Forget every binding when the core's lifetime changes; refuse another endpoint."""
+        if current == self.server:
+            return
+        self.bindings, self.notices, self.cache = {}, {}, {}
+        self.prior_rows, self.prior_membership = [], []
+        self.validated = False
+        if current["key"] != self.server["key"]:
+            raise RuntimeError("Herdr endpoint changed")
+        self.server = current
 
     def drain(self) -> None:
         for key, item in list(self.pending.items()):
@@ -392,6 +467,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         return text
 
     order = {name: i for i, name in enumerate(("Claude", "OpenAI", "Grok", "Google", "Fugu"))}
+    waiting = []
     for name in sorted(services, key=lambda key: (order.get(key, 99), key)):
         accounts = sorted(services[name], key=lambda row: not bool(row.get("windows")))
         selected = {}
@@ -439,7 +515,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         if any_resets and not reset_columns and saved and saved["count"] and not saved["stale"]:
             infos.append(reset_note(name, saved))
         if stale:
-            notes.append(f"{name}: * Waiting for fresh limits.")
+            waiting.append(name)
         if not selected:
             notes.append(f"{name}: {', '.join(sorted(notices)) or 'Limits unavailable'}.")
         else:
@@ -447,6 +523,8 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             errors = notices - {"Account unknown", "Limits unavailable", "Reading usage", *sources.DEPENDENCY_STATES}
             if errors:
                 notes.append(f"{name}: {', '.join(sorted(errors))}.")
+    if waiting:
+        notes.insert(0, "* Waiting for fresh limits: " + ", ".join(waiting) + ".")
     if notes or infos:
         lines.append("")
         for info in infos:
@@ -458,6 +536,7 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
 
 def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: float) -> None:
     lock, collector, shared, server = None, None, None, None
+    shown = None  # This watcher's last table from a validated scan
     screen = Readout(stop) if watch else None
     if screen:
         screen.__enter__()
@@ -466,6 +545,7 @@ def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: 
             try:
                 current = runtime.server_identity(binary, 2)
                 if server != current:
+                    shown = None
                     if collector:
                         collector.close()
                         collector = None
@@ -496,12 +576,20 @@ def run(state: Path, binary: str, watch: bool, stop: threading.Event, interval: 
                         # A closure or auth change during the fetch must remove it.
                         collector.scan()
                         collector.drain()
+                    # A failed save must not bring back a table this scan replaced.
+                    shown = None
                     snapshot = collector.write()
+                    shown = snapshot if collector.validated else None
                 else:
                     snapshot = cached_snapshot(shared, server)
                 output = render(snapshot, color=watch and os.isatty(1))
             except (RuntimeError, OSError, ValueError) as exc:
-                output = "Plan Usage\n" + field.clean(exc, 180) + "\n"
+                # A slow Herdr keeps the last validated table, marked out of date. Values this
+                # watcher never validated, such as another watcher's snapshot, stay hidden.
+                if shown:
+                    output = render(dict(shown, scan_failed=True), color=watch and os.isatty(1))
+                else:
+                    output = "Plan Usage\n" + field.clean(exc, 180) + "\n"
             if screen:
                 screen.draw(output)
             else:

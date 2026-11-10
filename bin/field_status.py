@@ -25,7 +25,9 @@ from terminal_readout import Readout
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m", "purple": "\x1b[35m"}
 RESET = "\x1b[0m"
-ORDER = {"working": 0, "blocked": 1, "done": 2, "idle": 3, "unknown": 4}
+ORDER = {"working": 0, "blocked": 1, "error": 1, "done": 2, "idle": 3, "unknown": 4}
+# An agent in one of these states has stopped its turn and awaits review.
+STOPPED = ("done", "idle", "blocked", "error")
 
 
 def clean(value: object, limit: int = 90) -> str:
@@ -121,6 +123,10 @@ def herdr_list(binary: str, item: str, timeout: float) -> list[dict]:
 def snapshot(binary: str, timeout: float) -> tuple[list[dict], list[dict], list[dict]]:
     # Fail closed: an unavailable source must never turn a live tab into a
     # fictitious closed agent or overwrite a valid prior snapshot.
+    import desktop
+    if desktop.reads(binary):
+        view = desktop.read_world(timeout).view
+        return view["tabs"], view["agents"], view["workspaces"]
     return (herdr_list(binary, "tab", timeout), herdr_list(binary, "agent", timeout),
             herdr_list(binary, "workspace", timeout))
 
@@ -319,10 +325,10 @@ def record_outcome(row: dict, data: dict, task_id: str, token: str,
     task = data["tasks"].get(row["pane_id"], {})
     if task.get("id") != task_id or not task_id:
         raise ValueError("task is not registered for this pane")
-    if row["raw_status"] not in ("done", "idle", "blocked"):
+    if row["raw_status"] not in STOPPED:
         raise ValueError("agent has not stopped")
-    if status == "complete" and row["raw_status"] == "blocked":
-        raise ValueError("a blocked agent cannot be complete")
+    if status == "complete" and row["raw_status"] in ("blocked", "error"):
+        raise ValueError(f"an agent stopped as {row['raw_status']} cannot be complete")
     if not (row.get("terminal_id") or row.get("agent_session")) or all(
             row.get(key) is None for key in ("completion_seq", "state_change_seq")):
         raise ValueError("source cannot identify the stopped turn; keep verification pending")
@@ -395,7 +401,7 @@ def section_for(row: dict, note_data: dict, home_pane_id: str) -> str | None:
         return None
     if row.get("raw_status") == "working":
         return "IN MOTION"
-    if row.get("has_agent") and row.get("raw_status") in ("done", "idle", "blocked"):
+    if row.get("has_agent") and row.get("raw_status") in STOPPED:
         outcome = row.get("outcome") or {}
         if outcome.get("status") == "complete":
             return "DONE"
@@ -410,7 +416,10 @@ def section_for(row: dict, note_data: dict, home_pane_id: str) -> str | None:
 
 def done_summary(row: dict, note_data: dict) -> str:
     outcome = row.get("outcome") or {}
-    return clean(outcome.get("summary"), 180) or "Outcome not yet verified"
+    summary = clean(outcome.get("summary"), 180)
+    if summary:
+        return summary
+    return "Stopped with an error" if row.get("raw_status") == "error" else "Outcome not yet verified"
 
 
 def append_note_section(lines: list[str], title: str, actions: dict, shade: str,

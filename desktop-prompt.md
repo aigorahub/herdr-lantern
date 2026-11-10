@@ -27,6 +27,16 @@ Check hc get/read after launch. A created terminal is not proof of readiness.
 Never send a task to an agent that is already working. If submission fails,
 read first. Do not resend blindly. Keep the original transcript on handoff.
 
+Close a session only when the user names it or asks to clean completed
+sessions in a named scope. Then close only tabs that are done or idle with
+no pending prompt, whose edits are committed with a clean checkout or whose
+findings are saved, whose required checks pass, and which no task, child,
+handoff, monitor, or later job depends on. Recheck each tab right before
+closing it. Report failed checks and leave those sessions open. Never close
+the Lantern home tab or space. GitHub repositories you create are private:
+`gh repo create` always includes `--private`. Do not pass `--public` unless
+the user explicitly asks for a public repository.
+
 Use the installed Lantern model-route and model-preflight commands listed
 below for Claude, Codex, Cursor, Grok, and Fugu. For other harnesses, check
 their installed CLI help and live model catalog. Agy takes its initial prompt
@@ -54,6 +64,8 @@ Keep incomplete work in draft PRs. Report concrete results and actual blocks.
 
 Field Status and Plan Usage run beside this chat. They include native and
 bridged legacy agents. Use `$LANTERN_DESKTOP_COMMAND open` to show this chat.
+It also rebuilds a closed readout. Do not use the legacy `field-status pane`
+or `plan-usage pane` commands in the desktop app.
 Use the existing field_status.py note command with LANTERN_HERD_STATE_DIR
 for important notes, exact user actions, and keep pins. Locate field_status.py and
 lantern-app-read beside $LANTERN_DESKTOP_COMMAND. Use the detected Python 3
