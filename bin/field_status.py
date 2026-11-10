@@ -121,6 +121,10 @@ def herdr_list(binary: str, item: str, timeout: float) -> list[dict]:
 def snapshot(binary: str, timeout: float) -> tuple[list[dict], list[dict], list[dict]]:
     # Fail closed: an unavailable source must never turn a live tab into a
     # fictitious closed agent or overwrite a valid prior snapshot.
+    import desktop
+    if desktop.reads(binary):
+        view = desktop.read_world(timeout).view
+        return view["tabs"], view["agents"], view["workspaces"]
     return (herdr_list(binary, "tab", timeout), herdr_list(binary, "agent", timeout),
             herdr_list(binary, "workspace", timeout))
 

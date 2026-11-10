@@ -9,13 +9,33 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import NamedTuple
 
 import field_status as field
 import usage_runtime as runtime
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = os.environ.get("LANTERN_APP_BIN", "herdr-app")
-HC = os.environ.get("LANTERN_HC_BIN", "hc")
+READER = ROOT / "bin" / "lantern-app-read"
+READ_SECONDS = 5
+
+
+def tool(name: str) -> str:
+    # The same directories bin/lantern-app puts first, since a readout or a
+    # script can start without them on PATH.
+    extra = [os.path.expanduser(folder) for folder in ("~/.grok/bin", "~/.local/bin", "~/bin")]
+    path = os.pathsep.join([*extra, "/opt/homebrew/bin", "/usr/local/bin", os.environ.get("PATH", "")])
+    return shutil.which(name, path=path) or name
+
+
+APP = tool(os.environ.get("LANTERN_APP_BIN", "herdr-app"))
+HC = tool(os.environ.get("LANTERN_HC_BIN", "hc"))
+
+
+class World(NamedTuple):
+    """One read of the desktop: this core's identity, the readout rows, and core's terminals."""
+    server: dict
+    view: dict
+    terminals: dict
 
 
 class CoreError(RuntimeError):
@@ -40,16 +60,30 @@ def run(argv: list[str], timeout: float = 15) -> str:
     return result.stdout
 
 
-def core(method: str, **params) -> dict:
-    request = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-    proc = subprocess.run([HC, "connect"], input=json.dumps(request) + "\n", capture_output=True,
-                          text=True, timeout=10, check=False)
+def core_calls(calls: list[tuple[str, dict]], timeout: float = 10) -> list[dict]:
+    """Send several requests over one core connection and return their results in order."""
+    requests = [{"jsonrpc": "2.0", "id": index, "method": method, "params": params}
+                for index, (method, params) in enumerate(calls, 1)]
+    proc = subprocess.run([HC, "connect"], input="".join(json.dumps(r) + "\n" for r in requests),
+                          capture_output=True, text=True, timeout=timeout, check=False)
     if proc.returncode:
         raise RuntimeError(field.clean(proc.stderr, 300))
-    response = json.loads(proc.stdout)
-    if "error" in response:
-        raise CoreError(response["error"])
-    return response["result"]
+    responses = {}
+    for line in proc.stdout.splitlines():
+        if line.strip():
+            response = json.loads(line)
+            responses[response.get("id")] = response
+    results = []
+    for index in range(1, len(calls) + 1):
+        response = responses[index]
+        if "error" in response:
+            raise CoreError(response["error"])
+        results.append(response["result"])
+    return results
+
+
+def core(method: str, **params) -> dict:
+    return core_calls([(method, params)])[0]
 
 
 def app(command: str, **args) -> dict:
@@ -67,20 +101,61 @@ def bridge(terminal: dict) -> tuple[str, str] | None:
     return None
 
 
-def read_world() -> tuple[dict, dict[str, dict], dict[str, dict]]:
-    inventory = json.loads(run([APP, "ls"]))
-    terminals = {t["address"]: t for t in core("terminal.list")["terminals"]}
-    sources = {}
-    for binary in {b[0] for t in terminals.values() if (b := bridge(t))}:
-        data = json.loads(run([binary, "api", "snapshot"], 5))["result"]["snapshot"]
-        recognized = {agent["terminal_id"]: agent for agent in data["agents"]}
-        sources[binary] = {}
-        for pane in data["panes"]:
-            pane = dict(pane)
-            pane.pop("agent", None)
-            pane.update(recognized.get(pane["terminal_id"], {}))
-            sources[binary][pane["terminal_id"]] = pane
-    return inventory, terminals, sources
+def reads(binary: str) -> bool:
+    """Whether a readout's Herdr command is this checkout's desktop reader."""
+    try:
+        return Path(binary).resolve() == READER.resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
+def core_identity(status: dict) -> dict:
+    started = runtime.process_start(status["pid"])
+    if not started:
+        raise RuntimeError("Cannot identify this core's lifetime")
+    return runtime.core_identity(status["core"]["id"], started)
+
+
+def boundary_errors(action):
+    """Report a slow or malformed desktop reply as the readouts' ordinary RuntimeError."""
+    try:
+        return action()
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Herdr desktop read timed out") from None
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+        raise RuntimeError("Herdr desktop returned an unexpected reply") from None
+
+
+def server_identity(timeout: float) -> dict:
+    return boundary_errors(lambda: core_identity(core_calls([("server.status", {})], timeout)[0]))
+
+
+def read_world(seconds: float = READ_SECONDS) -> World:
+    """Read the app's layout, core's terminals, and bridged legacy panes within one deadline."""
+    end = time.monotonic() + seconds
+
+    def left() -> float:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("desktop read", seconds)
+        return remaining
+
+    def read() -> World:
+        inventory = json.loads(run([APP, "ls"], left()))
+        status, listing = core_calls([("server.status", {}), ("terminal.list", {})], left())
+        terminals = {t["address"]: t for t in listing["terminals"]}
+        sources = {}
+        for binary in {b[0] for t in terminals.values() if (b := bridge(t))}:
+            data = json.loads(run([binary, "api", "snapshot"], min(5, left())))["result"]["snapshot"]
+            recognized = {agent["terminal_id"]: agent for agent in data["agents"]}
+            sources[binary] = {}
+            for pane in data["panes"]:
+                pane = dict(pane)
+                pane.pop("agent", None)
+                pane.update(recognized.get(pane["terminal_id"], {}))
+                sources[binary][pane["terminal_id"]] = pane
+        return World(core_identity(status), snapshot(inventory, terminals, sources), terminals)
+    return boundary_errors(read)
 
 
 def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dict]) -> dict:
@@ -138,31 +213,38 @@ def native_process(terminal: dict) -> dict:
     return fg
 
 
+def pane_route(world: World, pane: str) -> tuple:
+    """The terminal, and any bridged legacy pane, behind an app pane."""
+    row = next((r for r in world.view["panes"] if r["pane_id"] == pane), None)
+    if not row:
+        raise RuntimeError("Pane no longer exists")
+    return row["terminal_id"], row.get("legacy_binary"), row.get("legacy_pane_id")
+
+
+def process_info(world: World, pane: str, timeout: float = 15) -> dict:
+    terminal_id, binary, legacy_pane = pane_route(world, pane)
+    if binary:
+        return field.control(binary, ["pane", "process-info", "--pane", legacy_pane], timeout).get("process_info", {})
+    terminal = world.terminals[terminal_id]
+    fg = native_process(terminal)
+    return {"shell_pid": terminal["pid"], "foreground_processes": [fg] if fg else []}
+
+
 def read_model(args: list[str]) -> None:
     if args == ["status", "--json"]:
-        info = json.loads(run([HC, "server", "status"]))
-        started = runtime.process_start(info["pid"])
+        status = core("server.status")
+        started = runtime.process_start(status["pid"])
         if not started:
             raise RuntimeError("Cannot identify this core's lifetime")
         print(json.dumps({"server": {"running": True, "transport": "herdr-core",
-                                     "id": info["core"]["id"], "started_at": started}}))
+                                     "id": status["core"]["id"], "started_at": started}}))
         return
-    inventory, terminals, sources = read_world()
-    world = snapshot(inventory, terminals, sources)
+    world = read_world()
     if len(args) == 2 and args[1] == "list" and args[0] in {"workspace", "tab", "agent"}:
         key = args[0] + "s"
-        print(json.dumps({"result": {key: world[key]}}))
+        print(json.dumps({"result": {key: world.view[key]}}))
     elif len(args) == 4 and args[:3] == ["pane", "process-info", "--pane"]:
-        row = next((r for r in world["panes"] if r["pane_id"] == args[3]), None)
-        if not row:
-            raise RuntimeError("Pane no longer exists")
-        if row.get("legacy_binary"):
-            print(run([row["legacy_binary"], "pane", "process-info", "--pane", row["legacy_pane_id"]]), end="")
-        else:
-            terminal = terminals[row["terminal_id"]]
-            fg = native_process(terminal)
-            print(json.dumps({"result": {"process_info": {"shell_pid": terminal["pid"],
-                             "foreground_processes": [fg] if fg else []}}}))
+        print(json.dumps({"result": {"process_info": process_info(world, args[3])}}))
     else:
         raise RuntimeError("This adapter is read only; use herdr-app and hc for native actions")
 
@@ -487,7 +569,7 @@ def main() -> int:
             target.chmod(0o700)
             print(target)
         elif command == "snapshot":
-            print(json.dumps(snapshot(*read_world())))
+            print(json.dumps(read_world().view))
         elif command == "open":
             print(json.dumps(open_home()))
         elif command == "chat":

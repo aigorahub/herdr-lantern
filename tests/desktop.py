@@ -53,6 +53,43 @@ class DesktopTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             desktop.snapshot(self.inventory(), {}, {})
 
+    def core_replies(self, *responses):
+        def run(argv, **kwargs):
+            if argv[1:] == ["ls"]:
+                return subprocess.CompletedProcess(argv, 0, json.dumps(self.inventory()), "")
+            requests = [json.loads(line) for line in kwargs["input"].splitlines()]
+            results = {"server.status": {"pid": os.getpid(), "core": {"id": "core-1"}},
+                       "terminal.list": {"terminals": [dict(t, address=a) for a, t in self.terminals().items()]}}
+            # Answer in reverse order: replies are matched by id, not by position.
+            lines = [json.dumps({"id": r["id"], "result": results[r["method"]]}) for r in reversed(requests)]
+            return subprocess.CompletedProcess(argv, 0, "\n".join(responses or lines) + "\n", "")
+        return run
+
+    def test_world_read_and_status_read_report_the_same_core(self):
+        with patch.object(desktop.subprocess, "run", side_effect=self.core_replies()):
+            world = desktop.read_world()
+            self.assertEqual(world.server, desktop.server_identity(2))
+        self.assertEqual([agent["pane_id"] for agent in world.view["agents"]], ["p1"])
+
+    def test_slow_or_malformed_desktop_reply_is_an_ordinary_read_error(self):
+        def slow(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        for reply, message in ((slow, "timed out"), (self.core_replies("not json"), "unexpected reply"),
+                               (self.core_replies('{"id": 1, "result": {}}'), "unexpected reply")):
+            with self.subTest(message=message), patch.object(desktop.subprocess, "run", side_effect=reply), \
+                    self.assertRaisesRegex(RuntimeError, message):
+                desktop.read_world()
+
+    def test_desktop_tools_are_found_when_path_lacks_the_user_folders(self):
+        with tempfile.TemporaryDirectory() as home:
+            folder = Path(home) / ".local" / "bin"
+            folder.mkdir(parents=True)
+            tool = folder / ("hc.exe" if os.name == "nt" else "hc")
+            tool.write_text("")
+            tool.chmod(0o700)
+            with patch.dict(os.environ, {"HOME": home, "USERPROFILE": home, "PATH": os.defpath}):
+                self.assertEqual(Path(desktop.tool("hc")), tool)
+
     def test_config_is_data_and_never_runs_shell_substitutions(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "must-not-exist"

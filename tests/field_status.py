@@ -136,6 +136,15 @@ class FieldStatusTests(unittest.TestCase):
                     status.refresh(state_dir, "herdr", 1, NOW, False)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), data)
 
+    def test_desktop_refresh_reads_the_desktop_once(self):
+        import desktop
+        tabs, agents, workspaces = field("done")
+        world = desktop.World({}, {"tabs": tabs, "agents": agents, "workspaces": workspaces, "panes": agents}, {})
+        with tempfile.TemporaryDirectory() as root, patch.object(desktop, "read_world", return_value=world) as read:
+            output = status.refresh(Path(root), str(desktop.READER), 5, NOW, False)
+        read.assert_called_once_with(5)
+        self.assertIn("Plugin Update", output)
+
     def test_refresh_keeps_notes_and_removes_closed_agent(self):
         with tempfile.TemporaryDirectory() as root:
             state_dir = Path(root)
