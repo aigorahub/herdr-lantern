@@ -105,6 +105,10 @@ sys.exit(0 if fixture['available'] else 3)
         self.assertEqual(offer['alternatives'][0]['quota'], 'unknown')
         self.assertFalse(any(command[:2] == ['agent', 'start'] for command in self.commands()))
 
+    def test_agent_stopped_with_an_error_can_switch_provider(self):
+        self.change(status='error')
+        self.assertEqual(self.configure_offer()['source']['pane_id'], 'p1')
+
     def test_selected_route_gets_task_in_same_workspace_and_source_is_untouched(self):
         offer = self.configure_offer()
         code, value = self.start(offer)

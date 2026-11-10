@@ -144,6 +144,18 @@ def read_world(seconds: float = READ_SECONDS) -> World:
         inventory = json.loads(run([APP, "ls"], left()))
         status, listing = core_calls([("server.status", {}), ("terminal.list", {})], left())
         terminals = {t["address"]: t for t in listing["terminals"]}
+        # The live list leaves out finished terminals, which pile up. Ask only about the
+        # ones a pane still shows; one core does not know stays missing and fails the read.
+        missing = [pane["terminal"] for space in inventory["spaces"] if not space.get("machine")
+                   for tab in space["tabs"] for pane in tab["terminals"] if pane["terminal"] not in terminals]
+        if missing:
+            try:
+                found = core_calls([("terminal.get", {"terminal": address}) for address in missing], left())
+            except CoreError as exc:
+                if exc.kind != "not_found":
+                    raise
+                found = []
+            terminals.update((terminal["address"], terminal) for terminal in found)
         sources = {}
         for binary in {b[0] for t in terminals.values() if (b := bridge(t))}:
             data = json.loads(run([binary, "api", "snapshot"], min(5, left())))["result"]["snapshot"]
@@ -170,6 +182,8 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
             for pane in tab["terminals"]:
                 address = pane["terminal"]
                 terminal = terminals.get(address)
+                if terminal and terminal.get("state") == "finished":
+                    continue  # Its program ended, so the pane holds no agent until it is closed.
                 if not terminal or terminal.get("state") != "live":
                     raise RuntimeError(f"Terminal {address} changed during the read; retry")
                 status = terminal.get("status") or {}

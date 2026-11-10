@@ -331,6 +331,20 @@ class FieldStatusTests(unittest.TestCase):
         status.apply_outcomes(rows, data)
         self.assertEqual(status.section_for(row, {}, ""), "VERIFICATION PENDING")
 
+    def test_agent_stopped_with_an_error_waits_for_review_and_cannot_be_complete(self):
+        rows = status.reconcile(status.rows_for(*field("error")), {}, NOW)
+        row = rows[-1]
+        data = {"tasks": {"w3:p1": {"id": "task", "generation": "one"}}, "outcomes": {}}
+        status.apply_outcomes(rows, data)
+        self.assertEqual(status.section_for(row, {}, ""), "VERIFICATION PENDING")
+        self.assertIn("w3:p1", [pending["pane_id"] for pending in status.pending_rows(rows)])
+        self.assertIn("Plugin Update\n  Review\n  Stopped with an error", status.render(rows, {}, NOW, False))
+        with self.assertRaisesRegex(ValueError, "cannot be complete"):
+            status.record_outcome(row, data, "task", row["outcome_token"], "complete", "proof", "Fixed")
+        for result in ("blocked", "incomplete"):
+            status.record_outcome(row, data, "task", row["outcome_token"], result, "error output read", "Stopped early")
+            self.assertEqual(data["outcomes"]["w3:p1"]["status"], result)
+
     def test_fallback_sequence_and_incomplete_outcome(self):
         row = status.reconcile(status.rows_for(*field("done")), {}, NOW)[-1]
         row["agent_session"] = None

@@ -71,6 +71,35 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(world.server, desktop.server_identity(2))
         self.assertEqual([agent["pane_id"] for agent in world.view["agents"]], ["p1"])
 
+    def test_finished_pane_is_left_out_and_an_unknown_terminal_still_fails_the_read(self):
+        inventory = self.inventory()
+        inventory["spaces"][0]["tabs"].append({"id": "tab2", "name": "ended", "terminals": [
+            {"pane": "p3", "terminal": "t3", "app": "codex"}]})
+        for known, reply in ((True, {"address": "t3", "state": "finished", "status": None}),
+                             (False, {"code": -32000, "data": {"kind": "not_found"}, "message": "no terminal"})):
+            def run(argv, **kwargs):
+                if argv[1:] == ["ls"]:
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(inventory), "")
+                lines = []
+                for request in map(json.loads, kwargs["input"].splitlines()):
+                    if request["method"] == "terminal.get":
+                        self.assertEqual(request["params"], {"terminal": "t3"})
+                        lines.append({"id": request["id"], "result" if known else "error": reply})
+                    elif request["method"] == "server.status":
+                        lines.append({"id": request["id"], "result": {"pid": os.getpid(), "core": {"id": "core-1"}}})
+                    else:
+                        lines.append({"id": request["id"], "result": {"terminals": [
+                            dict(t, address=a) for a, t in self.terminals().items()]}})
+                return subprocess.CompletedProcess(argv, 0, "".join(json.dumps(line) + "\n" for line in lines), "")
+            with self.subTest(known=known), patch.object(desktop.subprocess, "run", side_effect=run):
+                if known:
+                    world = desktop.read_world()
+                    self.assertEqual([agent["pane_id"] for agent in world.view["agents"]], ["p1"])
+                    self.assertEqual([tab["tab_id"] for tab in world.view["tabs"]], ["tab1", "tab2"])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "t3 changed during the read"):
+                        desktop.read_world()
+
     def test_slow_or_malformed_desktop_reply_is_an_ordinary_read_error(self):
         def slow(argv, **kwargs):
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
