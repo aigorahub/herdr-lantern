@@ -109,11 +109,15 @@ def reads(binary: str) -> bool:
         return False
 
 
-def core_identity(status: dict) -> dict:
+def core_start(status: dict) -> str:
     started = runtime.process_start(status["pid"])
     if not started:
         raise RuntimeError("Cannot identify this core's lifetime")
-    return runtime.core_identity(status["core"]["id"], started)
+    return started
+
+
+def core_identity(status: dict) -> dict:
+    return runtime.core_identity(status["core"]["id"], core_start(status))
 
 
 def boundary_errors(action):
@@ -247,11 +251,8 @@ def process_info(world: World, pane: str, timeout: float = 15) -> dict:
 def read_model(args: list[str]) -> None:
     if args == ["status", "--json"]:
         status = core("server.status")
-        started = runtime.process_start(status["pid"])
-        if not started:
-            raise RuntimeError("Cannot identify this core's lifetime")
         print(json.dumps({"server": {"running": True, "transport": "herdr-core",
-                                     "id": status["core"]["id"], "started_at": started}}))
+                                     "id": status["core"]["id"], "started_at": core_start(status)}}))
         return
     world = read_world()
     if len(args) == 2 and args[1] == "list" and args[0] in {"workspace", "tab", "agent"}:
