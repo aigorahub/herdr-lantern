@@ -150,10 +150,19 @@ class DesktopTests(unittest.TestCase):
                     self.assertNotIn("HELPER_KATA_PROJECT", json.loads(settings))
                     if project:
                         self.assertIn(project, prompt)
-                        self.assertIn("lantern-" + desktop.instance_id(state)[:16], prompt)
+                        target = json.loads(prompt.split("Kata project and wake target: ", 1)[1].splitlines()[0])["target"]
+                        self.assertRegex(target, r"^lantern-[0-9a-f]{16}$")
                         self.assertIn("herdr-kata.agent", prompt)
                     else:
                         self.assertNotIn("Kata", prompt)
+                with patch.object(desktop, "run", return_value=json.dumps({"spaces": []})) as invoke, \
+                        patch.object(desktop, "core", return_value={"terminals": []}), \
+                        patch.object(desktop, "app", return_value={"terminal": "t1"}), \
+                        patch.object(desktop, "ensure_views"):
+                    desktop.open_home()
+                label = next(arg for call in invoke.call_args_list for arg in call.args[0]
+                             if arg.startswith("lantern.instance="))
+                self.assertEqual(target, "lantern-" + label.split("=", 1)[1][:16])
 
     def test_replaced_live_home_releases_kata_claim(self):
         with tempfile.TemporaryDirectory() as tmp:
