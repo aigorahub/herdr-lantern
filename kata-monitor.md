@@ -29,8 +29,8 @@ jobs before retrying with it. Verify the job with `kata cron job
 show`; restore a deleted recorded job with its current definition event UID and
 verify it.
 
-Before claiming the target, run `herdr-kata doctor`: it must succeed, show the
-job supported, the project unpaused and the issue ungated. Otherwise delete the
+Before claiming the target, run `herdr-kata doctor`: it must succeed and list no
+problem for this job or project. Otherwise delete the
 job, verify deletion, release any claim and report the block. Once ready, claim
 the target with `hc label "$HC_TERMINAL_ID" herdr-kata.agent=<target>`.
 
@@ -40,7 +40,8 @@ creation time with `hc get` before acting. If verification fails or differs,
 release the claim and report failure. Otherwise make one bounded pass under the
 desktop rules, update the record, run the exact `herdr-kata report` command in
 the wake file and end the turn; do not run an active loop. When all work is
-verified done or cancelled by the user, everything left needs the user, the user
+verified done or cancelled by the user, everything left needs the user, the project
+is paused, the user
 asks to stop, exit or shut down for the evening, or before another chat takes
 over, delete the job with its current definition event UID, verify deletion with
 `kata cron job show`, then release the claim with `hc label "$HC_TERMINAL_ID"
