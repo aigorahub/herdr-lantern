@@ -90,6 +90,8 @@ If the chat dies without stopping, the job stays in Kata and its runs end not de
 (nothing is typed anywhere) until the chat is reopened and adopts it, or the user
 deletes or pauses it with `kata cron job delete` or Kata’s own tools.
 Leave the setting empty to keep the existing behavior.
+Turning the setting off does not remove an existing job; ask the chat to stop
+monitoring first, or delete the job in Kata.
 
 ## Install the plugin
 

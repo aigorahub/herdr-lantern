@@ -564,8 +564,10 @@ def open_home() -> dict:
             return {"terminal": home["address"], "reused": True}
         helper_binary = helper_argv(config, "")[0]
         if home:
-            run([HC, "label", home["address"], "lantern.desktop=", "lantern.instance=", "lantern.helper=",
-                 "herdr-kata.agent="])
+            labels = [HC, "label", home["address"], "lantern.desktop=", "lantern.instance=", "lantern.helper="]
+            if "herdr-kata.agent" in home.get("labels", {}):
+                labels.append("herdr-kata.agent=")
+            run(labels)
         argv = ["sh", str(ROOT / "bin/lantern-app"), "chat", str(state), str(config_dir())]
         space = next((s for s in inventory["spaces"] if s["name"].lower() in {"lantern", "🔥 lantern"}
                       and not s.get("machine")), None)
