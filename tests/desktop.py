@@ -132,6 +132,68 @@ class DesktopTests(unittest.TestCase):
                 desktop.read_config(path)
             self.assertFalse(marker.exists())
 
+    def test_kata_opt_in_adds_only_desktop_monitor_instructions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, config = Path(tmp) / "state", Path(tmp) / "config"
+            config.mkdir()
+            with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": str(state),
+                                         "LANTERN_CONFIG_DIR": str(config)}), \
+                    patch.object(desktop, "helper_argv", side_effect=lambda conf, prompt: ["helper", prompt]), \
+                    patch.object(desktop, "helper_command", return_value=("codex", "helper")), \
+                    patch.object(desktop.os, "chdir"), patch.object(desktop.os, "execv") as execute:
+                for project in ("", "example-project"):
+                    (config / "helper.conf").write_text(
+                        f'HELPER_KATA_PROJECT="{project}"\n' if project else "")
+                    desktop.chat()
+                    prompt = execute.call_args.args[1][1]
+                    settings = prompt.split("\nSaved settings: ", 1)[1].split("\n", 1)[0]
+                    self.assertNotIn("HELPER_KATA_PROJECT", json.loads(settings))
+                    monitor = (desktop.ROOT / "kata-monitor.md").read_text()
+                    if project:
+                        self.assertIn(monitor, prompt)
+                        wake = json.loads(prompt.split("Kata project and wake target: ", 1)[1].splitlines()[0])
+                        self.assertEqual(wake["project"], project)
+                        target = wake["target"]
+                        self.assertRegex(target, r"^lantern-[0-9a-f]{16}$")
+                    else:
+                        self.assertNotIn(monitor, prompt)
+                        self.assertNotIn("Kata project and wake target", prompt)
+                with patch.object(desktop, "run", return_value=json.dumps({"spaces": []})) as invoke, \
+                        patch.object(desktop, "core", return_value={"terminals": []}), \
+                        patch.object(desktop, "app", return_value={"terminal": "t1"}), \
+                        patch.object(desktop, "ensure_views"):
+                    desktop.open_home()
+                label = next(arg for call in invoke.call_args_list for arg in call.args[0]
+                             if arg.startswith("lantern.instance="))
+                self.assertEqual(target, "lantern-" + label.split("=", 1)[1][:16])
+
+    def test_replaced_live_home_releases_kata_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, config = Path(tmp) / "state", Path(tmp) / "config"
+            state.mkdir()
+            config.mkdir()
+            (state / "home.json").write_text(json.dumps({"terminal": "t1", "helper_binary": "codex"}))
+            def run(argv, **kwargs):
+                return json.dumps({"spaces": []}) if argv == [desktop.APP, "ls"] else ""
+            for labels in ({"herdr-kata.agent": "lantern-0123456789abcdef"}, {}):
+                home = {"address": "t1", "state": "live", "foreground": {"name": "sh"}, "labels": labels}
+                (state / "home.json").write_text(json.dumps({"terminal": "t1", "helper_binary": "codex"}))
+                with self.subTest(labels=labels), \
+                        patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": str(state),
+                                                "LANTERN_CONFIG_DIR": str(config)}), \
+                        patch.object(desktop, "run", side_effect=run) as invoke, \
+                        patch.object(desktop, "core", return_value={"terminals": [home]}), \
+                        patch.object(desktop, "helper_argv", return_value=["codex"]), \
+                        patch.object(desktop, "app", return_value={"terminal": "t2"}), \
+                        patch.object(desktop, "ensure_views"):
+                    desktop.open_home()
+                clearing = next(call.args[0] for call in invoke.call_args_list
+                                if call.args[0][:3] == [desktop.HC, "label", "t1"])
+                if labels:
+                    self.assertIn("herdr-kata.agent=", clearing)
+                else:
+                    self.assertNotIn("herdr-kata.agent=", clearing)
+
     def test_empty_helper_uses_an_installed_codex_and_retains_native_process_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = Path(tmp) / ("codex.exe" if os.name == "nt" else "codex")

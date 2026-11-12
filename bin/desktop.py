@@ -53,6 +53,10 @@ def config_dir() -> Path:
     return Path(os.environ.get("LANTERN_CONFIG_DIR", str(Path.home() / ".config/herdr/plugins/config/aigora.lantern")))
 
 
+def instance_id(state: Path) -> str:
+    return runtime.digest([str(state.resolve()), str(config_dir().resolve())])
+
+
 def run(argv: list[str], timeout: float = 15) -> str:
     result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
     if result.returncode:
@@ -272,7 +276,8 @@ def read_config(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     keys = ["HELPER_AGENT", "HELPER_MODEL", "HELPER_PROVIDER", "HELPER_EFFORT", "HELPER_CWD",
-            "HELPER_SPAWN_KIND", "HELPER_SPAWN_MODEL", "HELPER_SPAWN_EFFORT", "HELPER_PERMISSION", "HELPER_EXTRA_ARGS"]
+            "HELPER_SPAWN_KIND", "HELPER_SPAWN_MODEL", "HELPER_SPAWN_EFFORT", "HELPER_PERMISSION", "HELPER_EXTRA_ARGS",
+            "HELPER_KATA_PROJECT"]
     # The legacy parser is the configuration contract for both backends.
     script = '. "$1"; helper_parse_conf "$2" || exit 1; printf "%s\\0" ' + " ".join('"$' + key + '"' for key in keys)
     values = run(["sh", "-c", script, "lantern-config", str(ROOT / "lib.sh"), str(path)]).split("\0")
@@ -354,8 +359,12 @@ def chat() -> None:
     state = state_dir()
     work = runtime.private_dir(state / "workdir")
     prompt = (ROOT / "desktop-prompt.md").read_text()
-    prompt += "\nSaved settings: " + json.dumps({k: v for k, v in config.items() if k != "HELPER_EXTRA_ARGS"})
+    prompt += "\nSaved settings: " + json.dumps({k: v for k, v in config.items() if k not in {"HELPER_EXTRA_ARGS", "HELPER_KATA_PROJECT"}})
     prompt += f"\nModel routing: {ROOT / 'bin/model-route'}\nPreflight: {ROOT / 'bin/model-preflight'}\n"
+    if config.get("HELPER_KATA_PROJECT"):
+        prompt += "\n" + (ROOT / "kata-monitor.md").read_text()
+        prompt += "\nKata project and wake target: " + json.dumps({"project": config["HELPER_KATA_PROJECT"],
+                                                                   "target": "lantern-" + instance_id(state)[:16]}) + "\n"
     for filename in ("CLAUDE.md", "AGENTS.md", "GEMINI.md"):
         (work / filename).write_text(prompt)
     args = helper_argv(config, prompt)
@@ -529,7 +538,7 @@ def open_home() -> dict:
         raise RuntimeError("Lantern is already opening")
     try:
         config = read_config(config_dir() / "helper.conf")
-        instance = runtime.digest([str(state.resolve()), str(config_dir().resolve())])
+        instance = instance_id(state)
         inventory = json.loads(run([APP, "ls"]))
         terminals = core("terminal.list")["terminals"]
         record = field.read_json(state / "home.json", {})
@@ -555,7 +564,10 @@ def open_home() -> dict:
             return {"terminal": home["address"], "reused": True}
         helper_binary = helper_argv(config, "")[0]
         if home:
-            run([HC, "label", home["address"], "lantern.desktop=", "lantern.instance=", "lantern.helper="])
+            labels = [HC, "label", home["address"], "lantern.desktop=", "lantern.instance=", "lantern.helper="]
+            if "herdr-kata.agent" in home.get("labels", {}):
+                labels.append("herdr-kata.agent=")
+            run(labels)
         argv = ["sh", str(ROOT / "bin/lantern-app"), "chat", str(state), str(config_dir())]
         space = next((s for s in inventory["spaces"] if s["name"].lower() in {"lantern", "🔥 lantern"}
                       and not s.get("machine")), None)
