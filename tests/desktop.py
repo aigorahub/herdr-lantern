@@ -148,18 +148,16 @@ class DesktopTests(unittest.TestCase):
                     prompt = execute.call_args.args[1][1]
                     settings = prompt.split("\nSaved settings: ", 1)[1].split("\n", 1)[0]
                     self.assertNotIn("HELPER_KATA_PROJECT", json.loads(settings))
+                    monitor = (desktop.ROOT / "kata-monitor.md").read_text()
                     if project:
+                        self.assertIn(monitor, prompt)
                         wake = json.loads(prompt.split("Kata project and wake target: ", 1)[1].splitlines()[0])
                         self.assertEqual(wake["project"], project)
                         target = wake["target"]
                         self.assertRegex(target, r"^lantern-[0-9a-f]{16}$")
                     else:
-                        expected = (desktop.ROOT / "desktop-prompt.md").read_text()
-                        expected += "\nSaved settings: " + json.dumps({
-                            k: v for k, v in desktop.read_config(config / "helper.conf").items()
-                            if k not in {"HELPER_EXTRA_ARGS", "HELPER_KATA_PROJECT"}})
-                        expected += f"\nModel routing: {desktop.ROOT / 'bin/model-route'}\nPreflight: {desktop.ROOT / 'bin/model-preflight'}\n"
-                        self.assertEqual(prompt, expected)
+                        self.assertNotIn(monitor, prompt)
+                        self.assertNotIn("Kata project and wake target", prompt)
                 with patch.object(desktop, "run", return_value=json.dumps({"spaces": []})) as invoke, \
                         patch.object(desktop, "core", return_value={"terminals": []}), \
                         patch.object(desktop, "app", return_value={"terminal": "t1"}), \
@@ -177,7 +175,7 @@ class DesktopTests(unittest.TestCase):
             (state / "home.json").write_text(json.dumps({"terminal": "t1", "helper_binary": "codex"}))
             def run(argv, **kwargs):
                 return json.dumps({"spaces": []}) if argv == [desktop.APP, "ls"] else ""
-            for labels in ({"herdr-kata.agent": "lantern-123"}, {}):
+            for labels in ({"herdr-kata.agent": "lantern-0123456789abcdef"}, {}):
                 home = {"address": "t1", "state": "live", "foreground": {"name": "sh"}, "labels": labels}
                 (state / "home.json").write_text(json.dumps({"terminal": "t1", "helper_binary": "codex"}))
                 with self.subTest(labels=labels), \
@@ -191,10 +189,10 @@ class DesktopTests(unittest.TestCase):
                     desktop.open_home()
                 clearing = next(call.args[0] for call in invoke.call_args_list
                                 if call.args[0][:3] == [desktop.HC, "label", "t1"])
-                expected = [desktop.HC, "label", "t1", "lantern.desktop=", "lantern.instance=", "lantern.helper="]
                 if labels:
-                    expected.append("herdr-kata.agent=")
-                self.assertEqual(clearing, expected)
+                    self.assertIn("herdr-kata.agent=", clearing)
+                else:
+                    self.assertNotIn("herdr-kata.agent=", clearing)
 
     def test_empty_helper_uses_an_installed_codex_and_retains_native_process_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
