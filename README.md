@@ -86,6 +86,9 @@ For an optional same-chat recurring monitor, set `HELPER_KATA_PROJECT` in
 `default_checkout`. This requires a herdr-kata release supporting
 `persistent_agent` and a helper that reports its status to herdr-core.
 Lantern uses one Kata job for its packs and removes it when monitoring stops.
+If the chat dies without stopping, the job stays in Kata and its runs end not delivered
+(nothing is typed anywhere) until the chat is reopened and adopts it, or the user
+deletes or pauses it with `kata cron job delete` or Kata’s own tools.
 Leave the setting empty to keep the existing behavior.
 
 ## Install the plugin
@@ -170,6 +173,7 @@ HELPER_SPAWN_MODEL=""        # spoken phrase or id; empty = that kind's live def
 HELPER_SPAWN_EFFORT=""       # optional extra effort when the model id lacks one
 HELPER_PERMISSION="smart"    # devin / agent: auto | accept-edits | smart | dangerous; pi: accepted and ignored — no flags
 HELPER_EXTRA_ARGS=""         # extra unquoted CLI tokens
+HELPER_KATA_PROJECT=""       # optional Kata project for desktop monitoring
 ```
 
 `launch.sh` parses `KEY=value` only; it does not source the file as shell.

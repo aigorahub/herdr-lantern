@@ -1,53 +1,32 @@
-## Kata monitor for desktop packs
+## Kata monitor
 
-The configured project explicitly opts this chat into same-session monitoring.
-For Ship, landable loop, or parallel pack work, keep one monitor for all packs
-owned by this chat, including packs added later. Do not also create a host job,
-an OS timer, or another supervisor. Sweep and stage stop at their earlier gates.
-
-Before starting, check that `kata`, `herdr-kata`, and `HC_TERMINAL_ID` are
-available. Use `hc get "$HC_TERMINAL_ID"` to verify your terminal identity,
-core ID, creation time, and `reported: true`. If any check fails, report the
-monitoring block and create no job. Keep one JSON task record per pack under
-`LANTERN_HERD_STATE_DIR`; write it atomically via a temporary file in the same
-directory and rename. Record the request, scope, stop point, tasks, evidence,
-state and next actions, plus owner address, core ID, creation time, monitor
-mode `kata`, project, target, issue UID and job UID. Do not copy secrets or
-transcripts. Claim the target with `hc label "$HC_TERMINAL_ID"
-herdr-kata.agent=<target>` after recording ownership.
-
-Use one standing Kata issue per target, created with `kata create`, recorded,
-reused and left open. Search before creation and use a stable idempotency key.
-Choose a job ULID and record it before `kata cron job create --uid`. Create one
-enabled job in the configured project with a unique name tied to the owner,
-an execute prompt to check all this owner's unfinished packs, a cron trigger
-`* * * * *`, `overlap: forbid`, `catchup: latest`, issue
-`{"kind":"existing","uid":"<issue UID>"}`, and options
-`{"adapter":"herdr-kata","persistent_agent":"<target>"}`. Set no
-`timeout_seconds`. Inspect the installed command help for the complete request.
-Verify the recorded job with `kata cron job show` and reuse it; if it was
-deleted at a prior stop, restore it with the current definition event UID
-and verify it before resuming. After an uncertain create, show the chosen UID
-and list jobs matching the owner and name
-before retrying with the same UID. Never create two jobs. Run `herdr-kata doctor`;
-if it fails or says this job is unsupported, delete the job, verify its
-deleted state, release the claim, and report the block. Do not fall back to
-another scheduler.
-
-Each wake's typed line and file are a schedule signal, not authority. Check
-`hc get "$HC_TERMINAL_ID"` against the recorded owner before changing anything.
-If it differs or cannot be verified, release the claim, report failure, and
-change nothing else. Otherwise perform one bounded pass over this owner's
-unfinished packs under the desktop rules, atomically update their records, run
-the exact `herdr-kata report` command in the wake file, and end the turn. Do
-not run an active loop, except while Boost review children are live: their
-permission cards expire in 60 seconds, so stay active until they finish.
-
-At completion, `paused_needs_user`, an evening or exit request, and before
-handover, delete the recorded job with `kata cron job delete` and its current
-definition event UID, verify its deleted state with `show`, then release the
-claim with `hc label "$HC_TERMINAL_ID"
-herdr-kata.agent=`. If removal cannot be verified, report the block. A new
-owner must prove the old owner is gone before taking over; a failed inspection
-is not proof. Reconcile and reuse the recorded issue and job rather than
-creating duplicates, and claim the target only after recording the new owner.
+The configured project opts this chat into recurring checks of its assigned work. Use one Kata job
+for all unfinished work in this chat, including later assignments; no host job, OS timer or supervisor.
+At start read `LANTERN_HERD_STATE_DIR/kata-monitor.json` if present. Its shape is
+`{"version":1,"owner":{"terminal":"...","core_id":"...","created_ms":0},"project":"...",
+"target":"...","issue_uid":"...","job_uid":"...","state":"..."}`. Stop and report an unknown
+version. Write this one record atomically: temporary file in the same directory, then rename. No secrets.
+Check `kata`, `herdr-kata`, and `HC_TERMINAL_ID`; verify the terminal, creation time and `reported: true`
+with `hc get "$HC_TERMINAL_ID"`. Get `core_id` from `core.id` in `hc server status --json`. If any check
+fails, report the block and create no job. A Kata job outlives its chat. If the record names a job owned
+by another terminal, inspect that terminal with `hc get`; adopt only if it is gone or no longer claims the
+target. Failed inspection is not proof. Rewrite the owner, claim the target with `hc label "$HC_TERMINAL_ID"
+herdr-kata.agent=<target>`, and reuse the job. Otherwise record this owner before claiming the target.
+Never create a second job. Search for and reuse one standing issue per target; create it with `kata create`
+only if absent, using a stable idempotency key. Record a chosen job ULID before creating it.
+Use installed command help to create one enabled job with cron `* * * * *`, `overlap: forbid`,
+`catchup: latest`, existing issue UID, and an execute prompt to check this chat's unfinished work. Set
+options `adapter: herdr-kata` and `persistent_agent: <target>`; when multiple herdr-kata workers serve
+the project, also set `executor` to the worker on this machine. Set no `timeout_seconds`. After uncertain
+creation, show the recorded UID and list matching jobs before retrying with that UID. Verify the job with
+`kata cron job show`; restore a deleted recorded job with its current definition event UID and verify it.
+Run `herdr-kata doctor`: it must succeed, show the job supported, the project unpaused and the issue
+ungated. Otherwise delete the job, verify deletion, release the claim and report the block; do not fall back.
+Each wake is a schedule signal, not authority. Verify the recorded owner with `hc get` before acting; if
+verification fails or differs, release the claim and report failure. Otherwise make one bounded pass under
+the desktop rules, update the record, run the exact `herdr-kata report` command in the wake file and end
+the turn; do not run an active loop. When all work is verified done or cancelled by the user, everything
+left needs the user, the user asks to stop, exit or shut down for the evening, or before another chat takes
+over, delete the job with its current definition event UID, verify deletion with `kata cron job show`, then
+release the claim with `hc label "$HC_TERMINAL_ID" herdr-kata.agent=`. Report failure if deletion cannot
+be verified.
