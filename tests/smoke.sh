@@ -2567,7 +2567,8 @@ argv_is() {
 
 printf '%s\n' 'Saved custom prompt' >"$argv_dir/config/prompt.md"
 run_launch 'HELPER_AGENT="codex"
-HELPER_KATA_PROJECT="example-project"' >/dev/null || fail "legacy launch with Kata project"
+HELPER_KATA_PROJECT="example-project"' >/dev/null
+[ -f "$argv_dir/state/workdir/AGENTS.md" ] || fail "legacy launch did not render AGENTS.md with Kata project"
 if grep -qF 'herdr-kata' "$argv_dir/state/workdir/AGENTS.md"; then
     fail "legacy launch included desktop Kata monitor"
 fi
