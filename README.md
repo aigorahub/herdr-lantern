@@ -81,6 +81,13 @@ Use `LANTERN_CONFIG_DIR` to select another helper configuration directory.
 Use `LANTERN_DESKTOP_STATE_DIR` to select separate private desktop state.
 The checkout must stay available while its desktop sessions run.
 
+For an optional same-chat recurring monitor, set `HELPER_KATA_PROJECT` in
+`helper.conf` to a Kata project enrolled in herdr-kata with a
+`default_checkout`. This requires a herdr-kata release supporting
+`persistent_agent` and a helper that reports its status to herdr-core.
+Lantern uses one Kata job for its packs and removes it when monitoring stops.
+Leave the setting empty to keep the existing behavior.
+
 ## Install the plugin
 
 One command after Herdr is installed (installs the plugin and opens it):

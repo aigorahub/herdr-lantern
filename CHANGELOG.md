@@ -4,6 +4,10 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Optional Kata-backed same-chat monitoring for desktop Lantern packs.
+
 ## [0.18.1] - 2026-11-10
 
 ### Fixed
