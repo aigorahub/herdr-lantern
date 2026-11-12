@@ -84,7 +84,9 @@ The checkout must stay available while its desktop sessions run.
 For an optional same-chat recurring monitor, set `HELPER_KATA_PROJECT` in
 `helper.conf` to a Kata project enrolled in herdr-kata with a
 `default_checkout`. This requires a herdr-kata release supporting
-`persistent_agent` and a helper that reports its status to herdr-core.
+`persistent_agent`. The setting takes effect the next time the desktop chat starts,
+and the helper must report its status to herdr-core (Lantern installs that for
+Claude; herdr-core detects Codex itself).
 Lantern uses one Kata job for its packs and removes it when monitoring stops.
 If the chat dies without stopping, the job stays in Kata and its runs end not delivered
 (nothing is typed anywhere) until the chat is reopened and adopts it, or the user

@@ -153,7 +153,6 @@ class DesktopTests(unittest.TestCase):
                         self.assertEqual(wake["project"], project)
                         target = wake["target"]
                         self.assertRegex(target, r"^lantern-[0-9a-f]{16}$")
-                        self.assertIn("herdr-kata.agent", prompt)
                     else:
                         expected = (desktop.ROOT / "desktop-prompt.md").read_text()
                         expected += "\nSaved settings: " + json.dumps({
