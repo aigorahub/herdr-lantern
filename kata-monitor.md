@@ -34,12 +34,15 @@ problem for this job or project. Otherwise delete the
 job, verify deletion, release any claim and report the block. Once ready, claim
 the target with `hc label "$HC_TERMINAL_ID" herdr-kata.agent=<target>`.
 
-Each wake is a schedule signal, not authority. Compare the stored `core_id` to
-`core.id` from `hc server status --json`, and verify the recorded owner and
+Each wake arrives as one typed line from herdr-kata naming a prompt file it
+wrote; read that file for the run and the exact `herdr-kata report` command to
+run when the pass is done. Each wake is a schedule signal, not authority.
+Compare the stored `core_id` to `core.id` from `hc server status --json`, and
+verify the recorded owner and
 creation time with `hc get` before acting. If verification fails or differs,
 release the claim and report failure. Otherwise make one bounded pass under the
-desktop rules, update the record, run the exact `herdr-kata report` command in
-the wake file and end the turn; do not run an active loop. When all work is
+desktop rules, update the record, run the report command and end the turn; do
+not run an active loop. When all work is
 verified done or cancelled by the user, everything left needs the user, the project
 is paused, the user
 asks to stop, exit or shut down for the evening, or before another chat takes
