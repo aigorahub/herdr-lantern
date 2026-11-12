@@ -46,3 +46,8 @@ HELPER_PERMISSION="smart"
 
 # Extra CLI tokens appended before the prompt. Unquoted words only.
 HELPER_EXTRA_ARGS=""
+
+# Desktop app only: enable the Kata monitor for this project.
+# Enroll the project in herdr-kata with a default_checkout first.
+# Empty keeps the existing monitoring behavior.
+HELPER_KATA_PROJECT=""

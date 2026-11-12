@@ -2566,6 +2566,11 @@ argv_is() {
 }
 
 printf '%s\n' 'Saved custom prompt' >"$argv_dir/config/prompt.md"
+run_launch 'HELPER_AGENT="codex"
+HELPER_KATA_PROJECT="example-project"' >/dev/null || fail "legacy launch with Kata project"
+if grep -qF 'herdr-kata' "$argv_dir/state/workdir/AGENTS.md"; then
+    fail "legacy launch included desktop Kata monitor"
+fi
 run_launch 'HELPER_AGENT="codex"' >/dev/null || fail "workflow injection launch"
 for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rules/lantern.md; do
     for invoke in 'ship high ROI issue fixes in <repos>' \
