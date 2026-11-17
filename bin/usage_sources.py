@@ -22,6 +22,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,7 +40,7 @@ FUGU_KEY_MISSING = "Sakana API key missing"
 NEEDS_PYTHON = "Needs Python 3.11 or newer"
 AUTO_INSTALL_LOCK = threading.Lock()
 AUTO_INSTALL_TRIED: set[str] = set()
-SUPPORTED = {"codex", "claude", "grok", "agy", "fugu"}
+SUPPORTED = {"codex", "claude", "grok", "agy", "fugu", "teamclaude"}
 SELECTORS = {"codex": ["CODEX_HOME"], "claude": ["CLAUDE_CONFIG_DIR"], "grok": ["GROK_HOME"], "agy": []}
 OVERRIDES = {
     "codex": ["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"],
@@ -236,6 +237,56 @@ def configured_fugu_scope(env: dict[str, str]) -> dict | None:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ImportError):
         raise SourceError("Account unknown", provider="fugu") from None
+
+
+def configured_teamclaude_scope(env: dict[str, str]) -> dict | None:
+    """Read only the explicitly selected proxy; never infer it from a model URL."""
+    url = env.get("LANTERN_TEAMCLAUDE_URL")
+    if not url:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        _ = parsed.port  # Validate an explicit port before accepting the origin.
+    except ValueError:
+        raise SourceError("Invalid TeamClaude URL") from None
+    if (not parsed.hostname or parsed.username is not None or parsed.password is not None
+            or "?" in url or "#" in url or parsed.path not in ("", "/")
+            or any(char.isspace() or ord(char) < 32 or ord(char) > 126 for char in url)
+            or parsed.scheme != "https" and not (
+                parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "::1", "localhost"))):
+        raise SourceError("Invalid TeamClaude URL")
+    credential = env.get("LANTERN_TEAMCLAUDE_API_KEY")
+    if not credential:
+        raise SourceError("TeamClaude API key missing")
+    if any(ord(char) < 32 or ord(char) > 126 for char in credential):
+        raise SourceError("Invalid TeamClaude API key")
+    scope = {"provider": "teamclaude", "env": {}, "files": [],
+             "url": url.rstrip("/") + "/teamclaude/quota", "api_key": credential}
+    scope["stamp"] = current_stamp(scope)
+    scope["key"] = runtime.digest(["teamclaude", scope["url"], credential])
+    return scope
+
+
+def parse_teamclaude(payload: object, scope: dict, observed: float) -> dict:
+    if not isinstance(payload, dict) or not isinstance(payload.get("aggregate"), dict):
+        raise SourceError("Limits unavailable")
+    windows = []
+    for key, label, minutes in (("fiveHour", "Session", 300), ("weeklyShared", "Weekly", 10080)):
+        raw = payload["aggregate"].get(key)
+        if not isinstance(raw, dict):
+            continue
+        used = number(raw.get("utilization"))
+        count = number(raw.get("knownAccounts"))
+        if used is None or not 0 <= used <= 1 or count is None or count < 1:
+            continue
+        # nextResetAt is only the first account to refill, not a fleet reset.
+        windows.append({"id": key, "label": label, "minutes": minutes,
+                        "remaining": round(100 * (1 - used), 6),
+                        "reset_at": None, "reset_text": ""})
+    if not windows:
+        raise SourceError("Limits unavailable")
+    return {"account": scope["key"], "provider": "teamclaude", "windows": windows,
+            "credits": [], "observed_at": observed, "source": "TeamClaude /teamclaude/quota"}
 
 
 def native_claude(executable: str) -> bool:
@@ -688,6 +739,17 @@ _DOWNLOAD_ERRORS = (OSError, urllib.error.URLError, http.client.HTTPException, T
 
 
 def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
+    payload = quota_read("https://api.sakana.ai/v1/usage",
+                         {"Authorization": "Bearer " + scope["api_key"]}, deadline, cancel)
+    return parse_fugu(payload, scope["api_key"], time.time())
+
+
+def teamclaude_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
+    payload = quota_read(scope["url"], {"x-api-key": scope["api_key"]}, deadline, cancel)
+    return parse_teamclaude(payload, scope, time.time())
+
+
+def quota_read(url: str, headers: dict, deadline: float, cancel: threading.Event) -> object:
     if cancel.is_set() or time.monotonic() >= deadline:
         raise SourceError("Last update failed")
     bound = min(deadline, time.monotonic() + FUGU_READ_TIMEOUT)
@@ -696,13 +758,12 @@ def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
             return None
     guard = _SocketDeadline(bound, cancel)
     opener = _bounded_opener(guard, (urllib.request.ProxyHandler({}), NoRedirect()))
-    request = urllib.request.Request("https://api.sakana.ai/v1/usage",
-                                     headers={"Authorization": "Bearer " + scope["api_key"],
-                                              "Accept": "application/json"})
+    request = urllib.request.Request(url, headers=dict(headers, Accept="application/json"))
     try:
         try:
             response = opener.open(request, timeout=_socket_timeout(bound))
         except urllib.error.HTTPError as exc:
+            exc.close()
             raise SourceError("Sign in required" if exc.code in (401, 403) else "Last update failed") from None
         except _DOWNLOAD_ERRORS:
             raise SourceError("Last update failed") from None
@@ -713,7 +774,7 @@ def fugu_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
             raise SourceError("Last update failed") from None
         if len(raw) > 1024 * 1024 or cancel.is_set():
             raise SourceError("Last update failed")
-        return parse_fugu(json.loads(raw), scope["api_key"], time.time())
+        return json.loads(raw)
     finally:
         guard.stop()
 
@@ -1194,6 +1255,8 @@ def fetch(scope: dict, state: Path, cancel: threading.Event) -> dict:
             result = codex_read(scope, deadline, cancel)
         elif provider == "fugu":
             result = fugu_read(scope, deadline, cancel)
+        elif provider == "teamclaude":
+            result = teamclaude_read(scope, deadline, cancel)
         elif provider == "agy":
             code, output = runtime.capture([scope["executable"], "-p", "/usage", "--output-format", "json"],
                                            scope["env"], min(deadline, time.monotonic() + 20), cancel,
