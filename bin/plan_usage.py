@@ -20,7 +20,7 @@ import usage_runtime as runtime
 import usage_sources as sources
 from terminal_readout import Readout
 
-NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok", "agy": "Google", "gemini": "Google", "fugu": "Fugu"}
+NAMES = {"codex": "OpenAI", "claude": "Claude", "grok": "Grok", "agy": "Google", "gemini": "Google", "fugu": "Fugu", "teamclaude": "TC pool"}
 CONFIG = {"version": 1, "hooks": {"enabled": False, "events": []}, "providers": [
     {"id": provider, "enabled": True, "cookieSource": "off", "source": source}
     for provider, source in (("claude", "cli"), ("grok", "oauth"))]}
@@ -212,6 +212,12 @@ class Collector:
                 bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
         except sources.SourceError as exc:
             notices.setdefault(("fugu", exc.state), set())
+        try:
+            configured = sources.configured_teamclaude_scope(os.environ)
+            if configured:
+                bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
+        except sources.SourceError as exc:
+            notices.setdefault(("teamclaude", exc.state), set())
         self.bindings, self.notices = bindings, notices
         self.cache = {key: self.cache[key] for key in bindings if key in self.cache}
         self.validated, self.scan_error = True, False
@@ -405,6 +411,9 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
     lines.append(style(gap.join("-" * w for w in widths), "2"))
     notes = [] if show_resets else ["Widen pane for weekly reset times."]
     infos = []
+    if "TC pool" in services:
+        infos.append("TC pool: TeamClaude's tier-weighted Claude pool, known accounts only. "
+                     "Not a single login or Codex allowance; weekly reset varies by account.")
 
     def add(cells: list[str], codes: list[str] | None = None):
         parts = [textwrap.wrap(field.clean(cell, 500), width=w) or [""] for cell, w in zip(cells, widths)]
