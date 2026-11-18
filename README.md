@@ -618,7 +618,7 @@ access; native CLI remapping remains explicit. See [Gemini routing](docs/gemini-
 - Claude: `fable high`, `fable 5.1 high`, and `claude-fable-5-1 high`
   resolve to `claude-fable-5-1`. The live initialization response supplies
   the exact model and its effort levels. Fable 5.1 supports low, medium,
-  high, xhigh, and max. It keeps the Fable quota check and substitute consent.
+  high, xhigh, and max. A catalog miss proposes one substitute and waits for consent.
 - Cursor: `fable 5.1 high` and `fable 5.1 thinking high` select the exact
   `claude-fable-5-1-*` entries. Cursor Astra remains unavailable unless
   `agent --list-models` adds it. The Cursor default remains live Sol high Fast.

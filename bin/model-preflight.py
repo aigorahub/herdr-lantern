@@ -158,7 +158,11 @@ def claude_substitute(model: str, models: dict[str, tuple[str, set[str]]]) -> di
             resolved = models[alias][0]
             return {"kind": "claude", "model": alias, "effort": effort, "fast": False,
                     "argv": ["--model", resolved, "--effort", effort]}
-    return cursor_sol_substitute()
+    try:
+        return cursor_sol_substitute()
+    except CheckError:
+        # Cursor is an optional fallback. Keep the Claude catalog rejection.
+        return None
 
 
 def report_available(kind: str, model: str, effort: str, *, quota: str | None = None) -> int:

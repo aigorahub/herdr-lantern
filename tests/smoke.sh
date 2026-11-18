@@ -740,7 +740,7 @@ for preflight_file in prompt.md launch.sh README.md; do
         fail "$preflight_file does not forbid a usage check before seating"
 done
 for usage_file in prompt.md launch.sh README.md herd-workflows.md desktop-prompt.md learnings.md bin/model-preflight.py; do
-    if grep -qiE 'claude /usage -p|preflight Claude usage|usage bucket|usage line' "$root/$usage_file"; then
+    if grep -qiE 'claude /usage -p|preflight Claude usage|usage bucket|usage line|quota check|exhausted bucket' "$root/$usage_file"; then
         fail "$usage_file still checks Claude usage before seating"
     fi
 done

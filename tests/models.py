@@ -365,6 +365,15 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             self.assertEqual(code, 3)
             self.assertEqual(result["substitute"]["kind"], "cursor")
             self.assertEqual(self.check("claude", "invented", "high")[0], 3)
+        def run_without_cursor(command, *, input_text=None, **_):
+            if command == ["agent", "--list-models"]:
+                preflight.fail("availability check failed: agent command not found")
+            return claude_read(command, input_text=input_text)
+        with patch.object(preflight, "run", side_effect=run_without_cursor):
+            code, result = self.check("claude", "sonnet", "max")
+            self.assertEqual(code, 3)
+            self.assertIsNone(result["substitute"])
+            self.assertIn("effort max", result["reason"])
         self.assertFalse(hasattr(preflight, "parse_claude_usage"))
         self.assertFalse(hasattr(preflight, "claude_cost_usage"))
 
