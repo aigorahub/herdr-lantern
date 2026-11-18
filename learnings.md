@@ -90,15 +90,11 @@ explicit `**Acceptance criteria**` label before the `- [ ] B#-A#: text` rows.
 `service_tier`. Derive it from the same live model row that matched the model.
 Stop when the catalog has no one clear ID.
 
-**A quota check is not an argv check.** Claude usage can prove that a bucket
-has capacity. It cannot prove that a model alias or effort exists. Check both
-the usage result and the installed CLI help before a seat is available.
-
-**A usage line does not need a reset time.** Claude now prints
-`Current session: 0% used` with no reset. Treat the percent as the check.
-Fail only when a parsed bucket is exhausted, the model is absent, or the
-usage command itself failed. Do not require every bucket or a reset just
-to pass. Harnesses with no quota command stay catalog-only.
+**Never gate a seat on a usage read.** Lantern once ran Claude's print-mode
+usage command before every Claude seat. It hit the 30-second timeout and
+blocked seats twice, so on 2026-11-17 Steven removed it. A quota read is slow
+and cannot prove that a model alias or effort exists anyway. Seat checks read
+only the model catalog; quota stays unknown until the seat runs.
 
 
 ## Team reports

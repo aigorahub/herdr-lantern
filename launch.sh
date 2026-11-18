@@ -431,17 +431,15 @@ $onboard_note
   Grok Build agent with \`herdr agent
   prompt\`. Otherwise start \`--kind grok\` with \`--permission-mode auto
   -p\` and the live Grok Build default. Grok Build has no review subcommand.
-- After model resolution, run
-  \`\$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]\`. Run it
-  before you seat anything. Do not create, start, or prompt
-  when it fails. A missing command, timeout, or unparseable check stops the
-  route. A usage line with no reset time is still valid. A harness with no
-  quota command is not a failed check. Claude token logins with no usage buckets
-  can report quota: unknown after login, model, and effort checks pass. This does
-  not measure remaining quota. Missing login evidence and failed or malformed
-  usage still fail the check. If the model is unavailable, report
-  its bucket and reset time when known. Name the one live substitute from
-  the result and ask the user to confirm it. Never switch models in silence.
+- Lantern never reads usage or quota before seating. Never run the Claude
+  usage command or any quota read as a seating gate, and never wait on one.
+  After model resolution, run
+  \`\$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]\`. It checks
+  only that the exact model ID and effort are in the installed catalog, and
+  reports quota: unknown. Do not create, start, or prompt for a model the
+  catalog does not list. A missing or unparseable catalog stops the route.
+  Name the one live substitute from the result and ask the user to confirm
+  it. Never switch models in silence.
   The route wrappers do not cover Pi: skip both for \`--kind pi\` and pass
   the configured model through.
 - Model routing requires a working Python 3 command. The wrappers try

@@ -94,8 +94,9 @@ bare `gpt-6` are ambiguous. Fable selects
 Claude Code unless the user names Cursor or another harness. An explicit
 harness always wins and must have that model in its own catalog.
 
-Resolve and preflight the driver and every named phase model before seating.
-Use `bin/model-route` and `bin/model-preflight` for covered kinds. For OMP,
+Resolve and catalog-check the driver and every named phase model before
+seating. Use `bin/model-route` and `bin/model-preflight` for covered kinds.
+These read model catalogs only; never read usage or quota before seating. For OMP,
 use `omp` help and its live catalog. Never infer OMP flags from another CLI.
 Keep explicit phase choices. If the user names one model, use that model
 for all requested phases. A different effort or guide/execution model needs
@@ -700,7 +701,8 @@ Keep kind, model, auth, local transport, sandbox, and review completion as
 separate facts. A successful help or catalog read does not mean a review ran.
 
 Use Claude Code for a named Claude review. Resolve with `model-route claude`
-and preflight Claude usage. Seat `--kind claude` with verified model args and
+and check the model with `model-preflight claude`. Never check Claude usage
+before seating. Seat `--kind claude` with verified model args and
 `--permission-mode plan`, then send a findings only review request to the
 ready seat. Never replace Claude Code with Opus through OMP or Cursor without
 a user route choice. The same model name does not mean the same harness.

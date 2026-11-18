@@ -346,14 +346,12 @@ medium effort. "In Cursor with Grok" uses `--kind cursor`. "Fugu" uses
 the installed `fugu.json`. The default is regular `fugu` at high effort.
 Fugu Max, Ultra, and effort max are selected only when the user names them.
 Lantern checks the selected model with `bin/model-preflight` before it
-seats anything. It stops on a failed check or a model it knows
-will not work, and names one live substitute. A usage line with no reset
-time is still valid. Missing quota info on a harness that has no usage
-command is not a failed check.
-Claude token logins can return costs without quota buckets. Preflight checks
-the login, model, and effort, then reports `quota: unknown`. It does not claim
-remaining quota. Logged-out sessions, missing login evidence, malformed
-usage, failed usage commands, and exhausted quotas still fail.
+seats anything. The check reads only the installed model catalog: it stops
+on a model ID or effort the catalog does not list, and names one live
+substitute. Lantern never reads usage or quota before seating, so a slow
+usage command can never block a seat.
+Claude reports `quota: unknown`. An explicitly logged-out Claude account
+still fails.
 
 "There is a PR on battle-paddle, get a Codex review" is a review route.
 Lantern resolves the repository and pull request with Git and `gh`. It checks

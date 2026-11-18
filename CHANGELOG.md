@@ -4,6 +4,16 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Lantern no longer reads Claude usage before seating. `model-preflight
+  claude` used to run Claude's print-mode usage command, which could hit its
+  30-second timeout and block the seat. The check now reads only the Claude
+  initialization catalog (model and effort) and always reports
+  `quota: unknown`. Substitutes are proposed only for a model or effort the
+  catalog does not list. Prompt, launch notes, and docs no longer tell
+  Lantern to check usage or stop on a usage timeout before seating.
+
 ## [0.18.1] - 2026-11-10
 
 ### Fixed

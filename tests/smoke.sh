@@ -513,24 +513,9 @@ case "$*" in
 "--safe-mode --print --input-format stream-json --output-format stream-json --verbose --no-session-persistence")
     cat "$(dirname "$0")/claude-models.json"
     ;;
-"/usage -p --output-format json")
-    case ${CLAUDE_USAGE_MODE-} in
-    global)
-        printf '%s\n' '{"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}'
-        ;;
-    session-no-reset)
-        printf '%s\n' '{"result":"Current session: 0% used\nCurrent week (all models): 82% used · resets Aug 23 at 5am\nCurrent week (Fable): 100% used · resets Aug 23 at 5am"}'
-        ;;
-    session-only-no-reset)
-        printf '%s\n' '{"result":"Current session: 0% used"}'
-        ;;
-    session-exhausted-no-reset)
-        printf '%s\n' '{"result":"Current session: 100% used"}'
-        ;;
-    *)
-        printf '%s\n' '{"result":"Current session: 4% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100% used - resets Aug 23 at 4:59am"}'
-        ;;
-    esac
+*/usage*)
+    : >"$(dirname "$0")/usage-called"
+    exit 2
     ;;
 "--help")
     cat <<'HELP'
@@ -582,24 +567,11 @@ if "%1"=="--help" (
   echo   --permission-mode ^<mode^>
   exit /b 0
 )
-if not "%1 %2 %3 %4"=="/usage -p --output-format json" exit /b 2
-if "%CLAUDE_USAGE_MODE%"=="global" (
-  echo {"result":"You have hit your weekly limit - resets Aug 23 at 4:59am"}
-  exit /b 0
+if "%1"=="/usage" (
+  type nul >"%~dp0usage-called"
+  exit /b 2
 )
-if "%CLAUDE_USAGE_MODE%"=="session-no-reset" (
-  echo {"result":"Current session: 0%% used\nCurrent week (all models): 82%% used - resets Aug 23 at 5am\nCurrent week (Fable): 100%% used - resets Aug 23 at 5am"}
-  exit /b 0
-)
-if "%CLAUDE_USAGE_MODE%"=="session-only-no-reset" (
-  echo {"result":"Current session: 0%% used"}
-  exit /b 0
-)
-if "%CLAUDE_USAGE_MODE%"=="session-exhausted-no-reset" (
-  echo {"result":"Current session: 100%% used"}
-  exit /b 0
-)
-echo {"result":"Current session: 4%% used - resets Aug 22 at 1:19pm\nCurrent week (all models): 82%% used - resets Aug 23 at 4:59am\nCurrent week (Fable): 100%% used - resets Aug 23 at 4:59am"}
+exit /b 2
 EOF
 chmod +x "$model_dir/codex" "$model_dir/agent" "$model_dir/grok" "$model_dir/claude"
 helper_detect_python >/dev/null || fail "model route needs Python 3"
@@ -671,68 +643,27 @@ printf '%s\n' "$fugu_ultra" | grep -qF '"model":"fugu-ultra-v2.0"' ||
     fail "Fugu Ultra route did not use the v2 slug"
 unset CODEX_HOME
 rm -rf "$fugu_home"
-if fable_check=$(run_model_preflight claude fable high); then
-    fail "Claude preflight accepted an exhausted Fable bucket"
+fable_check=$(run_model_preflight claude fable high) ||
+    fail "Claude model check rejected a listed model and effort"
+printf '%s\n' "$fable_check" | grep -qF '"available":true' ||
+    fail "Claude model check did not report a listed model as available"
+printf '%s\n' "$fable_check" | grep -qF '"quota":"unknown"' ||
+    fail "Claude model check claimed a quota it never measured"
+[ ! -e "$model_dir/usage-called" ] ||
+    fail "Claude model check read usage before seating"
+if fable_effort=$(run_model_preflight claude fable ultra); then
+    fail "Claude preflight accepted an unverified effort"
 else
     preflight_status=$?
 fi
-[ "$preflight_status" -eq 3 ] || fail "exhausted Fable should return unavailable"
-printf '%s\n' "$fable_check" | grep -qF '"reason":"Current week (Fable) is 100% used; resets Aug 23 at 4:59am"' ||
-    fail "Claude preflight did not report the exhausted bucket and reset"
-printf '%s\n' "$fable_check" | grep -qF '"substitute":{"kind":"claude","model":"opus","effort":"xhigh"' ||
+[ "$preflight_status" -eq 3 ] || fail "unlisted Claude effort should return unavailable"
+printf '%s\n' "$fable_effort" | grep -qF '"substitute":{"kind":"claude","model":"opus","effort":"xhigh"' ||
     fail "Claude preflight did not propose Opus xhigh"
 if run_model_preflight claude fabel high >/dev/null 2>&1; then
     fail "Claude preflight accepted an unverified model"
 fi
-if run_model_preflight claude fable ultra >/dev/null 2>&1; then
-    fail "Claude preflight accepted an unverified effort"
-fi
-CLAUDE_USAGE_MODE=session-no-reset
-export CLAUDE_USAGE_MODE
-opus_ok=$(run_model_preflight claude opus high) ||
-    fail "Claude preflight rejected Opus when session has no reset time"
-printf '%s\n' "$opus_ok" | grep -qF '"available":true' ||
-    fail "Claude preflight did not treat a session without reset as available"
-if fable_no_reset=$(run_model_preflight claude fable high); then
-    fail "Claude preflight accepted exhausted Fable without a session reset"
-else
-    preflight_status=$?
-fi
-[ "$preflight_status" -eq 3 ] || fail "exhausted Fable without session reset should return unavailable"
-printf '%s\n' "$fable_no_reset" | grep -qF '"reason":"Current week (Fable) is 100% used; resets Aug 23 at 5am"' ||
-    fail "Claude preflight dropped the Fable reset when session had none"
-printf '%s\n' "$fable_no_reset" | grep -qF '"substitute":{"kind":"claude","model":"opus","effort":"xhigh"' ||
-    fail "Claude preflight did not keep the Opus substitute"
-CLAUDE_USAGE_MODE=session-only-no-reset
-opus_session_only=$(run_model_preflight claude opus high) ||
-    fail "Claude preflight required an all-models bucket"
-printf '%s\n' "$opus_session_only" | grep -qF '"available":true' ||
-    fail "Claude preflight did not accept a session-only usage line"
-CLAUDE_USAGE_MODE=session-exhausted-no-reset
-if session_exhausted=$(run_model_preflight claude opus high); then
-    fail "Claude preflight accepted a 100% session with no reset time"
-else
-    preflight_status=$?
-fi
-[ "$preflight_status" -eq 3 ] || fail "100% session without reset should return unavailable"
-printf '%s\n' "$session_exhausted" | grep -qF '"reason":"Current session is 100% used"' ||
-    fail "Claude preflight required a reset time in the exhausted reason"
-printf '%s\n' "$session_exhausted" | grep -qF '"substitute":{"kind":"cursor","model":"gpt-5.6-sol-high-fast"' ||
-    fail "exhausted session did not keep the substitute list"
-unset CLAUDE_USAGE_MODE
-CLAUDE_USAGE_MODE=global
-export CLAUDE_USAGE_MODE
-if global_check=$(run_model_preflight claude fable high); then
-    fail "Claude preflight accepted a global limit"
-else
-    preflight_status=$?
-fi
-unset CLAUDE_USAGE_MODE
-[ "$preflight_status" -eq 3 ] || fail "global Claude limit should return unavailable"
-printf '%s\n' "$global_check" | grep -qF '"reason":"Limit: weekly is 100% used; resets Aug 23 at 4:59am"' ||
-    fail "Claude preflight did not report the generic limit and reset"
-printf '%s\n' "$global_check" | grep -qF '"substitute":{"kind":"cursor","model":"gpt-5.6-sol-high-fast"' ||
-    fail "global Claude limit proposed another Claude model"
+[ ! -e "$model_dir/usage-called" ] ||
+    fail "Claude model check read usage before seating"
 run_model_preflight cursor gpt-5.6-sol-high-fast high >/dev/null ||
     fail "Cursor preflight rejected a listed model"
 if cursor_miss=$(run_model_preflight cursor cursor-grok-4.7-high-fast high); then
@@ -805,8 +736,13 @@ grep -qF '"Grok Build review on XYZ", "have SuperGrok review that PR" | Use the 
 for preflight_file in prompt.md launch.sh README.md; do
     grep -qF 'model-preflight' "$root/$preflight_file" ||
         fail "$preflight_file does not require the availability preflight"
-    grep -qF 'usage line with no reset' "$root/$preflight_file" ||
-        fail "$preflight_file still requires a reset time on Claude usage"
+    grep -qF 'never reads usage or quota before seating' "$root/$preflight_file" ||
+        fail "$preflight_file does not forbid a usage check before seating"
+done
+for usage_file in prompt.md launch.sh README.md herd-workflows.md desktop-prompt.md learnings.md bin/model-preflight.py; do
+    if grep -qiE 'claude /usage -p|preflight Claude usage|usage bucket|usage line' "$root/$usage_file"; then
+        fail "$usage_file still checks Claude usage before seating"
+    fi
 done
 grep -qF 'Grok" means \`--kind grok\`' "$root/launch.sh" ||
     fail "launch.sh does not route bare Grok through Grok Build"

@@ -125,8 +125,9 @@ For a request such as "have Codex review battle-paddle #166":
    Never check out the pull request in the product repository.
 4. Resolve the requested kind and model. Use the named model phrase when one
    was supplied. Otherwise use the live default. Run `model-preflight` now.
-   Stop on any failed or unavailable result. Finish this step before any
-   workspace, worktree, tab, prompt, or agent mutation.
+   It checks the model catalog only, never usage. Stop when the catalog does
+   not list the model. Finish this step before any workspace, worktree, tab,
+   prompt, or agent mutation.
 5. If the current worktree is not the pull request head, offer a separate
    gated Herdr worktree based on that exact OID.
 6. Reuse an agent of the requested kind only when it sits on the matching repo
@@ -385,49 +386,45 @@ confirms that exact plan.
 "Cursor" or "in Cursor with Grok" selects the Cursor CLI. Never use
 Composer 2.5 as a default.
 
-### Availability preflight
+### Model check
 
-Claude token logins can return costs without quota buckets. A successful
-preflight then reports `quota: unknown`. This confirms the login and model
-route, but does not measure remaining quota. Missing login evidence and
-failed or malformed usage still fail the check.
+Lantern never reads usage or quota before seating. Never run `claude /usage`,
+a Plan Usage read, or any other quota command as a seating gate, and never
+wait on one. Quota is not known until the seat runs: report `quota: unknown`.
 
 Run `$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]` after
-model resolution and before you state the seat plan and run it. Do not
-create a workspace, create a tab, or start an agent before this check
-passes.
+model resolution and before you state the seat plan and run it. It checks
+only that the exact model ID and effort appear in the installed catalog.
+Do not create a workspace, create a tab, or start an agent for a model the
+catalog does not list.
 
-- Claude checks `claude /usage -p --output-format json` and parses the
-  `.result` text. A session, all-models, or requested family bucket at 100%
-  is unavailable. A result that says the user hit a limit is unavailable.
-  A usage line with no reset time is still a valid bucket. Report the reset
-  only when the text has one. Claude model identity and effort must appear
-  in the live initialization response. The wrapper sends only the SDK
-  initialize control request in safe mode with session persistence off.
-  It sends no model prompt. Help examples are not a model allowlist.
-  Do not require every usage bucket or a reset time just to pass.
+- Claude model identity and effort must appear in the live initialization
+  response. The wrapper sends only the SDK initialize control request in
+  safe mode with session persistence off. It sends no model prompt and no
+  slash command. Help examples are not a model allowlist. An account whose
+  token source is `none` is not logged in.
 - Cursor checks the exact ID in `agent --list-models`. It does not scrape a
-  dashboard or use account tokens because the CLI has no quota command.
+  dashboard or use account tokens.
 - Grok Build checks the exact ID in `grok models`. It does not scrape
   grok.com.
 - Codex checks the exact ID in `codex debug models`.
-- If a command is missing, times out, or returns unparseable data, stop and
-  report that the availability check failed. Do not seat on a guess. A
-  harness with no usage or quota command is not a failed check.
+- If a catalog command is missing or returns unparseable data, report that
+  the model check failed. Do not seat on a guessed model ID. These are
+  local catalog reads, not usage reads.
 - Lantern's route and preflight wrappers do not cover Pi: for `--kind pi`
   skip `model-route` and `model-preflight` and pass the configured
   `--provider`/`--model` argv through. Pi resolves those itself.
 - The route wrappers require a working Python 3 command. They use `python3`,
   `python`, or the Windows `py -3` launcher. If none works, stop and report
   that Python 3 is required for model routing.
-- If the model is unavailable, do not seat it. Report the bucket and reset
-  time when known. Report the one live substitute returned by the preflight.
-  Ask for confirmation of that substitute. Never switch without confirmation.
+- If the catalog does not list the model or effort, do not seat it. Report
+  the one live substitute returned by the check. Ask for confirmation of
+  that substitute. Never switch without confirmation.
 
-The preflight uses this substitute order. It skips absent or exhausted models:
+The check uses this substitute order. It skips models the catalog lacks:
 
-- Fable 5.1 (or the live fable alias) proposes Claude Opus at xhigh. If the all-models or session bucket is
-  exhausted, use Cursor Sol 5.6 high fast.
+- Fable 5.1 (or the live fable alias) proposes Claude Opus at xhigh, then
+  Cursor Sol 5.6 high fast.
 - Opus uses live Claude Sonnet at high, then Cursor Sol 5.6 high fast.
 - Cursor Grok uses the next live Cursor Grok high and fast model, then Cursor
   Sol 5.6 high fast.
