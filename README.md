@@ -280,6 +280,42 @@ Changed keys or profile files hide prior values. The reader converts used
 percentages to percentages left and shows the weekly reset in local time.
 It makes no model calls. The API key never enters the shared cache.
 
+### TeamClaude proxy quota
+
+For a remote TeamClaude server (including an Umbrel install), opt in by setting
+`LANTERN_TEAMCLAUDE_URL=https://proxy.example.com` and
+`LANTERN_TEAMCLAUDE_API_KEY` in the environment that starts Lantern's usage
+watcher. In the desktop app the pane inherits the Herdr core's environment,
+not necessarily the shell running `lantern-app open`; configure the environment
+where that watcher actually runs. Use the proxy's control API key, not an
+upstream Anthropic token.
+Keep it out of command arguments and tracked configuration. Restart an existing
+watcher after changing its environment.
+
+The separate **TC pool** row reads `GET /teamclaude/quota` every 60 seconds, even
+without an open agent tab. It shows TeamClaude's tier-weighted Claude subscription
+aggregate for the shared session and weekly windows, **known accounts only**.
+It is not a Codex allowance, an individual login's usage, a token/cost history,
+or a guarantee that every account is available. Unknown-tier accounts and
+third-party backends do not join TeamClaude's aggregate. Session quota covers
+only accounts with a reported session window; plans without that limit are
+omitted from the session aggregate. A missing window stays
+unknown, not 100% free. The earliest account reset is not a full pool reset, so
+this row deliberately leaves the weekly reset blank. This does not replace or
+attribute the native Claude row: a proxied agent may still show Account unknown.
+
+The URL must be an HTTPS origin (ASCII/punycode hostname), with no path, query,
+user info or fragment;
+plain HTTP is accepted only on loopback for local proxies. Reads verify TLS,
+ignore inherited forward-proxy settings, refuse redirects, limit response size,
+and stop after ten seconds. No upstream probe or model request is triggered.
+Only normalized quota and a hashed binding enter the private snapshot, never
+keys, URLs, account names or the raw response. A changed URL/key drops the old
+binding; failed reads retain the previous value marked stale, as for other plans.
+The freshness marker measures when Lantern read the server, not when TeamClaude
+last observed each upstream account. See TeamClaude's
+[quota contract](https://github.com/KarpelesLab/teamclaude/blob/master/docs/quota.md).
+
 Native Codex, Antigravity, and open Fugu tabs require a readable process
 environment. Those tab readings remain unmeasured on Windows. The configured
 Fugu profile read does not require a process environment and works on Windows.

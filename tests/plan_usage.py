@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import http.server
 import json
 import os
 import shlex
@@ -46,6 +47,97 @@ except ImportError:
 # Codex and Fugu settings are TOML, which Python reads from 3.11 on.
 # OldPythonTests covers what older Python shows instead.
 needs_tomllib = unittest.skipIf(tomllib is None, "Codex settings need Python 3.11")
+
+
+class TeamClaudeTests(unittest.TestCase):
+    def scope(self, **overrides):
+        return sources.configured_teamclaude_scope(dict(
+            LANTERN_TEAMCLAUDE_URL="https://proxy.example.com",
+            LANTERN_TEAMCLAUDE_API_KEY="synthetic-secret", **overrides))
+
+    def test_opt_in_and_invalid_destinations_never_create_a_scope(self):
+        self.assertIsNone(sources.configured_teamclaude_scope({}))
+        for url in ("http://proxy.example.com", "https://user:pass@proxy.example.com",
+                    "https://proxy.example.com?key=secret", "https://proxy.example.com/#x",
+                    "https://proxy.example.com/other", "https://proxy.example.com?",
+                    "https://proxy.example.com#", "https://pröxy.example.com", "file:///tmp/key"):
+            with self.subTest(url=url), self.assertRaises(sources.SourceError):
+                sources.configured_teamclaude_scope({"LANTERN_TEAMCLAUDE_URL": url,
+                                                     "LANTERN_TEAMCLAUDE_API_KEY": "key"})
+        with self.assertRaisesRegex(sources.SourceError, "TeamClaude API key missing"):
+            sources.configured_teamclaude_scope({"LANTERN_TEAMCLAUDE_URL": "https://proxy.example.com"})
+        first = self.scope()
+        second = sources.configured_teamclaude_scope({"LANTERN_TEAMCLAUDE_URL": "https://proxy.example.com",
+                                                     "LANTERN_TEAMCLAUDE_API_KEY": "rotated"})
+        self.assertNotEqual(first["key"], second["key"])
+        self.assertNotIn("synthetic-secret", json.dumps(first["env"]))
+
+    def test_fleet_fraction_is_not_a_percent_or_a_complete_reset(self):
+        payload = {"aggregate": {"fiveHour": {"utilization": .25, "knownAccounts": 2},
+                                 "weeklyShared": {"utilization": .8, "knownAccounts": 2,
+                                                  "nextResetAt": 1800000000000}},
+                   "accounts": [{"name": "private-account"}], "unknownTiers": []}
+        result = sources.parse_teamclaude(payload, self.scope(), 1700000000)
+        self.assertEqual([x["remaining"] for x in result["windows"]], [75, 20])
+        self.assertIsNone(result["windows"][1]["reset_at"])
+        self.assertNotIn("private-account", json.dumps(result))
+        self.assertNotIn("synthetic-secret", json.dumps(result))
+        for bad in (None, {}, {"aggregate": {"fiveHour": {"utilization": True}}},
+                    {"aggregate": {"fiveHour": {"utilization": 40, "knownAccounts": 1}}}):
+            with self.subTest(payload=bad), self.assertRaises(sources.SourceError):
+                sources.parse_teamclaude(bad, self.scope(), 1700000000)
+
+    def test_authenticated_read_redirect_refusal_and_cache_privacy(self):
+        requests = []
+        class Handler(http.server.BaseHTTPRequestHandler):
+            mode = "ok"
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                requests.append((self.path, self.headers.get("x-api-key")))
+                if self.mode == "redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "/leak")
+                    self.end_headers()
+                    return
+                if self.mode == "unauthorized":
+                    self.send_response(401); self.end_headers(); return
+                self.send_response(200); self.end_headers()
+                self.wfile.write(json.dumps({"aggregate": {"weeklyShared": {
+                    "utilization": .3, "knownAccounts": 1}}}).encode())
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(lambda: (server.shutdown(), thread.join()))
+        env = {"LANTERN_TEAMCLAUDE_URL": f"http://127.0.0.1:{server.server_port}",
+               "LANTERN_TEAMCLAUDE_API_KEY": "synthetic-secret"}
+        scope = sources.configured_teamclaude_scope(env)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); core = {"key": "core", "lifetime": "one"}
+            collector = usage.Collector(root / "state", root / "shared", "herdr", core)
+            self.addCleanup(collector.close)
+            with patch.dict(os.environ, env, clear=True), \
+                    patch.object(sources, "configured_fugu_scope", return_value=None), \
+                    patch.object(runtime, "server_identity", return_value=core), \
+                    patch.object(field, "snapshot", return_value=([], [], [])):
+                collector.scan()
+                self.assertIn(scope["key"], collector.bindings)
+                result = sources.fetch(scope, root, threading.Event())
+                collector.cache[scope["key"]] = {"result": result, "state": "Measured"}
+                snapshot = collector.write()
+                self.assertEqual(snapshot["rows"][0]["tabs"], 0)
+                self.assertIn("70%", usage.render(snapshot))
+                self.assertIn("known accounts only", usage.render(snapshot, width=120))
+                self.assertNotIn("synthetic-secret", (root / "shared/snapshot.json").read_text())
+                for mode, error in (("redirect", "Last update failed"), ("unauthorized", "Sign in required")):
+                    Handler.mode = mode
+                    with self.assertRaisesRegex(sources.SourceError, error):
+                        sources.fetch(scope, root, threading.Event())
+                with patch.dict(os.environ, {"LANTERN_TEAMCLAUDE_API_KEY": "rotated"}):
+                    collector.scan()
+                    self.assertFalse(collector.cache)
+        self.assertEqual(requests, [("/teamclaude/quota", "synthetic-secret")] * 3)
 
 
 class ConfiguredFuguTests(unittest.TestCase):
