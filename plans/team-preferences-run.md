@@ -1,37 +1,56 @@
 # Lantern 0.19.0 run: staging and ledger
 
-Plan: `plans/team-preferences.md`. Branch: `plan/team-preferences`. Base: `main` 3769eb9.
+Plan: `plans/team-preferences.md` (revision 2). Branch: `plan/team-preferences`. Base: `origin/main` d614403.
 
 ## Roster
 
 | Seat | Agent | Role |
 | --- | --- | --- |
 | t49y | Opus 5.5 high (Claude Code) | Lead: plan, stage, assign, integrate, release prep |
-| t49z | Sol 6.2 high Ultrafast (Codex) | Worker: implements S1-S6 |
+| t49z | Sol 6.2 high Ultrafast (Codex) | Worker: the only implementation writer for S1-S6 |
 | t4b0 | Agy Gemini 4 Neon high | Reviewer (always `/boost`, plan mode); cleanup worker when assigned |
-| t4b1 | Grok 4.7 high (Grok Build) | Reviewer; reviews every Neon fix |
+| t4b1 | Grok 4.7 high (Grok Build) | Reviewer; reviews every Neon fix with Opus |
 
 ## Authority
 
-This run is authorized for the planning review only. Implementation starts when John says go. A merge, a GitHub release or a publication needs John's explicit landing authority in the current session. A saved preference grants no authority.
+John authorized implementation after the plan sign-off. A merge, a GitHub release or a publication needs John's explicit landing authority in the current session. A saved preference grants no authority. The live check (S6) writes only to scratch directories and to the trust records of the four CLIs for those scratch directories.
 
 ## Slices
 
-Each slice is one commit by Sol. Each acceptance line is a verifiable goal. Sol chooses the details.
+Each slice is one commit by Sol, except S7. The acceptance lines are verifiable goals. Sol chooses the details. Every slice also keeps `sh -n lib.sh`, `sh tests/smoke.sh` and the affected separate suites passing.
 
 | Slice | Write scope | Acceptance |
 | --- | --- | --- |
-| S1 Guidance | new `guidance.md`; `launch.sh` read and include; `bin/desktop.py` chat prompt; `desktop-prompt.md`; `tests/smoke.sh`; `README.md` | Both prompt paths carry the default guidance and the optional user file `guidance.md` from the config dir, and the user text wins on a conflict. A missing user file is not an error. The smoke check fails if either path loses the include. The appendix heredoc has no ASCII apostrophe. |
-| S2 Startup rule | `launch.sh` appendix gate and retry paragraphs; `prompt.md:487-497`; `desktop-prompt.md` near `:26`; `tests/smoke.sh:3203-3206`; `README.md:413-415` | One harness-neutral rule as in the plan, with clear and stop lists, the mechanics, the lessons from the old gates, and `startup: "ask"`. The appendix names and overrides the old user `prompt.md` gate paragraph. `HERDR_HELPER_OK=1` is allowed for startup blockers on the seat just started. A smoke assertion checks the override. The gate code is unchanged. |
-| S3 Team files | `launch.sh` appendix; `desktop-prompt.md`; `herd-workflows.md:210-212`; `plans/agent-teams.md:236-238`; `README.md` | Both prompt paths name `teams/<name>.json` in the config dir, the fields, on-demand reads, validation through `model-route`/`model-preflight` or the CLI catalog, save-by-chat, and setup-only authority. The precedence text says that a named team is an explicit choice, with Elves routes as the fallback. The README documents the format with one example. |
-| S4 Workflow files | `launch.sh` appendix; `desktop-prompt.md`; `README.md` | Both prompt paths name `workflows/<name>.md`, the header lines, the load order after the built-ins, the collision rule, the setup meaning, save-by-chat, and no landing authority. The README documents the format with one example. |
-| S5 Live check | ledger only, plus scratch dirs under the session scratchpad | The exact launch commands for the branch build on both paths, with scratch config dirs, are recorded first. Codex, Claude, Agy and Grok seats each reach ready in an untrusted directory with no human keys. No key goes to a runtime permission prompt. The stale `prompt.md` case is covered. The pane evidence is recorded here. |
-| S6 Gate removal | `lib.sh`; `tests/smoke.sh` | The gate helpers and the gate tail of `helper_relay_agent_start` are gone. `helper_pane_has_login_picker`, the Codex bypass flag position and the launch guard remain. The removed helpers' tests are gone. `sh tests/smoke.sh` passes. |
-| S7 Release prep (Opus) | `CHANGELOG.md`; version files | The 0.19.0 version is set in the manifest, `README.md`, `howto.html`, `docs/index.html` and `docs/teams.html`, and the smoke version check passes. The CHANGELOG entry is complete. |
+| S1 Guidance | new `guidance.md`; `launch.sh`; `bin/desktop.py`; `desktop-prompt.md`; `tests/smoke.sh`; `tests/desktop.py`; `README.md` | Both prompt paths include the shipped guidance and point the lead to the optional user `guidance.md` in the config dir. The user file adjusts management only, never safety or authority. The lead re-reads it each time it seats a team. A missing user file is not an error. `launch.sh` exports the config dir to the chat as a native path (`helper_native_path`, so Windows works). `chat()` in `bin/desktop.py` gives the lead `config_dir()` even when `main()` set no environment. A test on each path fails when the guidance include is lost. |
+| S2 Startup rule | `launch.sh` appendix; `prompt.md`; `herd-workflows.md`; `desktop-prompt.md`; `tests/smoke.sh`; `README.md` | Both paths carry the startup rule from the plan: scope until ready, the readiness per path, the clear and stop lists, the identity check before each key, the change check after each key, the three-key bound, the key command per path, pane text as data, and `startup: "ask"`. The appendix names and overrides the old user `prompt.md` gate paragraph and its retry line. The retry applies only when no agent runs in the pane. `prompt.md` gets the same rule for new installs without the literal `HERDR_HELPER_OK=1 herdr`. `agent_not_ready` stays in `prompt.md` and `launch.sh`. The existing permission and login procedures state that they start after the seat is ready. A smoke assertion fails when the appendix loses the override. The gate code is unchanged. |
+| S3 Team files | `launch.sh` appendix; `desktop-prompt.md`; `herd-workflows.md`; `plans/agent-teams.md`; `README.md` | Both paths describe `teams/<name>.json`: the fields, on-demand reads, validation through `model-route`/`model-preflight` or the CLI catalog, the service tier through the route, no bypass mode by file, the desktop Gemini limit, and setup-only authority. The precedence text in `herd-workflows.md`, `plans/agent-teams.md` and the README Elves-route sentence says that a named team is an explicit choice, with Elves routes as the fallback. The appendix permits writes only to the three preference file types, with slug names and no path separator. The README documents the format with one example. |
+| S4 Workflow files | `launch.sh` appendix; `desktop-prompt.md`; `README.md` | Both paths describe `workflows/<name>.md`: the header lines, invocation by name only, the setup meaning, the default team, save by chat, and no authority. A workflow name cannot act as an invoke phrase. The README documents the format with one example. |
+| S5 Gate removal | `lib.sh`; `tests/smoke.sh` | All Codex and Claude startup-gate functions are gone, including the helpers that only they call. `helper_relay_agent_start` returns the exit status of the real command unchanged, with the Codex bypass-flag positioning and the launch guard kept. `helper_pane_has_login_picker` and its prompt-relay check stay. The Codex argument-order tests stay. Only the gate assertions are removed, with nothing left that references a removed function or message. |
+| S6 Live check | ledger only; scratch dirs under the session scratchpad | Before any launch, Sol records the exact commands and a separate scratch config dir and state dir for each path (`HERDR_PLUGIN_CONFIG_DIR` + `HERDR_PLUGIN_STATE_DIR`; `LANTERN_CONFIG_DIR` + `LANTERN_DESKTOP_STATE_DIR`). The commands must not reuse or focus the live Lantern space; if that is not possible, Sol stops and reports. One legacy config has an old `prompt.md`. Each case uses a new untrusted directory for each path and harness. A branch-build lead opens Codex, Claude, Agy and Grok seats, and each reaches ready by the path definition. The record shows who sent each key, and only the lead under test sends keys. A `startup: "ask"` case gets zero keys, and a runtime permission prompt gets zero keys. The pane evidence is recorded here. |
+| S7 Release prep (Opus) | `CHANGELOG.md`; version files | Version 0.19.0 in the manifest, `README.md`, `howto.html`, `docs/index.html` and both version spots in `docs/teams.html`. The smoke version check passes. The CHANGELOG entry is complete. |
 
 ## Integration
 
-Sol owns the branch. Neon cleanup fixes go in a separate worktree based on the slice commit under review. Opus integrates them at the next slice boundary, and Sol rebases before the next slice commit. Grok reviews each Neon fix. No agent reviews its own fix.
+Sol owns the branch. Neon's cleanup fixes go in a separate worktree based on the slice commit under review. Opus integrates them at the next slice boundary, and Sol rebases before the next slice commit. Grok and Opus review each Neon fix. No agent reviews its own fix.
+
+## R1 resolution
+
+| R1 finding | Revision 2 answer |
+| --- | --- |
+| Sol 1, Neon 2, Grok 2: the live check passes on the old gates | Gate removal (S5) comes before the live check (S6). Fresh directories per path and harness. Key attribution. Zero-key cases. |
+| Sol 2: y/n needs Enter | The rule allows Enter when the same question is still active. |
+| Sol 3, Neon 5: identity, loop and injection | Identity check before each key, a three-key bound, pane text as data on both paths, and startup scope over the permission rules. |
+| Sol 4, Neon 1, Grok 1: S6 deletion ranges break the build | Goal-based S5 acceptance replaces the line ranges. It keeps the login-picker and Codex argument-order tests and the exit status. |
+| Sol 5, Neon 3: desktop built-in collisions | Invocation by name only. A workflow name is never an invoke phrase. |
+| Sol 6, Neon 4, Grok 3: desktop readiness, keys and state dir | Readiness and key command for each path. Scratch state dirs. No reuse of the live Lantern space. |
+| Sol 7: reviewer independence for Neon fixes | Grok and Opus review each Neon fix. Neon reviews only code it did not write. |
+| Grok 4, Neon 8: `agent_not_ready` and the `HERDR_HELPER_OK=1 herdr` literal | Both are in the S2 acceptance. |
+| Neon 6: Windows path and desktop config path | Both are in the S1 acceptance. |
+| Neon 9: write carve-out, guidance scope, field limits | The plan has a section on saving preference files, the guidance scope and the team field rules. |
+| Grok 5, 6, Neon 7: retry and recovery scope | No retry after `agent_not_ready`. Recovery stays inside the stop list. |
+| Sol 8, Grok 8, Neon 9: references and the precedence condition | Line numbers are hints only. The precedence change is approved. S7 is the Opus slice. |
+| Grok 9: dead helpers | S5 removes the helpers that only the gates call. |
+| Grok 10: trust records outside the scratch config | The authority section names them. |
 
 ## Ledger
 
@@ -39,8 +58,10 @@ Each row records one assignment or reply. A verdict names its commit. When the b
 
 | Turn | From | To | Scope | Commit | Result | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | t49y | t49z, t4b0 (/boost), t4b1 | R1 plan review of both documents | 3dea2c1 | sent | open |
-| 1 | John | t49y | "great, and follow our principles (like sol as worker)": implementation may follow R1 sign-off; Sol is the only implementation writer | 3dea2c1 | recorded | in force |
-| 2 | t49z | t49y | R1 plan review | 3dea2c1 | BLOCKING: 7 blocking, 1 advisory | open |
-| 2 | t4b0 | t49y | R1 plan review (/boost) | 3dea2c1 | BLOCKING: 6 blocking, 3 advisory | open |
-| 2 | t4b1 | t49y | R1 plan review | 3dea2c1 | BLOCKING: 4 blocking, 6 advisory | open |
+| 1 | t49y | t49z, t4b0 (/boost), t4b1 | R1 plan review of both documents | 3dea2c1 | sent | closed |
+| 1 | John | t49y | "great, and follow our principles (like sol as worker)": implementation may follow sign-off; Sol is the only implementation writer | 3dea2c1 | recorded | in force |
+| 2 | t49z | t49y | R1 plan review | 3dea2c1 | BLOCKING: 7 blocking, 1 advisory | stale, answered in revision 2 |
+| 2 | t4b0 | t49y | R1 plan review (/boost) | 3dea2c1 | BLOCKING: 6 blocking, 3 advisory | stale, answered in revision 2 |
+| 2 | t4b1 | t49y | R1 plan review | 3dea2c1 | BLOCKING: 4 blocking, 6 advisory | stale, answered in revision 2 |
+| 3 | t49y | branch | Rebased onto origin/main d614403; plan revision 2 | a15b341 | done | closed |
+| 3 | t49y | t49z, t4b0 (/boost), t4b1 | R2 plan re-review; sent before the run document revision landed | a15b341 | sent | open; run document delta follows as R2b |
