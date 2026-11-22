@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -746,7 +746,7 @@ questions within scope, inspect stalls, and advance idle seats with work
 left. They grant routine permissions for the accepted Elves run, the
 assigned task and role, or the configured startup in the exact workspace.
 They read the prompt, choose the narrowest visible option, and verify the
-seat resumes. [Shipped manager rules](manager-duty.md)
+seat resumes. See the [shipped manager rules](manager-duty.md).
 Lantern never closes its home tab. See [the herd contract](herd-workflows.md).
 
 Run ownership and phase records come from the installed Elves skill. Prewalk

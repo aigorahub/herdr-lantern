@@ -4,6 +4,26 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-11-22
+
+### Changed
+
+- The manager keeps every agent moving. Lantern and each team lead it sets up
+  watch their seats, answer questions they can resolve, recover stalled seats,
+  give idle seats their next assigned action, and grant routine permission
+  prompts inside the seat scope without asking the user. Scope is the
+  accepted Elves run, the task and role assigned to the seat, or, at startup,
+  starting the seat in its configured state in the workspace Lantern opened.
+  The 0.19.0 rule that stopped and reported every startup permission prompt is
+  replaced. `startup: "ask"` still reports startup blockers without keys.
+- The rules are in the shipped `manager-duty.md`. The desktop and legacy
+  paths both include it and give it to each team lead. User guidance, team
+  files and workflow principles cannot override it.
+- Still escalated to the user: login, account or credential choice, plan,
+  quota or payment, actions outside scope, unauthorized merge, deployment,
+  publication or financial actions, permission-mode increases, permanent
+  broad access, host dialogs and unknown screens.
+
 ## [0.19.0] - 2026-11-22
 
 ### Added
