@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.18.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -411,9 +411,16 @@ after resume or review. Kinds without a listed tier get no extra flags.
 bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
 unless the user asks for yolo and confirms the exact flag and the protections it removes.
 Pi has no permission modes: `HELPER_PERMISSION` is accepted and ignored for
-Pi, and Lantern never passes any approval-bypass flag to it. A Claude folder
-trust card that highlights `No, exit` gets Down, then Enter only when the
-marker is on `Yes, I trust this folder`. An older card still gets one Enter.
+Pi, and Lantern never passes any approval-bypass flag to it.
+
+Lantern can clear startup screens on a seat it just opened. Examples
+include trust for that exact workspace, a new chat confirmation, and a
+welcome screen. It reads the exact pane before each key and checks the
+result. On both paths, readiness requires a fresh read of the exact pane
+that shows the usable harness input prompt with no active dialog. It
+reports login, account, quota, payment, tool permission, and
+other blocks that need a decision. Cutoff recovery for an existing run
+keeps its separate login restart procedure.
 
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok", "Grok Build", and
@@ -612,8 +619,9 @@ Use Elves 2.37.0 or later for team assignments and the callback adapter.
 Lantern supports native Windows. Elves team execution on Windows requires
 WSL2. The executable, state, and credential paths must be valid inside the
 Elves environment; native Windows paths cannot be used unchanged in WSL2.
-Saved model routes and substitute choices belong to Elves. Lantern reuses
-them. Named models and team limits take priority. Without a requested count,
+When you name a saved team, Lantern uses its routes as your explicit choice.
+When you name no team, Lantern reuses the Elves routes and substitutes.
+Named models and team limits take priority. Without a requested count,
 a comparison starts with a lead and two proposers. Helpers cannot expand
 the team or change their own scope.
 
@@ -643,6 +651,67 @@ for copyable requests and a request builder.
 See the [team rules](herd-workflows.md#teams-on-one-task) and
 [callback protocol](plans/team-protocol-v1.md) for setup and recovery.
 
+### Managerial guidance
+
+Lantern gives each team lead the shipped managerial guidance and your
+adjustments. Add your adjustments to `guidance.md` in the Lantern config
+directory. Lantern reads this optional file each time it sets up a team,
+so a change takes effect without restarting Lantern. The file changes
+management defaults only. Safety, permission, and authority rules still apply.
+Say “remember that as manager guidance” to add a line from chat.
+
+### Saved teams
+
+Save a team in `teams/<name>.json` in the Lantern config directory. Say
+“save this as my review team” to save it from chat. Open it by its name
+or an alias. Lantern reads the file on demand and checks each exact model
+and effort before it seats the team. An unavailable route stops the
+affected launch. Lantern reports it without substituting another model.
+
+```json
+{
+  "name": "review",
+  "aliases": ["review pair"],
+  "startup": "ask",
+  "agents": [
+    {"role": "lead", "harness": "codex", "model": "gpt-6-astra", "effort": "high"},
+    {"role": "reviewer", "harness": "codex", "model": "gpt-5.6-sol", "effort": "high"}
+  ]
+}
+```
+
+Use a lowercase file name slug with letters, digits, underscores, or
+hyphens. Start it with a letter or digit. A seat can also specify
+`service_tier` (use `fast` when the route supports it), `mode`, `label`, or
+`notes`. Put shared notes in the top-level `coordination` field. Set
+`startup` to `ask` to report a visible startup blocker without sending keys.
+The default is `auto`. The team receives its roster and the lead receives
+the guidance. The team waits for a task. The saved team grants no authority
+to change permissions, merge, deploy, publish, or take financial action.
+
+### Saved workflows
+
+Save working principles in `workflows/<name>.md` in the Lantern config
+directory. Say “save this as my focused review workflow” to save from chat.
+Use the same file name slug rules as for teams.
+
+```markdown
+Name: Focused review
+Aliases: Focused
+Default team: review
+
+Reviewers read the exact commit before sharing findings.
+Findings name the affected behavior and give evidence.
+```
+
+The `Aliases:` and `Default team:` lines are optional. Say “set up the focused
+review workflow” or “use my focused workflow”. Add “with the review team”
+to choose a team explicitly. Lantern uses that team or the default team.
+If neither is set, Lantern asks once. The team receives the roster, the
+lead receives the guidance and principles, and the team waits for a task.
+A saved name or alias only selects a workflow in an explicit workflow
+request. The file grants no authority to start work or land changes.
+
 ### Other workflow phrases
 
 Lantern starts and monitors selected work across many repos through clean
@@ -663,7 +732,8 @@ from its home tab and raises only decisions that need you.
 For `landable loop` and `parallel pack`, omit `merge when clean` to stop at a
 landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage never grants merge authority.
 Lantern never merges or edits product repositories. It never prompts a working
-chat. A login picker gets one exact process restart, with no input keys.
+chat. During cutoff recovery, a login picker gets one exact process
+restart with the recorded resume arguments and no input keys.
 Lantern grants routine permissions within the selected run's scope. It reads
 the blocked prompt, selects a visible allow once option, and checks progress.
 It does not enable broad bypass settings or approve work outside that scope.

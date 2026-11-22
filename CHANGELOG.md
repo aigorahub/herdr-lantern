@@ -4,8 +4,31 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-22
+
 ### Added
 
+- Managerial guidance. Lantern ships a default `guidance.md` and gives it to
+  every team lead it sets up, on the legacy and desktop paths. The defaults
+  are: divide the work so it is done correctly as fast as the resources
+  allow, give agents verifiable goals and do not micromanage, give image
+  models the reference instead of a description, and send multimodal work to
+  the strongest multimodal seat. An optional `guidance.md` in the config
+  directory adjusts the management defaults. It cannot change safety,
+  permission or authority rules.
+- Saved teams in `teams/<name>.json` in the config directory. A team maps each
+  role to a harness, model, effort and optional service tier. Lantern checks
+  each seat with `model-route` and `model-preflight`, or the installed CLI
+  catalog, and reports an unavailable model instead of substituting. A named
+  team takes priority over saved Elves routes. Repository vetoes and safety
+  rules still outrank it. Opening a team is setup only.
+- Saved workflows in `workflows/<name>.md`. "Set up the <name> workflow" opens
+  the named or default team, gives the lead the guidance and the workflow
+  principles, and waits for a task. A workflow name is never an invoke phrase
+  and grants no authority.
+- Lantern saves guidance, teams and workflows by chat ("save this as my X
+  team"). It writes only those files in the config directory, under a lock,
+  with symbolic link checks and an atomic rename.
 - `field_status.py reap` lists finished agents that can be closed. With
   `--yes` (or `--pane <id> --yes` for one helper) it closes only agents that
   are done with a recorded Complete outcome. It never closes Lantern's home
@@ -27,6 +50,15 @@ All notable changes to Lantern, by Elves are documented here.
   on Windows. It checks local load and leaves the done count to Field Status.
 
 ### Changed
+
+- One general startup rule replaces the per-harness Codex and Claude startup
+  gates. The lead clears only startup screens (workspace trust, first-run
+  confirms, welcome and release notes) on a seat it opened, with the least
+  privilege, on every harness and on both launch paths. It stops and reports a
+  login, account, quota or payment screen, any tool or command permission,
+  and any unknown screen. A seat counts as ready only when a fresh pane read
+  shows the usable input prompt. A team can set `startup: "ask"` to report
+  blockers instead. Agy and Grok seats no longer stop at startup.
 
 - On Linux and macOS, Plan Usage tracks a read's helper processes by asking the OS
   directly instead of starting `ps` several times a second (#89).

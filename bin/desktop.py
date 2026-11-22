@@ -415,12 +415,15 @@ def install_claude_hooks(work: Path) -> None:
 
 def chat() -> None:
     record_start(state_dir(), "chat")
-    config = read_config(config_dir() / "helper.conf")
+    preferences = config_dir().resolve()
+    config = read_config(preferences / "helper.conf")
     state = state_dir()
     work = runtime.private_dir(state / "workdir")
     prompt = (ROOT / "desktop-prompt.md").read_text()
     prompt += "\nSaved settings: " + json.dumps({k: v for k, v in config.items() if k not in {"HELPER_EXTRA_ARGS", "HELPER_KATA_PROJECT"}})
     prompt += f"\nModel routing: {ROOT / 'bin/model-route'}\nPreflight: {ROOT / 'bin/model-preflight'}\n"
+    prompt += f"\nLantern config directory (LANTERN_CONFIG_DIR): {preferences}\n"
+    prompt += "\n" + (ROOT / "guidance.md").read_text(encoding="utf-8") + "\n"
     if config.get("HELPER_KATA_PROJECT"):
         prompt += "\n" + (ROOT / "kata-monitor.md").read_text()
         prompt += "\nKata project and wake target: " + json.dumps({"project": config["HELPER_KATA_PROJECT"],
@@ -433,7 +436,8 @@ def chat() -> None:
     for name in list(os.environ):
         if name.startswith("HERDR_") and name != "HERDR_APP_HOME":
             os.environ.pop(name, None)
-    os.environ.update(LANTERN_DESKTOP_COMMAND=str(ROOT / "bin/lantern-app"),
+    os.environ.update(LANTERN_CONFIG_DIR=str(preferences),
+                      LANTERN_DESKTOP_COMMAND=str(ROOT / "bin/lantern-app"),
                       LANTERN_HERD_STATE_DIR=str(state), LANTERN_TEAM_STATE_DIR=str(state),
                       LANTERN_TEAM_MAILBOX=str(ROOT / "bin/team_mailbox.py"))
     os.chdir(work)

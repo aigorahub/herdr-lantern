@@ -267,7 +267,7 @@ esac
 grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/launch.sh" ||
     fail "launch.sh should force the wrapper to the front of PATH"
 grep -q 'helper_relay_agent_start' "$root/bin/herdr" ||
-    fail "bin/herdr should relay agent start for the Codex startup gate"
+    fail "bin/herdr should relay agent start for Codex unattended flag positioning"
 rm -rf "$resolve_dir"
 
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
@@ -1431,12 +1431,6 @@ for task_text in 'Fix login in /tmp/login-service' 'Review sign in and select ac
 done
 for login_screen in 'Sign in to continue. Yes, continue' 'Select an account. Start a new chat? [y/n]' 'Choose login method. Yes, I trust this folder' 'Sign in with ChatGPT' 'Login' 'Authentication method:'; do
     helper_pane_has_login_picker "$login_screen" || fail "login screen was not detected"
-    if helper_codex_startup_key "$login_screen" >/dev/null; then
-        fail "Codex login picker received a startup key"
-    fi
-    if helper_claude_pane_has_trust "$login_screen"; then
-        fail "Claude login picker received a trust key"
-    fi
     printf '%s\n' "$login_screen" >"$FAKE_PANE"
     if out=$(sh "$root/bin/herdr" agent prompt w1:p1 "hello there" 2>"$err"); then
         fail "login picker must block the prompt fallback"
@@ -1445,186 +1439,11 @@ for login_screen in 'Sign in to continue. Yes, continue' 'Select an account. Sta
         fail "login picker received Enter from the prompt fallback"
     fi
 done
-login_path_trust=$(printf '%s\n' '/tmp/login-service' 'Do you trust the contents of this directory?' 'Yes, continue')
-[ "$(helper_codex_startup_key "$login_path_trust")" = Enter ] ||
-    fail "login in a repo path must not block Codex trust"
-helper_claude_pane_has_trust "$(printf '%s\n' 'Accessing workspace: /tmp/login-service' 'Yes, I trust this folder')" ||
-    fail "login in a repo path must not block Claude trust"
 unset FAKE_PANE
 unset HERDR_REAL
 rm -rf "$fake_prompt"
 fake_prompt=
 
-# Codex first-run gates. Herdr returns agent_not_ready as soon as the
-# seat is blocked during startup. The wrapper reads that named pane and
-# sends only the key that gate wants.
-[ "$(helper_codex_startup_key "$(printf '%s\n' \
-    '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue')")" = Enter ] ||
-    fail "trust dialog should send Enter"
-[ "$(helper_codex_startup_key "$(printf '%s\n' \
-    'Do you trust the contents of this' \
-    'directory?')")" = Enter ] ||
-    fail "a wrapped trust question should still send Enter"
-[ "$(helper_codex_startup_key 'Start a new chat? [y/n]')" = y ] ||
-    fail "[y/n] new-chat confirm should send y"
-[ "$(helper_codex_startup_key 'Resume this session? yes (y)')" = y ] ||
-    fail "yes (y) new-chat confirm should send y"
-[ "$(helper_codex_startup_key "$(printf '%s\n' \
-    'Do you trust the contents of this directory?' \
-    'Yes, continue' \
-    'Start a new chat? [y/n]')")" = Enter ] ||
-    fail "trust should win the first key when both gates are visible"
-if helper_codex_startup_key 'Would you like to run setup.sh? [y/n]' >/dev/null; then
-    fail "a permission [y/n] must not look like a new-chat confirm"
-fi
-if helper_codex_startup_key 'Approve MCP server startup? yes (y)' >/dev/null; then
-    fail "a permission yes (y) must not look like a new-chat confirm"
-fi
-helper_seat_is_ready '{"interactive_ready":true,"agent_status":"idle"}' ||
-    fail "idle plus interactive_ready should be ready"
-helper_seat_is_ready '{"interactive_ready":true,"agent_status":"done"}' ||
-    fail "done plus interactive_ready should be ready"
-if helper_seat_is_ready '{"interactive_ready":true,"agent_status":"blocked"}'; then
-    fail "blocked plus interactive_ready must not count as seated"
-fi
-if helper_codex_seat_ok '{"agent":"claude","pane_id":"w1:p1"}' w1:p1; then
-    fail "a Claude occupant must not count as the Codex seat"
-fi
-helper_codex_seat_ok '{"agent":"codex","pane_id":"w1:p1"}' w1:p1 ||
-    fail "a Codex occupant in the start pane should count"
-helper_seat_ok '{"agent":"claude","pane_id":"w1:p1"}' w1:p1 claude ||
-    fail "a Claude occupant in the start pane should count"
-if helper_seat_ok '{"agent":"codex","pane_id":"w1:p1"}' w1:p1 claude; then
-    fail "a Codex occupant must not count as the Claude seat"
-fi
-if helper_seat_ok '{"agent":"claude","pane_id":"w2:p9"}' w1:p1 claude; then
-    fail "a Claude seat in another pane must not count"
-fi
-
-# Claude first-run folder trust. One screen, one Enter, nothing else.
-helper_claude_pane_has_trust "$(printf '%s\n' \
-    'Accessing workspace' \
-    '/tmp/demo' \
-    '› 1. Yes, I trust this folder' \
-    '  2. No, choose another folder' \
-    'Enter to confirm')" ||
-    fail "the Claude folder trust screen should be a gate"
-helper_claude_pane_has_trust "$(printf '%s\n' \
-    'Yes, I' \
-    'trust this folder')" ||
-    fail "a wrapped Claude trust option should still be a gate"
-if helper_claude_pane_has_trust "$(printf '%s\n' \
-    '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue')"; then
-    fail "the Codex trust dialog must not be the Claude gate"
-fi
-if helper_claude_pane_has_trust 'press enter to confirm or esc to cancel'; then
-    fail "a later permission prompt must not look like the Claude gate"
-fi
-if helper_claude_pane_has_trust 'Do you want to make this edit to lib.sh?'; then
-    fail "a later edit permission prompt must not look like the Claude gate"
-fi
-if helper_claude_pane_has_trust 'Start a new chat? [y/n]'; then
-    fail "a new-chat confirm must not look like the Claude gate"
-fi
-if helper_claude_pane_has_trust 'claude is starting...'; then
-    fail "unrelated pane text must not look like the Claude gate"
-fi
-
-# Newer Claude builds default the trust card's highlight to "No, exit"
-# instead of "Yes, I trust this folder". A bare Enter would pick that
-# default and quit rather than trust, so the gate must recognize this
-# shape needs a Down before Enter - and must not say so for the older
-# layout where trust is already the default.
-helper_claude_trust_needs_down "$(printf '%s\n' \
-    'Accessing workspace:' \
-    '/tmp/demo' \
-    'Quick safety check: is this a project you trust?' \
-    '❯ No, exit' \
-    '  Yes, I trust this folder' \
-    'Enter to confirm · Esc to cancel')" ||
-    fail "the No, exit default should need a Down before Enter"
-if helper_claude_trust_needs_down "$(printf '%s\n' \
-    'Accessing workspace' \
-    '/tmp/demo' \
-    '› 1. Yes, I trust this folder' \
-    '  2. No, choose another folder' \
-    'Enter to confirm')"; then
-    fail "the older Yes-first layout should not need a Down"
-fi
-if helper_claude_trust_needs_down 'Start a new chat? [y/n]'; then
-    fail "an unrelated pane must not need a Down"
-fi
-
-# Codex P2: after sending Down, the gate must verify the selection
-# actually moved onto "Yes, I trust this folder", not just that the same
-# trust-card text is still on screen. A dropped or no-op Down leaves the
-# mark on "No, exit" and must never read as confirmed.
-helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
-    'Accessing workspace:' \
-    '/tmp/demo' \
-    'Quick safety check: is this a project you trust?' \
-    '  No, exit' \
-    '❯ Yes, I trust this folder' \
-    'Enter to confirm · Esc to cancel')" ||
-    fail "a mark on Yes, I trust this folder should read as confirmed"
-if helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
-    'Accessing workspace:' \
-    '/tmp/demo' \
-    'Quick safety check: is this a project you trust?' \
-    '❯ No, exit' \
-    '  Yes, I trust this folder' \
-    'Enter to confirm · Esc to cancel')"; then
-    fail "a mark still on No, exit must not read as confirmed"
-fi
-if helper_claude_trust_confirmed_on_yes 'Start a new chat? [y/n]'; then
-    fail "an unrelated pane must not read as confirmed"
-fi
-
-# Codex P2: a narrow pane wraps the selected label across lines (for
-# example after "I"). helper_codex_flat_pane turns that wrap into extra
-# whitespace, so the match must tolerate any run of whitespace between
-# the label's words without loosening which option the marker sits in
-# front of.
-helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
-    'Accessing workspace:' \
-    '/tmp/demo' \
-    'Quick safety check: is this a project you trust?' \
-    '  No, exit' \
-    '❯ Yes, I' \
-    '  trust this folder' \
-    'Enter to confirm · Esc to cancel')" ||
-    fail "a wrapped Yes selection should still read as confirmed"
-helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
-    'Accessing workspace:' \
-    '/tmp/demo' \
-    'Quick safety check: is this a project you trust?' \
-    '  No, exit' \
-    '❯ Yes,   I    trust  this   folder' \
-    'Enter to confirm · Esc to cancel')" ||
-    fail "extra whitespace inside the Yes label should still read as confirmed"
-# Wrapping must not blur the marker into matching the wrong option: the
-# unselected label always sits in the pane too, unmarked.
-if helper_claude_trust_confirmed_on_yes "$(printf '%s\n' \
-    'Accessing workspace:' \
-    '/tmp/demo' \
-    'Quick safety check: is this a project you trust?' \
-    '❯ No,' \
-    '  exit' \
-    '  Yes, I' \
-    '  trust this folder' \
-    'Enter to confirm · Esc to cancel')"; then
-    fail "a wrapped No, exit selection must not read as confirmed"
-fi
-if helper_codex_startup_key 'press enter to confirm or esc to cancel' >/dev/null; then
-    fail "a later confirm prompt must not look like a first-run gate"
-fi
-if helper_codex_startup_key 'codex is starting...' >/dev/null; then
-    fail "unrelated pane text must not look like a first-run gate"
-fi
 [ "$(helper_argv_option_value --kind agent start reviewer --kind codex --pane w1:p1)" = codex ] ||
     fail "--kind value"
 [ "$(helper_argv_option_value --pane agent start reviewer --kind=codex --pane=w1:p1)" = w1:p1 ] ||
@@ -1651,55 +1470,15 @@ case "$1 $2" in
     fi
     printf '{"error":{"code":"agent_not_ready","message":"%s is blocked during startup and is not ready for prompts"}}\n' \
         "$3" >&2
-    exit 1
+    exit "${FAKE_START_EXIT:-1}"
     ;;
 "agent get")
-    ready=false
-    status=blocked
-    [ -f "${FAKE_READY_FILE:-}" ] && ready=true && status=idle
-    [ -n "${FAKE_GET_STATUS:-}" ] && status=$FAKE_GET_STATUS
-    printf '{"result":{"agent":{"pane_id":"%s","agent":"%s","interactive_ready":%s,"agent_status":"%s"}}}\n' \
-        "${FAKE_AGENT_PANE:-w1:p1}" "${FAKE_GET_AGENT:-codex}" "$ready" "$status"
+    printf '{"result":{"agent":{"pane_id":"w1:p1","agent":"codex","interactive_ready":false,"agent_status":"blocked"}}}\n'
     exit 0
     ;;
 "agent read")
-    n=0
-    [ -f "${FAKE_READ_N:-}" ] && n=$(cat "$FAKE_READ_N")
-    n=$((n + 1))
-    [ -n "${FAKE_READ_N:-}" ] && printf '%s\n' "$n" >"$FAKE_READ_N"
-    if [ -n "${FAKE_PANE_AFTER:-}" ] && [ -f "$FAKE_PANE_AFTER" ] &&
-        [ "$n" -ge "${FAKE_SWAP_AT:-999}" ]; then
-        cat "$FAKE_PANE_AFTER"
-        exit 0
-    fi
-    if [ "$n" -eq 1 ] && [ -n "${FAKE_PANE_DELAY:-}" ] && [ -f "$FAKE_PANE_DELAY" ]; then
-        cat "$FAKE_PANE_DELAY"
-        exit 0
-    fi
-    cat "$FAKE_PANE" 2>/dev/null
+    printf 'Do you trust the contents of this directory?\n'
     exit 0
-    ;;
-"agent send-keys")
-    printf 'agent send-keys %s %s\n' "$3" "$4"
-    if [ -n "${FAKE_PANE_NEXT:-}" ] && [ -f "$FAKE_PANE_NEXT" ]; then
-        cat "$FAKE_PANE_NEXT" >"$FAKE_PANE"
-        rm -f "$FAKE_PANE_NEXT"
-        exit 0
-    fi
-    if [ -n "${FAKE_HOLD_FILE:-}" ] && [ -f "$FAKE_HOLD_FILE" ]; then
-        rm -f "$FAKE_HOLD_FILE"
-        exit 0
-    fi
-    [ -n "${FAKE_START_DEAF:-}" ] || : >"${FAKE_READY_FILE:-/dev/null}"
-    exit 0
-    ;;
-"agent wait")
-    printf '%s\n' "$*"
-    case "$*" in
-    *"--timeout 120000"*) exit 0 ;;
-    esac
-    [ -f "${FAKE_READY_FILE:-}" ] && exit 0
-    exit 1
     ;;
 esac
 printf '%s\n' "$*"
@@ -1708,152 +1487,10 @@ EOF
 chmod +x "$fake_start/herdr"
 export HERDR_REAL="$fake_start/herdr"
 export HERDR_HELPER_OK=1
-export FAKE_PANE="$fake_start/pane.txt"
-export FAKE_PANE_NEXT="$fake_start/pane.next"
-export FAKE_PANE_DELAY="$fake_start/pane.delay"
-export FAKE_PANE_AFTER="$fake_start/pane.after"
-export FAKE_SWAP_AT=999
-export FAKE_GET_AGENT=codex
-unset FAKE_GET_STATUS
-export FAKE_READ_N="$fake_start/read.n"
-export FAKE_HOLD_FILE="$fake_start/hold"
-export FAKE_READY_FILE="$fake_start/ready"
-export FAKE_AGENT_PANE=w1:p1
-export FAKE_START_ERR=agent_not_ready
-export FAKE_START_LOG="$fake_start/start.log"
-unset FAKE_START_OK
-unset FAKE_START_DEAF
-: >"$FAKE_PANE"
-rm -f "$FAKE_READY_FILE" "$FAKE_PANE_NEXT" "$FAKE_PANE_DELAY" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
-
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "Codex trust gate should recover after Enter"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "Codex trust gate did not send Enter to the named seat"
-printf '%s\n' "$out" | grep -q 'agent wait reviewer --until idle' ||
-    fail "Codex trust gate did not wait until idle"
-
-rm -f "$FAKE_READY_FILE"
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "Codex new-chat [y/n] should recover after y"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
-    fail "Codex new-chat confirm did not send y to the named seat"
-
-rm -f "$FAKE_READY_FILE"
-printf '%s\n' 'Resume this session? yes (y)' >"$FAKE_PANE"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "Codex yes (y) confirm should recover after y"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
-    fail "Codex yes (y) confirm did not send y"
-
-# Trust then a new-chat confirm: one key is not enough.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "trust then new-chat should recover after both keys"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "sequential gates did not send Enter for trust"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
-    fail "sequential gates did not send y for new-chat"
-
-# Leftover trust text in the pane must not send a second Enter instead of y.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' \
-    'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "leftover trust text should still send y for new-chat"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
-    fail "leftover trust text ate the new-chat y"
-[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -eq 1 ] ||
-    fail "leftover trust text sent Enter more than once"
-
-# After trust, a blank transition, then the new-chat confirm.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-printf '%s\n' 'codex is starting...' >"$FAKE_PANE_NEXT"
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_AFTER"
-export FAKE_SWAP_AT=3
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "a delayed second gate should still recover"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "delayed second gate did not send Enter for trust"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
-    fail "delayed second gate did not send y after the blank"
-export FAKE_SWAP_AT=999
-rm -f "$FAKE_PANE_AFTER" "$FAKE_PANE_NEXT"
-
-# A live Claude occupant in that pane must not receive keys.
-export FAKE_GET_AGENT=claude
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a Claude occupant must not be reported as a Codex seat"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a Claude occupant must not receive Codex startup keys"
-fi
-export FAKE_GET_AGENT=codex
-
-# Trust, then a [y/n] that still needs Enter.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
-: >"$FAKE_HOLD_FILE"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "trust then stuck [y/n] should recover after Enter"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "trust then stuck [y/n] did not send Enter"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
-    fail "trust then stuck [y/n] did not send y"
-# Enter, y, Enter — the last Enter is the one that submits [y/n].
-[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -ge 2 ] ||
-    fail "trust then stuck [y/n] should send Enter twice"
-
-# A [y/n] that does not submit on y still needs Enter.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
-: >"$FAKE_HOLD_FILE"
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "a [y/n] that stayed up should recover after Enter"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer y' ||
-    fail "stuck [y/n] did not send y first"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "stuck [y/n] did not send Enter after y"
-
-# The dialog may still be painting when Herdr first reports blocked.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_HOLD_FILE"
-printf '%s\n' 'codex is starting...' >"$FAKE_PANE_DELAY"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>/dev/null) ||
-    fail "a delayed trust dialog should still recover"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "a delayed trust dialog did not send Enter"
-rm -f "$FAKE_PANE_DELAY"
-
 # A successful start must not send keys. Codex argv is logged one token
 # per line so a glued string cannot fake the unattended-flag position.
 export FAKE_START_OK=1
+export FAKE_START_LOG="$fake_start/start.log"
 codex_start_head='<agent>
 <start>
 <reviewer>
@@ -1869,7 +1506,7 @@ check_start_log() {
         fail "$2"
     fi
 }
-rm -f "$FAKE_READY_FILE" "$FAKE_START_LOG"
+rm -f "$FAKE_START_LOG"
 out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1) ||
     fail "a successful Codex start should pass through"
 if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
@@ -1946,300 +1583,15 @@ check_start_log "$codex_start_head
 <exact-session-id>" "exact resume must preserve model and session with unattended flag"
 unset FAKE_START_OK
 
-# The Codex dialog on a Claude seat is somebody else's gate.
-rm -f "$FAKE_READY_FILE"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a Claude start on the Codex dialog must not be reported as seated"
-fi
+rm -f "$FAKE_START_LOG"
+start_status=0
+out=$(FAKE_START_EXIT=7 sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err") ||
+    start_status=$?
+[ "$start_status" -eq 7 ] ||
+    fail "agent_not_ready start should return the real nonzero exit status (got $start_status)"
 if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a Claude start on the Codex dialog must not send keys into the pane"
+    fail "agent_not_ready start must not send keys from the wrapper"
 fi
-
-# Unrelated start failure, even with a trust dialog on screen.
-export FAKE_START_ERR=pane_not_found
-rm -f "$FAKE_READY_FILE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "an unrelated start failure must not be reported as seated"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "an unrelated start failure must not send keys"
-fi
-export FAKE_START_ERR=agent_not_ready
-
-# The named agent is sitting in another pane. Do not type into it.
-export FAKE_AGENT_PANE=w2:p9
-rm -f "$FAKE_READY_FILE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a pane mismatch must not be reported as seated"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a pane mismatch must not send keys into another agent's pane"
-fi
-export FAKE_AGENT_PANE=w1:p1
-
-# A later permission prompt during startup is not a first-run gate.
-rm -f "$FAKE_READY_FILE"
-printf '%s\n' 'Allow command?' 'press enter to confirm or esc to cancel' >"$FAKE_PANE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a later permission prompt must not be auto-dismissed"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a later permission prompt must not receive keys"
-fi
-
-# Kind taken from agent args after -- must not trigger the gate.
-rm -f "$FAKE_READY_FILE"
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 -- --kind codex 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a --kind after -- must not trigger the Codex startup gate"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a --kind after -- must not send keys"
-fi
-
-# Enter that never makes the seat interactive_ready is a failed start.
-export FAKE_START_DEAF=1
-rm -f "$FAKE_READY_FILE"
-printf '%s\n' '> You are in /tmp/demo' \
-    'Do you trust the contents of this directory?' \
-    '› 1. Yes, continue' >"$FAKE_PANE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a gate that did not become ready must not be reported as seated"
-fi
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "the unreadied trust gate should still press Enter"
-grep -q 'did not become ready' "$err" ||
-    fail "an unreadied Codex seat should say why"
-unset FAKE_START_DEAF
-
-# Claude first-run folder trust, same shape as Codex: only that screen,
-# only the named start pane, one Enter, then wait for a ready seat.
-claude_trust_pane() {
-    printf '%s\n' 'Accessing workspace' \
-        '/tmp/demo' \
-        '› 1. Yes, I trust this folder' \
-        '  2. No, choose another folder' \
-        'Enter to confirm' >"$FAKE_PANE"
-}
-export FAKE_GET_AGENT=claude
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-claude_trust_pane
-out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
-    fail "Claude folder trust gate should recover after Enter"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "Claude folder trust gate did not send Enter to the named seat"
-printf '%s\n' "$out" | grep -q 'agent wait reviewer --until idle' ||
-    fail "Claude folder trust gate did not wait until idle"
-[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys')" -eq 1 ] ||
-    fail "Claude folder trust gate should send exactly one key"
-
-# The dialog may still be painting when Herdr first reports blocked.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-printf '%s\n' 'claude is starting...' >"$FAKE_PANE_DELAY"
-claude_trust_pane
-out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
-    fail "a delayed Claude trust screen should still recover"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "a delayed Claude trust screen did not send Enter"
-rm -f "$FAKE_PANE_DELAY"
-
-# A later Claude permission prompt during startup is not a first-run gate.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-printf '%s\n' 'Allow command?' 'press enter to confirm or esc to cancel' >"$FAKE_PANE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a later Claude permission prompt must not be auto-dismissed"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a later Claude permission prompt must not receive keys"
-fi
-
-# A new-chat confirm is a Codex gate. Claude seats leave it alone.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a [y/n] on a Claude seat must not be reported as seated"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a Claude seat must not answer a new-chat confirm"
-fi
-
-# A Codex occupant on the Claude trust screen is another agent's pane.
-export FAKE_GET_AGENT=codex
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-claude_trust_pane
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a Codex occupant must not be reported as a Claude seat"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a Codex occupant must not receive Claude startup keys"
-fi
-export FAKE_GET_AGENT=claude
-
-# The named agent is sitting in another pane. Do not type into it.
-export FAKE_AGENT_PANE=w2:p9
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-claude_trust_pane
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a Claude pane mismatch must not be reported as seated"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "a Claude pane mismatch must not send keys into another agent's pane"
-fi
-export FAKE_AGENT_PANE=w1:p1
-
-# Reproduces the reported defect: newer Claude builds default the trust
-# card's highlighted choice to "No, exit" instead of "Yes, I trust this
-# folder". A bare Enter would pick that default and quit, so the seat
-# never becomes ready and Herdr keeps returning agent_not_ready on this
-# named pane - and a caller retry then hits agent_name_taken instead of
-# a seated agent. The gate must send Down to reach the trust option
-# before the Enter that confirms it.
-claude_trust_pane_no_exit_default() {
-    printf '%s\n' 'Accessing workspace:' \
-        '/tmp/demo' \
-        "Quick safety check: is this a project you created or one you trust?" \
-        'Claude Code will be able to read, edit, and execute files here.' \
-        '❯ No, exit' \
-        '  Yes, I trust this folder' \
-        'Enter to confirm · Esc to cancel' >"$FAKE_PANE"
-}
-# Same card, but with the selection actually moved onto trust - what a
-# Down that really worked looks like on screen.
-claude_trust_pane_yes_selected() {
-    printf '%s\n' 'Accessing workspace:' \
-        '/tmp/demo' \
-        "Quick safety check: is this a project you created or one you trust?" \
-        'Claude Code will be able to read, edit, and execute files here.' \
-        '  No, exit' \
-        '❯ Yes, I trust this folder' \
-        'Enter to confirm · Esc to cancel' >"$1"
-}
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
-claude_trust_pane_no_exit_default
-claude_trust_pane_yes_selected "$FAKE_PANE_NEXT"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
-    fail "the No, exit default trust card should still recover once Down lands"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down' ||
-    fail "the No, exit default did not move the selection down first"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "the No, exit default did not confirm trust with Enter"
-[ "$(printf '%s\n' "$out" | grep -n 'agent send-keys reviewer' | head -n1)" = "$(printf '%s\n' "$out" | grep -n 'agent send-keys reviewer Down' | head -n1)" ] ||
-    fail "Down must be sent before Enter on the No, exit default"
-[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Down')" -eq 1 ] &&
-    [ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -eq 1 ] ||
-    fail "the No, exit default should send exactly one Down and one Enter"
-
-# Codex P2 regression: a dropped or no-op Down leaves the mark on "No,
-# exit" - the same trust card, unmoved. Enter must never follow it.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
-claude_trust_pane_no_exit_default
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a dropped Down that leaves No, exit marked must not be reported as seated"
-fi
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down' ||
-    fail "a dropped Down should still have been attempted"
-if printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter'; then
-    fail "a dropped Down must not still be followed by Enter"
-fi
-grep -q 'did not move off the No, exit default' "$err" ||
-    fail "a dropped Down should say why it stopped"
-
-# Codex P2 regression: a narrow pane wraps the selected "Yes, I trust
-# this folder" label across lines after a real, working Down. That must
-# still read as confirmed and reach Enter, not be mistaken for a
-# dropped Down.
-claude_trust_pane_yes_selected_wrapped() {
-    printf '%s\n' 'Accessing workspace:' \
-        '/tmp/demo' \
-        "Quick safety check: is this a project you created or one you trust?" \
-        'Claude Code will be able to read, edit, and execute files here.' \
-        '  No, exit' \
-        '❯ Yes, I' \
-        '  trust this folder' \
-        'Enter to confirm · Esc to cancel' >"$1"
-}
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
-claude_trust_pane_no_exit_default
-claude_trust_pane_yes_selected_wrapped "$FAKE_PANE_NEXT"
-out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
-    fail "a wrapped Yes selection after Down should still recover"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down' ||
-    fail "a wrapped Yes selection did not move the selection down first"
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "a wrapped Yes selection did not confirm trust with Enter"
-[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys reviewer Enter')" -eq 1 ] ||
-    fail "a wrapped Yes selection should send exactly one Enter"
-
-# The older layout, where trust is already the highlighted default,
-# still takes just the one Enter - no regression for that shape.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-claude_trust_pane
-out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>/dev/null) ||
-    fail "the Yes-first trust card should still recover with one Enter"
-if printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Down'; then
-    fail "the Yes-first trust card must not receive a Down"
-fi
-[ "$(printf '%s\n' "$out" | grep -c 'agent send-keys')" -eq 1 ] ||
-    fail "the Yes-first trust card should still send exactly one key"
-
-# A Down that lands somewhere else - not the documented trust card - must
-# not be followed by a blind Enter.
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N" "$FAKE_PANE_NEXT"
-claude_trust_pane_no_exit_default
-printf '%s\n' 'Start a new chat? [y/n]' >"$FAKE_PANE_NEXT"
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a Down that leaves the trust card must not be reported as seated"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter'; then
-    fail "a Down that leaves the trust card must not still send Enter"
-fi
-grep -q 'left the folder trust gate' "$err" ||
-    fail "leaving the trust card after Down should say why"
-rm -f "$FAKE_PANE_NEXT"
-
-# Unrelated start failure, even with the folder trust screen on show.
-export FAKE_START_ERR=pane_not_found
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-claude_trust_pane
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "an unrelated Claude start failure must not be reported as seated"
-fi
-if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
-    fail "an unrelated Claude start failure must not send keys"
-fi
-export FAKE_START_ERR=agent_not_ready
-
-# Enter that never makes the seat interactive_ready is a failed start.
-export FAKE_START_DEAF=1
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
-claude_trust_pane
-if out=$(sh "$root/bin/herdr" agent start reviewer --kind claude --pane w1:p1 2>"$err"); then
-    printf '%s\n' "$out" >&2
-    fail "a Claude gate that did not become ready must not be reported as seated"
-fi
-printf '%s\n' "$out" | grep -q 'agent send-keys reviewer Enter' ||
-    fail "the unreadied Claude trust gate should still press Enter"
-grep -q 'did not become ready' "$err" ||
-    fail "an unreadied Claude seat should say why"
-unset FAKE_START_DEAF
-export FAKE_GET_AGENT=codex
-rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
 
 (
     guard_dir=$fake_start/launch-guard
@@ -2492,17 +1844,6 @@ PY
 )
 printf 'ok: opt-in launch guard\n'
 
-unset FAKE_PANE
-unset FAKE_PANE_NEXT
-unset FAKE_PANE_DELAY
-unset FAKE_PANE_AFTER
-unset FAKE_SWAP_AT
-unset FAKE_READ_N
-unset FAKE_HOLD_FILE
-unset FAKE_READY_FILE
-unset FAKE_AGENT_PANE
-unset FAKE_GET_AGENT
-unset FAKE_GET_STATUS
 unset FAKE_START_ERR
 unset FAKE_START_OK
 unset HERDR_REAL
@@ -2823,7 +2164,8 @@ argv_is() {
     esac
 }
 
-printf '%s\n' 'Saved custom prompt' >"$argv_dir/config/prompt.md"
+printf '%s\n' 'Saved custom prompt' 'Do not send y or Enter yourself for those startup gates.' \
+    'If an agent start fails, wait two seconds and retry once.' >"$argv_dir/config/prompt.md"
 run_launch 'HELPER_AGENT="codex"
 HELPER_KATA_PROJECT="example-project"' >/dev/null
 [ -f "$argv_dir/state/workdir/AGENTS.md" ] || fail "legacy launch did not render AGENTS.md with Kata project"
@@ -2831,6 +2173,12 @@ if grep -qF 'herdr-kata' "$argv_dir/state/workdir/AGENTS.md"; then
     fail "legacy launch included desktop Kata monitor"
 fi
 run_launch 'HELPER_AGENT="codex"' >/dev/null || fail "workflow injection launch"
+grep -qF "The Lantern config directory is $(helper_native_path "$argv_dir/config")" \
+    "$argv_dir/state/workdir/AGENTS.md" || fail "legacy launch did not expose the native config path"
+while IFS= read -r guidance_line; do
+    [ -z "$guidance_line" ] || grep -qFx "$guidance_line" "$argv_dir/state/workdir/AGENTS.md" ||
+        fail "legacy launch did not include the shipped guidance"
+done <"$root/guidance.md"
 for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rules/lantern.md; do
     for invoke in 'ship high ROI issue fixes in <repos>' \
         'ship performance improvements in <repos>' 'ship <task> in <repo>' \
@@ -2854,6 +2202,10 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
         fail "$rendered_file lacks the native Codex receipt path in runtime instructions"
     grep -qF 'Saved custom prompt' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lost the custom prompt"
+    grep -qF 'This overrides the saved prompt.md first-run gate paragraph' "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file startup rule does not override the saved prompt gate"
+    grep -qF 'prompt.md instruction to retry any failed agent start.' "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file startup rule does not override the saved retry rule"
 done
 
 # Launch refresh must preserve unfinished monitoring records.
@@ -3201,9 +2553,9 @@ grep -q 'helper_agent_takes_effort' "$root/launch.sh" ||
 grep -qF 'This chat runs $chat_identity' "$root/launch.sh" ||
     fail "the launch.sh appendix should name what the chat runs"
 grep -qF 'agent_not_ready' "$root/prompt.md" ||
-    fail "prompt.md does not describe the Codex startup gate"
+    fail "prompt.md does not handle agent_not_ready in the startup rule"
 grep -qF 'agent_not_ready' "$root/launch.sh" ||
-    fail "the launch.sh appendix does not describe the Codex startup gate"
+    fail "the launch.sh appendix does not handle agent_not_ready in the startup rule"
 grep -qF '`pi -c`' "$root/prompt.md" ||
     fail "prompt.md does not carry the Pi session route"
 grep -qF 'Pi \`--continue\` or \`--session <id>\`' "$root/launch.sh" ||
