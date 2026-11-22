@@ -142,8 +142,8 @@ class DesktopTests(unittest.TestCase):
                     patch.object(desktop, "helper_command", return_value=("codex", "helper")), \
                     patch.object(desktop.os, "chdir"), patch.object(desktop.os, "execv") as execute:
                 for project in ("", "example-project"):
-                    (config / "helper.conf").write_text(
-                        f'HELPER_KATA_PROJECT="{project}"\n' if project else "")
+                    (config / "helper.conf").write_bytes(
+                        f'HELPER_KATA_PROJECT="{project}"\n'.encode() if project else b"")
                     desktop.chat()
                     prompt = execute.call_args.args[1][1]
                     settings = prompt.split("\nSaved settings: ", 1)[1].split("\n", 1)[0]
