@@ -6,8 +6,10 @@ import io
 import http.server
 import json
 import os
+import runpy
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1596,30 +1598,129 @@ for line in sys.stdin:
 
     @unittest.skipIf(os.name == "nt", "requires Unix PTY process groups")
     def test_stop_reaps_helper_in_separate_process_group(self):
+        self._assert_stop_reaps_detached_helper(os.environ.copy())
+
+    def _assert_stop_reaps_detached_helper(self, env):
+        helper_code = """
+import os
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+deadline = time.monotonic() + 30
+while os.path.isdir(sys.argv[1]) and time.monotonic() < deadline:
+    time.sleep(0.1)
+"""
+        provider_code = """
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+pid_file = Path(sys.argv[1])
+child = subprocess.Popen(
+    [sys.executable, "-c", sys.argv[2], str(pid_file.parent), "lantern-test-detached-helper"],
+    start_new_session=True,
+)
+pending = pid_file.with_suffix(".tmp")
+pending.write_text(str(child.pid))
+os.replace(pending, pid_file)
+time.sleep(30)
+"""
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "pid"
-            code = "import os,signal,subprocess,sys,time; child=subprocess.Popen([sys.executable,'-c','import os,signal,time;os.setsid();signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(30)']);open(sys.argv[1],'w').write(str(child.pid));time.sleep(30)"
-            proc = runtime.spawn([sys.executable, "-c", code, str(path)], os.environ.copy())
+            proc = runtime.spawn([sys.executable, "-c", provider_code, str(path), helper_code], env)
+            pid, marker = None, ""
             try:
                 deadline = time.monotonic() + 5
                 while not path.exists() and time.monotonic() < deadline:
                     time.sleep(.05)
                 self.assertTrue(path.exists())
                 pid = int(path.read_text())
+                marker = runtime.process_start(pid)
                 time.sleep(.5)
                 runtime.stop_process(proc)
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline:
-                    state = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True).stdout.strip()
+                    state = subprocess.run(
+                        ["/bin/ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True,
+                    ).stdout.strip()
                     if not state or state.startswith("Z"):
                         break
                     time.sleep(.05)
                 self.assertTrue(not state or state.startswith("Z"), state)
                 self.assertIsNotNone(proc.returncode)
             finally:
-                runtime.stop_process(proc)
-                proc.stdin.close()
-                proc.stdout.close()
+                try:
+                    if pid is not None and marker and runtime.process_start(pid) == marker:
+                        with contextlib.suppress(ProcessLookupError):
+                            os.kill(pid, signal.SIGKILL)
+                finally:
+                    try:
+                        runtime.stop_process(proc)
+                    finally:
+                        proc.stdin.close()
+                        proc.stdout.close()
+
+    @contextlib.contextmanager
+    def _block_tracker_ps(self, directory):
+        log = directory / "ps-attempts"
+        log.touch()
+        sitecustomize = directory / "sitecustomize.py"
+        sitecustomize.write_text(r"""
+import os
+import subprocess
+
+
+def block_tracker_ps(log):
+    original = subprocess.check_output
+
+    def check_output(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        if isinstance(argv, (list, tuple)) and list(argv[:2]) == ["/bin/ps", "-axo"]:
+            with open(log, "a", encoding="ascii") as stream:
+                stream.write(f"{os.getpid()}\n")
+            raise OSError("Tracker must not invoke ps with native child discovery")
+        return original(*args, **kwargs)
+
+    return check_output
+
+
+if __name__ == "sitecustomize":
+    subprocess.check_output = block_tracker_ps(os.environ["LANTERN_TEST_PS_LOG"])
+""")
+        # The watcher and its Python lease must both use the blocker.
+        block_tracker_ps = runpy.run_path(str(sitecustomize))["block_tracker_ps"]
+        with patch("subprocess.check_output", block_tracker_ps(log)):
+            yield log
+
+    @unittest.skipUnless(sys.platform in ("linux", "darwin"), "requires native child discovery")
+    def test_stop_reaps_helper_without_ps(self):
+        with tempfile.TemporaryDirectory() as temporary, self._block_tracker_ps(Path(temporary)) as log:
+            env = os.environ.copy()
+            search_path = [temporary]
+            if env.get("PYTHONPATH"):
+                search_path.append(env["PYTHONPATH"])
+            env["PYTHONPATH"] = os.pathsep.join(search_path)
+            env["LANTERN_TEST_PS_LOG"] = str(log)
+            with self.subTest(check="detached helper reaped"):
+                self._assert_stop_reaps_detached_helper(env)
+            self.assertEqual(log.read_text(), "")
+
+    @unittest.skipUnless(sys.platform in ("linux", "darwin"), "requires native child discovery")
+    def test_child_pids_lists_new_subprocess(self):
+        with tempfile.TemporaryDirectory() as temporary, self._block_tracker_ps(Path(temporary)) as log:
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+            try:
+                self.assertIn(child.pid, runtime.child_pids(os.getpid()))
+                if sys.platform == "linux":
+                    self.assertEqual(runtime._parent_table()[child.pid], os.getpid())
+                self.assertEqual(log.read_text(), "")
+            finally:
+                child.kill()
+                child.wait()
 
     @unittest.skipIf(os.name == "nt", "requires Unix provider lease")
     def test_provider_lease_stops_native_child_after_parent_is_killed(self):

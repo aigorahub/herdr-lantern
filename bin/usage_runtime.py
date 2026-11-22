@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict, deque
 from pathlib import Path
 
 import field_status as field
@@ -148,15 +149,22 @@ def darwin_process_info(pid: int) -> bytes:
     return buffer.raw
 
 
+def _linux_stat_tail(pid: int) -> list[bytes]:
+    # The command name can contain closing parentheses and non-UTF-8 bytes.
+    return Path(f"/proc/{pid}/stat").read_bytes().rsplit(b")", 1)[1].split()
+
+
+def _darwin_start_marker(info: bytes) -> str:
+    return f"{int.from_bytes(info[120:128], sys.byteorder)}:{int.from_bytes(info[128:136], sys.byteorder)}"
+
+
 def process_start(pid: int) -> str:
     """Process creation marker. Used for diagnostics and receipt checks."""
     try:
         if sys.platform.startswith("linux"):
-            tail = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
-            return tail[19]
+            return _linux_stat_tail(pid)[19].decode("ascii")
         if sys.platform == "darwin":
-            info = darwin_process_info(pid)
-            return f"{int.from_bytes(info[120:128], sys.byteorder)}:{int.from_bytes(info[128:136], sys.byteorder)}"
+            return _darwin_start_marker(darwin_process_info(pid))
         if os.name == "nt":
             from ctypes import wintypes
             kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -173,7 +181,7 @@ def process_start(pid: int) -> str:
                     return str((values[0].dwHighDateTime << 32) | values[0].dwLowDateTime)
             finally:
                 kernel.CloseHandle(handle)
-    except (OSError, subprocess.SubprocessError, IndexError):
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
         pass
     return ""
 
@@ -342,26 +350,177 @@ def spawn_owned(argv: list[str], env: dict[str, str], lease_fd: int | None = Non
     return proc
 
 
+_PROC_PPID_ONLY = 6
+_libproc = None
+_linux_has_proc_children = None
+
+
+def _darwin_child_pids(pid: int) -> set[int]:
+    global _libproc
+    libproc = _libproc
+    if libproc is None:
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        libproc.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
+        libproc.proc_listpids.restype = ctypes.c_int
+        _libproc = libproc
+
+    def list_pids(buffer, size: int) -> int:
+        # libproc reports errors and an empty list with the same return value.
+        ctypes.set_errno(0)
+        count = libproc.proc_listpids(_PROC_PPID_ONLY, pid, buffer, size)
+        errno = ctypes.get_errno()
+        if count < 0 or (count == 0 and errno):
+            raise OSError(errno, "proc_listpids failed")
+        return count
+
+    estimate = list_pids(None, 0)
+    if estimate == 0:
+        return set()
+    entry_size = ctypes.sizeof(ctypes.c_int)
+    capacity = estimate // entry_size + 32
+    for _ in range(9):
+        buffer = (ctypes.c_int * capacity)()
+        size = ctypes.sizeof(buffer)
+        count = list_pids(buffer, size)
+        if count < size:
+            return {child for child in buffer[:count // entry_size] if child > 0}
+        capacity *= 2
+    raise OSError("proc_listpids buffer did not stabilize")
+
+
+def _native_children(pid: int) -> set[int] | None:
+    global _linux_has_proc_children
+    if pid <= 0:
+        return set()
+    if sys.platform == "darwin":
+        return _darwin_child_pids(pid)
+    if not sys.platform.startswith("linux"):
+        return None
+    if _linux_has_proc_children is None:
+        _linux_has_proc_children = Path(f"/proc/self/task/{os.getpid()}/children").exists()
+    if not _linux_has_proc_children:
+        return None
+    tasks = Path(f"/proc/{pid}/task")
+    try:
+        tids = os.listdir(tasks)
+    except (FileNotFoundError, ProcessLookupError):
+        return set()
+    children = set()
+    for tid in tids:
+        try:
+            children.update(map(int, (tasks / tid / "children").read_bytes().split()))
+        except (FileNotFoundError, ProcessLookupError):
+            # A departing thread can move children to a thread already scanned.
+            return None
+    return children
+
+
+def _linux_parent_table() -> dict[int, int]:
+    parents = {}
+    for entry in os.listdir("/proc"):
+        if entry.isdecimal():
+            pid = int(entry)
+            try:
+                parents[pid] = int(_linux_stat_tail(pid)[1])
+            except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError, ValueError):
+                continue
+    if not parents:
+        raise OSError("Process table unavailable in procfs")
+    return parents
+
+
+def _parent_table() -> dict[int, int]:
+    if sys.platform.startswith("linux"):
+        try:
+            return _linux_parent_table()
+        except OSError:
+            pass
+    output = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid="], text=True, timeout=1)
+    return {int(parts[0]): int(parts[1]) for line in output.splitlines()
+            if len(parts := line.split()) == 2}
+
+
+def _try_native(pid: int) -> set[int] | None:
+    try:
+        return _native_children(pid)
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def child_pids(pid: int) -> set[int]:
+    if pid <= 0:
+        return set()
+    children = _try_native(pid)
+    if children is not None:
+        return children
+    return {child for child, parent in _parent_table().items() if parent == pid}
+
+
+def _process_identity(pid: int) -> tuple[int, str] | None:
+    try:
+        if sys.platform.startswith("linux"):
+            tail = _linux_stat_tail(pid)
+            return int(tail[1]), tail[19].decode("ascii")
+        if sys.platform == "darwin":
+            info = darwin_process_info(pid)
+            if int.from_bytes(info[12:16], sys.byteorder) == pid:
+                return int.from_bytes(info[16:20], sys.byteorder), _darwin_start_marker(info)
+    except (OSError, IndexError, ValueError):
+        pass
+    return None
+
+
+def _owned_tree(root: int, root_marker: str, recorded: dict[int, str]) -> dict[int, str]:
+    roots = {root: root_marker, **recorded}
+    pending = deque(roots.items())
+    found = {}
+    fallback = None
+    while pending:
+        node, marker = pending.popleft()
+        if fallback is None:
+            candidates = _try_native(node)
+            if candidates is None:
+                fallback = defaultdict(set)
+                for child, parent in _parent_table().items():
+                    fallback[parent].add(child)
+                pending = deque(roots.items())
+                found.clear()
+                continue
+        else:
+            candidates = fallback.get(node, ())
+        if not marker or process_start(node) != marker:
+            continue
+        for child in candidates:
+            if child in roots or child in found:
+                continue
+            # A candidate edge can outlive the parent PID's original generation.
+            identity = _process_identity(child)
+            if identity is None:
+                continue
+            parent, child_marker = identity
+            if parent == node and child_marker:
+                found[child] = child_marker
+                pending.append((child, child_marker))
+    return found
+
+
 def attach_tracker(proc: subprocess.Popen) -> None:
     if os.name != "nt":
         stopped, children, guard = threading.Event(), {}, threading.Lock()
+        root_marker = process_start(proc.pid)
 
         def track() -> None:
+            nonlocal root_marker
             while not stopped.is_set():
                 if proc.poll() is not None:
                     break
                 try:
-                    output = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid="], text=True, timeout=1)
-                    parents = {int(parts[0]): int(parts[1]) for line in output.splitlines()
-                               if len(parts := line.split()) == 2}
-                    owned = {proc.pid, *(pid for pid, marker in children.items() if process_start(pid) == marker)}
-                    changed = True
-                    while changed:
-                        found = {pid for pid, parent in parents.items() if parent in owned} - owned
-                        changed = bool(found)
-                        owned.update(found)
-                    for pid in owned - {proc.pid} - children.keys():
-                        marker = process_start(pid)
+                    if not root_marker:
+                        root_marker = process_start(proc.pid)
+                    with guard:
+                        recorded = dict(children)
+                    found = _owned_tree(proc.pid, root_marker, recorded)
+                    for pid, marker in found.items():
                         if marker and not stopped.is_set():
                             with guard:
                                 children[pid] = marker

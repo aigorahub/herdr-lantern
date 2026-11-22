@@ -21,6 +21,8 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Changed
 
+- On Linux and macOS, Plan Usage tracks a read's helper processes by asking the OS
+  directly instead of starting `ps` several times a second (#89).
 - Documentation: the README and both guides say the Herdr desktop app is
   supported on macOS and Linux only for now, that its readouts include the
   agents whose panes sit in a tab, which tools belong to the legacy plugin
