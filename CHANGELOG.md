@@ -4,6 +4,10 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Optional Kata-backed same-chat monitoring for desktop Lantern packs.
+
 ### Fixed
 
 - A Claude usage timeout, nonzero exit, unparseable result, error flag, or
