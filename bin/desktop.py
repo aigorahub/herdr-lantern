@@ -1,6 +1,7 @@
 """Run Lantern in Herdr's desktop app without changing the legacy plugin."""
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 import field_status as field
 import usage_runtime as runtime
@@ -426,7 +427,204 @@ def starting(terminal: dict, state: Path | None = None, role: str = "chat") -> b
     return time.time() * 1000 - terminal.get("created_ms", 0) < 30000
 
 
-def ensure_views(record: dict, state: Path) -> None:
+def same_path(value, path: Path) -> bool:
+    # Resolving a relative argv path here would use Open's cwd, which can differ from the watcher's.
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        return False
+    try:
+        return os.path.normcase(str(Path(value).resolve())) == os.path.normcase(str(path.resolve()))
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def process_argv(pid) -> list[str] | None:
+    """Read current argv on Linux and macOS."""
+    if type(pid) is not int or pid <= 0:
+        return None
+    try:
+        if sys.platform.startswith("linux"):
+            data = (Path("/proc") / str(pid) / "cmdline").read_bytes()
+            if not data.endswith(b"\0"):
+                return None
+            return [os.fsdecode(arg) for arg in data[:-1].split(b"\0")]
+        if sys.platform != "darwin":
+            return None
+        libc = ctypes.CDLL(None, use_errno=True)
+        sysctl = libc.sysctl
+        sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                           ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+        sysctl.restype = ctypes.c_int
+        # KERN_PROCARGS2 can under-report its buffer size on macOS.
+        argmax_mib = (ctypes.c_int * 2)(1, 8)  # CTL_KERN, KERN_ARGMAX
+        argmax = ctypes.c_int()
+        size = ctypes.c_size_t(ctypes.sizeof(argmax))
+        if (sysctl(argmax_mib, len(argmax_mib), ctypes.byref(argmax), ctypes.byref(size), None, 0)
+                or size.value != ctypes.sizeof(argmax) or not 4 < argmax.value <= 2 * 1024 * 1024):
+            return None
+        mib = (ctypes.c_int * 3)(1, 49, pid)  # CTL_KERN, KERN_PROCARGS2
+        buffer = ctypes.create_string_buffer(argmax.value)
+        size = ctypes.c_size_t(len(buffer))
+        if (sysctl(mib, len(mib), buffer, ctypes.byref(size), None, 0)
+                or not 4 < size.value <= len(buffer)):
+            return None
+        data = buffer.raw[:size.value]
+        argc = int.from_bytes(data[:4], sys.byteorder, signed=True)
+        if not 0 < argc < len(data):
+            return None
+        # Darwin places the executable path and NUL padding before argv and the environment after it.
+        offset = data.index(b"\0", 4) + 1
+        args = data[offset:].lstrip(b"\0").split(b"\0", argc)
+        if len(args) == argc + 1:
+            return [os.fsdecode(arg) for arg in args[:argc]]
+    except (OSError, ValueError, ctypes.ArgumentError):
+        pass
+    return None
+
+
+def original_launch(terminal: dict, state: Path, role: str) -> bool:
+    """The wrapper execs an interactive shell once its launched command returns."""
+    launch = terminal.get("argv")
+    if not (isinstance(launch, list) and len(launch) == 8 and all(isinstance(arg, str) for arg in launch)
+            and launch[1:3] == ["-ic", '"$@"; exec "$0" -i'] and launch[0] == launch[3]
+            and Path(launch[0]).name in {"sh", "bash", "zsh"} and Path(launch[4]).name == "sh"
+            and same_path(launch[5], ROOT / "bin" / "lantern-app") and launch[6] == role
+            and same_path(launch[7], state)):
+        return False
+    return process_argv(terminal.get("pid")) == launch
+
+
+def read_state(path: Path) -> dict:
+    try:
+        return field.read_json(path, {})
+    except ValueError:
+        return {}
+
+
+def tolerant(check: Callable[[], bool]) -> bool:
+    # A bad receipt is absent. A failed fingerprint read cannot establish that a watcher is stale.
+    try:
+        return check()
+    except ValueError:
+        return False
+
+
+def launched(terminal: dict, fg: dict, state: Path, role: str) -> str:
+    pid = fg.get("pid")
+    if type(pid) is not int or pid <= 0:
+        return ""
+    start = runtime.process_start(pid)
+    if not start or pid == terminal.get("pid"):
+        return start
+    path = state / f"{role}-start.json"
+    receipt = read_state(path)
+    try:
+        fresh = abs(path.stat().st_mtime * 1000 - terminal["created_ms"]) < 30000
+    except (OSError, KeyError, TypeError):
+        fresh = False
+    if (fresh and receipt.get("terminal") == terminal.get("address") and receipt.get("pid") == pid
+            and receipt.get("start") == start and original_launch(terminal, state, role)):
+        return start
+    return ""
+
+
+def stock_readout(terminal: dict, fg: dict, state: Path, role: str, script: str) -> str:
+    argv = fg.get("argv")
+    if not (isinstance(argv, list) and len(argv) == 7 and argv[2] == "--state-dir"
+            and argv[4] == "--herdr" and argv[6] == "watch"
+            and same_path(argv[1], ROOT / "bin" / script) and same_path(argv[3], state)
+            and same_path(argv[5], READER)):
+        return ""
+    return launched(terminal, fg, state, role)
+
+
+def stop_readout(record: dict, state: Path, role: str, address: str, old_pid: int, script: str) -> None:
+    end = time.monotonic() + 5
+
+    def call(method: str) -> dict | None:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Outdated readout did not stop; retry open")
+        try:
+            return core_calls([(method, {"terminal": address})], remaining)[0]
+        except subprocess.TimeoutExpired:
+            return None
+        except CoreError as exc:
+            if exc.kind != "not_found":
+                raise
+            return None
+
+    fresh = call("terminal.get")
+    fg = native_process(fresh) if fresh and fresh.get("state") == "live" else {}
+    start = stock_readout(fresh, fg, state, role, script) if fresh and fg.get("pid") == old_pid else ""
+    if not start:
+        raise RuntimeError("Readout state changed during repair; retry open")
+    # The marker must outlive a timeout so a retry cannot replace a pane whose watcher is still running.
+    pending = {"pid": old_pid, "start": start}
+    record[role] = dict(record[role], stopping=pending)
+    field.write_json(state / "home.json", record)
+    observed = call("terminal.kill")
+    while True:
+        if observed and observed.get("state") == "finished" and not pending.get("finished"):
+            pending["finished"] = True
+            field.write_json(state / "home.json", record)
+        if pending.get("finished") and runtime.process_start(old_pid) != start:
+            return
+        if time.monotonic() >= end:
+            raise RuntimeError("Outdated readout did not stop; retry open")
+        time.sleep(0.05)
+        observed = call("terminal.get")
+
+
+def confirm_pending_stop(saved: dict) -> None:
+    pending = saved["stopping"]
+    if isinstance(pending, dict):
+        pid, start = pending.get("pid"), pending.get("start")
+        finished = pending.get("finished", False)
+        if (type(pid) is int and pid > 0 and isinstance(start, str) and start and type(finished) is bool
+                and runtime.process_start(pid) != start):
+            if finished:
+                return
+            try:
+                ended = core_calls([("terminal.get", {"terminal": saved["terminal"]})], 5)[0]
+                if ended.get("state") == "finished":
+                    return
+            except subprocess.TimeoutExpired:
+                pass
+            except CoreError as exc:
+                # A previously known terminal on this core can only be removed after it finishes.
+                if exc.kind == "not_found":
+                    return
+                raise
+    raise RuntimeError("Outdated readout did not stop; retry open")
+
+
+def close_readout_pane(address: str, tab_id: str) -> None:
+    def mounted(timeout: float = 15):
+        return locate(json.loads(run([APP, "ls"], timeout)), address)
+
+    current = mounted()
+    if not current:
+        return
+    if current[1]["id"] != tab_id:
+        raise RuntimeError("A saved Lantern readout moved; preserve its pane")
+    try:
+        app("pane.close", pane=current[2]["pane"])
+    except RuntimeError:
+        if mounted():
+            raise
+        return
+    end = time.monotonic() + 3
+    while (remaining := end - time.monotonic()) > 0:
+        try:
+            if not mounted(remaining):
+                return
+        except subprocess.TimeoutExpired:
+            break
+        time.sleep(0.05)
+    raise RuntimeError("Readout pane close is still pending; retry open")
+
+
+def ensure_views(record: dict, state: Path) -> list[str]:
     terminals = {t["address"]: t for t in core("terminal.list")["terminals"]}
     inventory = json.loads(run([APP, "ls"]))
     location = locate(inventory, record["terminal"])
@@ -437,6 +635,7 @@ def ensure_views(record: dict, state: Path) -> None:
     field.write_json(state / "home.json", record)
     field.write_json(state / "views.json", {"home_pane_id": pane["pane"]})
     changed = not record.get("layout_ready")
+    notices = []
     for role in ("field", "usage"):
         saved = record.get(role) or {}
         target = terminals.get(saved.get("terminal"))
@@ -463,29 +662,47 @@ def ensure_views(record: dict, state: Path) -> None:
                 changed = True
             if current[1]["id"] != tab["id"]:
                 raise RuntimeError("A saved Lantern readout moved; leave its current location unchanged")
-            from lantern_views import matches_watcher
+            from lantern_views import VIEWS, current_watcher, matches_watcher
             fg = native_process(target)
             if matches_watcher(fg, ROOT, state, role):
-                run([HC, "label", target["address"], "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
-                continue
-            argv = fg.get("argv") or []
-            if str(Path(__file__).resolve()) in argv and role in argv or starting(target, state, role):
-                continue
-            if fg.get("pid") != target.get("pid") or fg.get("name") not in {"sh", "bash", "zsh", "fish", "pwsh", "powershell.exe"}:
-                raise RuntimeError("A Lantern readout pane now runs another program; preserve it")
-            # Parking keeps the stopped readout's shell and history, including
-            # any input the person typed after quitting the readout.
-            app("terminal.park", terminal=target["address"])
-            end = time.monotonic() + 3
-            while locate(json.loads(run([APP, "ls"])), target["address"]):
-                if time.monotonic() >= end:
-                    raise RuntimeError("Readout parking is still pending; retry open")
-                time.sleep(0.05)
-            run([HC, "label", target["address"], "lantern.desktop=", "lantern.instance=", "herdr.space=", "herdr.tab="])
-            record.setdefault("parked_readouts", []).append(target["address"])
+                stamp = read_state(state / f"{role}-watcher.json")
+                pid = fg.get("pid")
+                recorded = type(pid) is int and stamp.get("pid") == pid and bool(stamp.get("code"))
+                keep = (tolerant(lambda: current_watcher({"foreground_processes": [fg]}, ROOT, state, role))
+                        or (not recorded and time.time() * 1000 - target.get("created_ms", 0) < 30000
+                            and tolerant(lambda: starting(target, state, role))))
+                label, script = VIEWS[role]
+                if not keep and not stock_readout(target, fg, state, role, script):
+                    notices.append(f"{label} in {target['address']} runs older Lantern code with its own "
+                                   "command, so Lantern left it running; restart it to update")
+                    keep = True
+                if keep:
+                    run([HC, "label", target["address"], "lantern.desktop=" + role,
+                         "lantern.instance=" + record["instance"]])
+                    continue
+                stop_readout(record, state, role, target["address"], fg["pid"], script)
+                close_readout_pane(target["address"], tab["id"])
+            else:
+                argv = fg.get("argv") or []
+                if str(Path(__file__).resolve()) in argv and role in argv or starting(target, state, role):
+                    continue
+                if fg.get("pid") != target.get("pid") or fg.get("name") not in {"sh", "bash", "zsh", "fish", "pwsh", "powershell.exe"}:
+                    raise RuntimeError("A Lantern readout pane now runs another program; preserve it")
+                # Parking keeps the stopped readout's shell and history, including
+                # any input the person typed after quitting the readout.
+                app("terminal.park", terminal=target["address"])
+                end = time.monotonic() + 3
+                while locate(json.loads(run([APP, "ls"])), target["address"]):
+                    if time.monotonic() >= end:
+                        raise RuntimeError("Readout parking is still pending; retry open")
+                    time.sleep(0.05)
+                run([HC, "label", target["address"], "lantern.desktop=", "lantern.instance=", "herdr.space=", "herdr.tab="])
+                record.setdefault("parked_readouts", []).append(target["address"])
         elif saved.get("terminal"):
-            mounted = locate(inventory, saved["terminal"])
-            if mounted:
+            if "stopping" in saved:
+                confirm_pending_stop(saved)
+                close_readout_pane(saved["terminal"], tab["id"])
+            elif mounted := locate(inventory, saved["terminal"]):
                 if mounted[1]["id"] != tab["id"]:
                     raise RuntimeError("A saved Lantern readout moved; preserve its pane")
                 try:
@@ -501,6 +718,7 @@ def ensure_views(record: dict, state: Path) -> None:
         saved = app("pane.split", pane=anchor, direction="down" if role == "usage" else "right",
                     argv=["sh", str(ROOT / "bin/lantern-app"), role, str(state)])
         record[role] = saved
+        record["layout_ready"] = False
         field.write_json(state / "home.json", record)
         run([HC, "label", saved["terminal"], "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
         changed = True
@@ -529,6 +747,7 @@ def ensure_views(record: dict, state: Path) -> None:
         field.write_json(state / "home.json", record)
     app("space.move", id=record["space"], index=1)
     app("pane.focus", pane=record["pane"])
+    return notices
 
 
 def open_home() -> dict:
@@ -560,8 +779,8 @@ def open_home() -> dict:
             record["helper_binary"] = binary or (home.get("foreground") or {}).get("argv", [""])[0]
             run([HC, "label", home["address"], "lantern.instance=" + instance,
                  "lantern.helper=" + record["helper_binary"]])
-            ensure_views(record, state)
-            return {"terminal": home["address"], "reused": True}
+            notices = ensure_views(record, state)
+            return {"terminal": home["address"], "reused": True, "notices": notices}
         helper_binary = helper_argv(config, "")[0]
         if home:
             labels = [HC, "label", home["address"], "lantern.desktop=", "lantern.instance=", "lantern.helper="]
@@ -579,8 +798,8 @@ def open_home() -> dict:
         field.write_json(state / "home.json", record)
         run([HC, "label", made["terminal"], "lantern.desktop=home", "lantern.instance=" + instance,
              "lantern.helper=" + helper_binary])
-        ensure_views(record, state)
-        return dict(made, native=True)
+        notices = ensure_views(record, state)
+        return dict(made, native=True, notices=notices)
     finally:
         lock.close()
 

@@ -1,6 +1,8 @@
 """Desktop protocol and configuration boundaries. No live user processes."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from itertools import count
 from pathlib import Path
 import json
 import os
@@ -13,9 +15,123 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 import desktop
+import lantern_views
+
+
+def terminal_missing():
+    return desktop.CoreError({"data": {"kind": "not_found"}})
+
+
+class ReadoutHome:
+    def __init__(self, state):
+        self.state = state
+        self.record = {"terminal": "t1", "instance": "instance", "layout_ready": True}
+        self.panes = {"p1": "t1"}
+        self.terminals = {}
+        self.starts = {}
+        self.live_argv = {}
+        self.get_replies = {}
+        self.actions = []
+        self.kill_state = "finished"
+        self.kill_error = None
+        self.exit_process = True
+        self.code = lantern_views.code_stamp(desktop.ROOT)
+        for index, (role, (_, script)) in enumerate(lantern_views.VIEWS.items(), 2):
+            pane, address = f"p{index}", f"t{index}"
+            root, pid = 100 + index, 200 + index
+            created = int(time.time() * 1000) - 60000
+            argv = ["/bin/sh", "-ic", '"$@"; exec "$0" -i', "/bin/sh", "sh",
+                    str(desktop.ROOT / "bin" / "lantern-app"), role, str(state)]
+            self.panes[pane] = address
+            self.record[role] = {"pane": pane, "terminal": address}
+            self.terminals[address] = {"address": address, "state": "live", "pid": root,
+                                       "created_ms": created, "argv": argv, "cwd": str(state),
+                                       "foreground": {"pid": pid, "argv": [sys.executable,
+                                           str(desktop.ROOT / "bin" / script), "--state-dir", str(state),
+                                           "--herdr", str(desktop.READER), "watch"]}}
+            self.live_argv[root] = argv
+            self.starts[pid] = str(pid)
+            receipt = state / f"{role}-start.json"
+            receipt.write_text(json.dumps({"terminal": address, "pid": pid, "start": self.starts[pid]}))
+            os.utime(receipt, (created / 1000, created / 1000))
+            (state / f"{role}-watcher.json").write_text(json.dumps({"pid": pid, "code": self.code}))
+        (state / "home.json").write_text(json.dumps(self.record))
+
+    def stale(self, role):
+        address = self.record[role]["terminal"]
+        target = self.terminals[address]
+        (self.state / f"{role}-watcher.json").write_text(
+            json.dumps({"pid": target["foreground"]["pid"], "code": "old"}))
+        return target
+
+    def run(self, argv, timeout=15):
+        if argv == [desktop.APP, "ls"]:
+            return json.dumps({"spaces": [{"id": "s1", "tabs": [{"id": "tab1", "terminals": [
+                {"pane": pane, "terminal": terminal} for pane, terminal in self.panes.items()]}]}]})
+        if argv[:2] == [desktop.HC, "label"]:
+            self.actions.append(("label", argv[2:]))
+            return ""
+        raise AssertionError(argv)
+
+    def core(self, calls, timeout=10):
+        (method, params), = calls
+        if method == "terminal.list":
+            return [{"terminals": [t for t in self.terminals.values() if t["state"] == "live"]}]
+        if method == "terminal.get":
+            address = params["terminal"]
+            replies = self.get_replies.get(address)
+            result = replies.pop(0) if replies else self.terminals.get(address, terminal_missing())
+            if isinstance(result, BaseException):
+                raise result
+            return [result]
+        if method == "terminal.kill":
+            self.actions.append((method, params))
+            target = self.terminals[params["terminal"]]
+            target["state"] = self.kill_state
+            if self.exit_process:
+                self.starts.pop(target["foreground"]["pid"])
+            if self.kill_error:
+                raise self.kill_error
+            return [target]
+        if method == "doc.get":
+            root = {"id": "root", "type": "row", "children": [
+                {"type": "block", "content": {"terminal": address}} for address in self.panes.values()]}
+            return [{"value": {"spaces": [{"tabs": [{"id": "tab1", "root": root}]}]}, "version": 1}]
+        if method == "doc.set":
+            return [{}]
+        raise AssertionError(method)
+
+    def app(self, command, **params):
+        self.actions.append((command, params))
+        if command == "pane.close":
+            del self.panes[params["pane"]]
+        elif command == "pane.split":
+            created = {"pane": "p4", "terminal": "t4"}
+            self.panes[created["pane"]] = created["terminal"]
+            return created
+        elif command not in {"space.move", "pane.focus"}:
+            raise AssertionError(command)
+        return {}
+
+    def mutations(self):
+        return [(method, params) for method, params in self.actions
+                if method in {"terminal.kill", "pane.close", "pane.split"}]
 
 
 class DesktopTests(unittest.TestCase):
+    @contextmanager
+    def readout_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = ReadoutHome(Path(tmp).resolve())
+            with patch.object(desktop, "core_calls", side_effect=home.core), \
+                    patch.object(desktop, "run", side_effect=home.run), \
+                    patch.object(desktop, "app", side_effect=home.app), \
+                    patch.object(desktop, "process_argv", side_effect=home.live_argv.get), \
+                    patch.object(desktop.runtime, "process_start", side_effect=lambda pid: home.starts.get(pid, "")), \
+                    patch.object(desktop.time, "monotonic", side_effect=count(step=0.5)), \
+                    patch.object(desktop.time, "sleep"):
+                yield home
+
     def inventory(self):
         return {"spaces": [{"id": "s1", "name": "api", "machine": None,
                             "tabs": [{"id": "tab1", "name": "fix", "terminals": [
@@ -305,6 +421,150 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(result["argv"], ["grok", "--model", "grok-4.7"])
         self.assertEqual(result["cwd"], cwd)
         self.assertEqual(fg["argv"][0], "/bin/zsh")
+
+    def test_stale_stock_readout_is_replaced_after_stop_confirmation(self):
+        for role, case in (("field", "old stamp"), ("usage", "old stamp"), ("field", "missing stamp"),
+                           ("field", "corrupt stamp"), ("field", "kill not found"), ("field", "kill timeout")):
+            with self.subTest(role=role, case=case), self.readout_home() as home:
+                address = home.stale(role)["address"]
+                stamp = home.state / f"{role}-watcher.json"
+                if case == "missing stamp":
+                    stamp.unlink()
+                elif case == "corrupt stamp":
+                    stamp.write_text("[]")
+                elif case == "kill not found":
+                    home.kill_error = terminal_missing()
+                elif case == "kill timeout":
+                    home.kill_error = subprocess.TimeoutExpired("hc connect", 5)
+                pane = home.record[role]["pane"]
+                anchor, direction = ("p1", "right") if role == "field" else ("p2", "down")
+                notices = desktop.ensure_views(home.record, home.state)
+                self.assertEqual(home.mutations(), [
+                    ("terminal.kill", {"terminal": address}), ("pane.close", {"pane": pane}),
+                    ("pane.split", {"pane": anchor, "direction": direction,
+                                    "argv": ["sh", str(desktop.ROOT / "bin" / "lantern-app"), role, str(home.state)]}),
+                ])
+                self.assertEqual(home.record[role], {"pane": "p4", "terminal": "t4"})
+                self.assertIn(("label", ["t4", "lantern.desktop=" + role, "lantern.instance=instance"]), home.actions)
+                self.assertEqual(notices, [])
+
+    def test_current_starting_and_custom_watchers_keep_their_pane(self):
+        custom = {"extra argv", "relative reader", "no receipt", "late relaunch", "early relaunch", "unreadable argv"}
+        for case in ("current", "starting", *sorted(custom)):
+            with self.subTest(case=case), self.readout_home() as home:
+                target = home.stale("field") if case in custom else home.terminals["t2"]
+                argv = target["foreground"]["argv"]
+                if case == "starting":
+                    target["created_ms"] = int(time.time() * 1000)
+                    (home.state / "field-watcher.json").unlink()
+                elif case == "extra argv":
+                    argv[-1:-1] = ["--interval", "2"]
+                elif case == "relative reader":
+                    argv[5] = "bin/lantern-app-read"
+                elif case == "no receipt":
+                    (home.state / "field-start.json").unlink()
+                elif case == "late relaunch":
+                    os.utime(home.state / "field-start.json", None)
+                elif case == "early relaunch":
+                    home.live_argv[target["pid"]] = ["/bin/sh", "-i"]
+                elif case == "unreadable argv":
+                    del home.live_argv[target["pid"]]
+                notices = desktop.ensure_views(home.record, home.state)
+                self.assertEqual(home.mutations(), [])
+                self.assertIn(("label", ["t2", "lantern.desktop=field", "lantern.instance=instance"]), home.actions)
+                if case in custom:
+                    self.assertIsInstance(notices, list)
+                    self.assertEqual(len(notices), 1)
+                    self.assertIn("t2", notices[0])
+                else:
+                    self.assertFalse(notices)
+
+    def test_unconfirmed_stop_preserves_the_pane_across_open_attempts(self):
+        error = "Outdated readout did not stop"
+        for case in ("stays live", "same process marker", "replacement shell", "removed on retry", "live on retry"):
+            with self.subTest(case=case), self.readout_home() as home:
+                target = home.stale("field")
+                address, pid = target["address"], target["foreground"]["pid"]
+                if case == "replacement shell":
+                    home.get_replies[address] = [dict(target, foreground={
+                        "pid": target["pid"], "argv": ["/bin/sh", "-i"]})]
+                    with self.assertRaisesRegex(RuntimeError, "Readout state changed"):
+                        desktop.ensure_views(home.record, home.state)
+                    self.assertEqual(home.mutations(), [])
+                    continue
+                if case in {"stays live", "same process marker"}:
+                    home.exit_process = False
+                    if case == "stays live":
+                        home.kill_state = "live"
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        desktop.ensure_views(home.record, home.state)
+                    self.assertEqual(home.mutations(), [("terminal.kill", {"terminal": address})])
+                    if case == "stays live":
+                        continue
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        desktop.ensure_views(self.saved_home(home), home.state)
+                    self.assertEqual(home.mutations(), [("terminal.kill", {"terminal": address})])
+                    del home.starts[pid]
+                    home.get_replies[address] = [AssertionError("The saved finished result should suffice")]
+                else:
+                    home.record["field"]["stopping"] = {"pid": pid, "start": home.starts.pop(pid)}
+                    (home.state / "home.json").write_text(json.dumps(home.record))
+                    del home.terminals[address]
+                    del home.panes["p2"]
+                    if case == "live on retry":
+                        home.get_replies[address] = [target]
+                        with self.assertRaisesRegex(RuntimeError, error):
+                            desktop.ensure_views(self.saved_home(home), home.state)
+                        self.assertEqual(home.mutations(), [])
+                        continue
+                desktop.ensure_views(self.saved_home(home), home.state)
+                self.assertEqual(home.panes, {"p1": "t1", "p3": "t3", "p4": "t4"})
+                self.assertEqual(self.saved_home(home)["field"], {"pane": "p4", "terminal": "t4"})
+
+    def saved_home(self, home):
+        return json.loads((home.state / "home.json").read_text())
+
+    def test_unreadable_code_fingerprint_does_not_trigger_a_restart(self):
+        with self.readout_home() as home, \
+                patch.object(lantern_views, "code_stamp", side_effect=PermissionError("fingerprint unreadable")):
+            with self.assertRaises(OSError):
+                desktop.ensure_views(home.record, home.state)
+            self.assertEqual(home.mutations(), [])
+
+    def test_open_home_returns_notices_for_new_and_reused_homes(self):
+        notice = ["Field Status in t2 runs older Lantern code"]
+        for reused in (False, True):
+            with self.subTest(reused=reused), tempfile.TemporaryDirectory() as tmp:
+                state = Path(tmp)
+                (state / "home.json").write_text(json.dumps({"terminal": "t1", "helper_binary": "codex"}))
+                terminals = [{"address": "t1", "state": "live", "foreground": {"name": "codex"}}] if reused else []
+                with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": str(state),
+                                             "LANTERN_CONFIG_DIR": str(state)}), \
+                        patch.object(desktop, "run", return_value='{"spaces": []}'), \
+                        patch.object(desktop, "core_calls", return_value=[{"terminals": terminals}]), \
+                        patch.object(desktop, "app", return_value={"terminal": "t1"}), \
+                        patch.object(desktop, "helper_argv", return_value=["codex"]), \
+                        patch.object(desktop, "ensure_views", return_value=notice):
+                    result = desktop.open_home()
+                self.assertEqual(result["terminal"], "t1")
+                self.assertIs(result["reused" if reused else "native"], True)
+                self.assertIn("notices", result)
+                self.assertEqual(result["notices"], notice)
+
+    @unittest.skipUnless(sys.platform.startswith("linux") or sys.platform == "darwin", "Unix process argv")
+    def test_live_process_argv_preserves_spaces_empty_and_non_ascii_arguments(self):
+        import select
+
+        argv = [sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(30)", "a b", "", "ü"]
+        with subprocess.Popen(argv, stdout=subprocess.PIPE, text=True) as child:
+            try:
+                self.assertTrue(select.select([child.stdout], [], [], 5)[0], "child did not become ready")
+                self.assertEqual(child.stdout.readline(), "ready\n")
+                self.assertEqual(desktop.process_argv(child.pid), argv)
+            finally:
+                child.terminate()
+                child.wait(timeout=5)
+        self.assertIsNone(desktop.process_argv(child.pid))
 
 
 if __name__ == "__main__":

@@ -33,6 +33,9 @@ All notable changes to Lantern, by Elves are documented here.
   that model unavailable and keeps the substitute list. An explicitly
   logged-out Claude account still fails. A missing Cursor CLI on a Claude
   catalog miss returns no substitute instead of exit 2.
+- In the Herdr desktop app, reopening Lantern restarts Field Status and Plan
+  Usage readouts still running old code, and reports custom readouts instead
+  of restarting them (issues #86 and #92).
 
 ## [0.18.1] - 2026-11-10
 
