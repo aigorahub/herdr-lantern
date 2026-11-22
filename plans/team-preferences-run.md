@@ -39,3 +39,8 @@ Each row records one assignment or reply. A verdict names its commit. When the b
 
 | Turn | From | To | Scope | Commit | Result | State |
 | --- | --- | --- | --- | --- | --- | --- |
+| 1 | t49y | t49z, t4b0 (/boost), t4b1 | R1 plan review of both documents | 3dea2c1 | sent | open |
+| 1 | John | t49y | "great, and follow our principles (like sol as worker)": implementation may follow R1 sign-off; Sol is the only implementation writer | 3dea2c1 | recorded | in force |
+| 2 | t49z | t49y | R1 plan review | 3dea2c1 | BLOCKING: 7 blocking, 1 advisory | open |
+| 2 | t4b0 | t49y | R1 plan review (/boost) | 3dea2c1 | BLOCKING: 6 blocking, 3 advisory | open |
+| 2 | t4b1 | t49y | R1 plan review | 3dea2c1 | BLOCKING: 4 blocking, 6 advisory | open |
