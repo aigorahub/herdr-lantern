@@ -18,6 +18,12 @@ import usage_runtime as runtime
 ROOT = Path(__file__).resolve().parents[1]
 READER = ROOT / "bin" / "lantern-app-read"
 READ_SECONDS = 5
+APP_AGENT_NAMES = {
+    "claude-code": "claude",
+    "grok-build": "grok",
+    "antigravity-cli": "agy",
+    "antigravity": "agy",
+}
 
 
 def tool(name: str) -> str:
@@ -183,8 +189,59 @@ def read_world(seconds: float = READ_SECONDS) -> World:
     return boundary_errors(read)
 
 
+def sub_agent_parent_tab(address: str, parent: object, terminals: dict[str, dict],
+                         pane_tabs: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
+    visited = {address}
+    while isinstance(parent, str) and parent and "/" not in parent and parent not in visited:
+        if parent in pane_tabs:
+            return pane_tabs[parent]
+        visited.add(parent)
+        terminal = terminals.get(parent)
+        parent = terminal.get("parent") if isinstance(terminal, dict) else None
+    return None
+
+
+def sub_agent_rows(terminals: dict[str, dict], pane_tabs: dict[str, tuple[str, str]]) -> list[dict]:
+    rows = []
+    for address, terminal in terminals.items():
+        if not isinstance(address, str) or not address or "/" in address or address in pane_tabs:
+            continue
+        if not isinstance(terminal, dict) or terminal.get("state") != "live":
+            continue
+        status = terminal.get("status")
+        app = status.get("app") if isinstance(status, dict) else None
+        if not isinstance(app, str) or not app:
+            continue
+        try:
+            if bridge(terminal):
+                continue
+        except (AttributeError, KeyError, TypeError, ValueError):
+            # Malformed foreground metadata on a parked terminal cannot invalidate pane rows.
+            continue
+        parent = terminal.get("parent")
+        attribution = sub_agent_parent_tab(address, parent, terminals, pane_tabs)
+        if attribution is None:
+            continue
+        tab_id, workspace_id = attribution
+        rows.append({
+            "pane_id": f"sub-agent:{tab_id}:{address}",
+            "terminal_id": address,
+            "tab_id": tab_id,
+            "workspace_id": workspace_id,
+            "agent": APP_AGENT_NAMES.get(app, app),
+            "agent_status": status.get("state") or "unknown",
+            "cwd": terminal.get("cwd"),
+            "name": terminal.get("name"),
+            "state_change_seq": terminal.get("status_ms"),
+            "sub_agent": True,
+            "parent": parent,
+        })
+    return rows
+
+
 def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dict]) -> dict:
     result = {"workspaces": [], "tabs": [], "agents": [], "panes": []}
+    pane_tabs = {}
     for space in inventory["spaces"]:
         if space.get("machine"):
             continue
@@ -194,6 +251,7 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
             result["tabs"].append({"tab_id": tab["id"], "workspace_id": space["id"], "label": tab["name"]})
             for pane in tab["terminals"]:
                 address = pane["terminal"]
+                pane_tabs[address] = (tab["id"], space["id"])
                 terminal = terminals.get(address)
                 if terminal and terminal.get("state") == "finished":
                     continue  # Its program ended, so the pane holds no agent until it is closed.
@@ -216,11 +274,11 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
                                                         "name", "state_change_seq", "completion_seq") if k in original})
                     row.update(legacy_binary=binary, legacy_pane_id=original["pane_id"])
                 elif status.get("app"):
-                    row["agent"] = {"claude-code": "claude", "grok-build": "grok", "antigravity-cli": "agy",
-                                    "antigravity": "agy"}.get(status["app"], status["app"])
+                    row["agent"] = APP_AGENT_NAMES.get(status["app"], status["app"])
                 if row.get("agent"):
                     result["agents"].append(row)
                 result["panes"].append(row)
+    result["sub_agents"] = sub_agent_rows(terminals, pane_tabs)
     return result
 
 
@@ -242,10 +300,11 @@ def native_process(terminal: dict) -> dict:
 
 def pane_route(world: World, pane: str) -> tuple:
     """The terminal, and any bridged legacy pane, behind an app pane."""
-    row = next((r for r in world.view["panes"] if r["pane_id"] == pane), None)
-    if not row:
-        raise RuntimeError("Pane no longer exists")
-    return row["terminal_id"], row.get("legacy_binary"), row.get("legacy_pane_id")
+    for rows in (world.view["panes"], world.view.get("sub_agents", ())):
+        for row in rows:
+            if row["pane_id"] == pane:
+                return row["terminal_id"], row.get("legacy_binary"), row.get("legacy_pane_id")
+    raise RuntimeError("Pane no longer exists")
 
 
 def process_info(world: World, pane: str, timeout: float = 15) -> dict:
