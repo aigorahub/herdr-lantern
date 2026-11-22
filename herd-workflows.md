@@ -116,7 +116,8 @@ Use these actual Herdr routes with `HERDR_HELPER_OK=1` for mutations:
   --path <worktree> --label <run> --no-focus`.
 - Start at a verified shell: `herdr agent start <slug> --kind <kind>
   --pane <pane_id> -- <verified model and permission args>`.
-- Send one prompt to an idle or done, interactive ready fresh seat:
+- Send one prompt to a fresh seat that meets the startup readiness rule
+  (a fresh pane read shows the usable input prompt with no dialog):
   `herdr agent prompt <target> "<workspace brief, then kickoff>" --wait`.
   The prompt starts with the workspace brief from the launch runtime
   section. That brief says: Load the herdr skill. List peers with
@@ -211,8 +212,7 @@ Reuse Elves saved role routes and substitutes when the user names no team.
 A named Lantern team is an explicit route choice, but repository vetoes and
 safety rules still outrank it. Keep Elves provider qualification and
 respect explicit user models, counts, scope, and stop points. State the
-lead, helper
-assignments, expected result, and capacity at kickoff. A model comparison
+lead, helper assignments, expected result, and capacity at kickoff. A model comparison
 without a count starts with one lead and two proposers. Helpers may request
 help but cannot add seats, acquire write access, or enlarge their assignment.
 The lead must fit any added helper within the recorded limit.

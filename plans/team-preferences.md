@@ -64,7 +64,7 @@ The appendix overrides the old "Do not edit files" ground rule for exactly these
 
 Scope: the window from the start of a seat that the lead itself opened until that seat is ready. In that window this rule applies. The existing monitoring permission procedure in `herd-workflows.md` does not apply until the seat is ready. After that, it applies unchanged. The cutoff recovery login restart is a separate procedure and is unchanged.
 
-Goal: the seat is ready. Legacy: `interactive_ready` and idle or done. Desktop: the `hc` terminal is live, its foreground process is the expected harness, its status is idle or done, and a fresh read shows the harness input prompt with no dialog.
+Goal: the seat is ready. Legacy: `interactive_ready` and idle or done, and a fresh pane read shows the usable harness input prompt with no dialog (S6 found that Grok Build reports both flags while its trust dialog still blocks input). Desktop: the `hc` terminal is live, its foreground process is the expected harness, its status is idle or done, and a fresh read shows the harness input prompt with no dialog.
 
 At each blocker the lead selects the least-privilege option that lets the seat start in its configured state.
 

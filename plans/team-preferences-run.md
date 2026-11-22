@@ -81,6 +81,68 @@ Each row records one assignment or reply. A verdict names its commit. When the b
 | 10 | t4b0 | t49y | R5 sign-off (/boost) | 8b4b537 | GREEN | signed off |
 | 10 | t4b1 | t49y | R5 sign-off | 8b4b537 | GREEN, 1 advisory (narrow the scope sentence) | signed off |
 | 10 | t49y | branch | Docs-only alignment of the plan scope sentence to the signed-off S2 acceptance (Grok R5 advisory); no new review needed | next commit | done | closed |
+| 11 | t49y | t49z | I1: implement S1-S6 | e948586 | sent | open |
+| 12 | t49z | t49y | S1 commit | c17e06b | committed, checks passed per commit body | open |
+| 12 | t49y | t4b0 (/boost), t4b1 | S1R1 slice review | c17e06b | sent | open |
+| 13 | t4b0 | t49y | S1R1 (/boost) | c17e06b | BLOCKING: 1 (stray + operand tests/smoke.sh:2834, confirmed by t49y), 2 advisory | open |
+| 14 | t49z | t49y | S2 commit | b1b7f19 | committed | open |
+| 14 | t49y | t4b0 (/boost) | S2R1 slice review (Grok after its S1 review) | b1b7f19 | sent | open |
+| 15 | t49y | t4b1 | Rejected docker run (external image, out of read-only scope); asked for S1R1 verdict | c17e06b | sent | open |
+| 16 | t4b1 | t49y | S1R1 | c17e06b | GREEN, 2 advisory (the + operand as advisory) | open |
+| 16 | t49y | t4b1 | S2R1 slice review | b1b7f19 | sent | open |
+| 17 | t4b1 | t49y | S2R1 | b1b7f19 | GREEN, 1 advisory (state that the non-echo Enter needs no visible answer) | open |
+| 18 | t49z | t49y | I1 status | b1b7f19 | BLOCKED: smoke Plan Usage timeouts under host load 34; S3 staged | answered by I2 |
+| 18 | t4b0 | t49y | S2R1 (/boost) | b1b7f19 | GREEN | open |
+| 18 | t49y | t49z | I2: prove environment failure on baseline, commit S3, continue S4-S6 | b1b7f19 | sent | open |
+| 19 | t49y | t4b0 | C1 cleanup: + operand, micromanage line, non-echo Enter wording, desktop observed-data wording; worktree fix/neon-s1s2 at b1b7f19 | b1b7f19 | sent | open |
+| 20 | t4b0 | t49y | C1 status | 06344f6 | DONE; sh -n lib.sh, tests/desktop.py and full sh tests/smoke.sh pass per Neon | open |
+| 20 | t49y | t4b1 | C1R1 fix review | 06344f6 | sent | open |
+| 20 | t49y | t49z | C1R1 fix review (second reviewer) | 06344f6 | pending until Sol finishes I2 | open |
+| 21 | t4b1 | t49y | C1R1 | 06344f6 | GREEN, 1 advisory (same observed-data wording in launch.sh and prompt.md; queued for C2) | open |
+| 22 | t49z | t49y | S3 commit | 610bd98 | committed; full smoke passed on rerun; baseline Plan Usage 134 pass | open |
+| 22 | t49y | t4b0 (/boost), t4b1 | S3R1 slice review | 610bd98 | sent | open |
+| 23 | t4b0 | t49y | S3R1 (/boost) | 610bd98 | GREEN, 1 advisory (remove a failed temp file on error; queued for C2) | open |
+| 24 | t4b1 | t49y | S3R1 | 610bd98 | GREEN, 2 advisory (legacy Gemini limit; repo veto wording) | open |
+| 24 | t49y | fix/neon-s1s2 | Rebased C1 onto 610bd98; range-diff identical | 8ae5757 | done | closed |
+| 24 | t49y | t4b0 | C2 cleanup: observed-data wording, temp file cleanup, legacy Gemini limit, repo veto | 8ae5757 | sent | open |
+| 25 | t4b0 | t49y | C2 status | 1365e20 | DONE; smoke passed except 1 Plan Usage host-load timeout | open |
+| 25 | t49z | t49y | S4 commit | ad41053 | committed, checks passed per body | open |
+| 25 | t49y | t4b0 (/boost) | S4R1 slice review | ad41053 | sent | open |
+| 25 | t49y | t4b1 | C2R1 fix review, then S4R1 | 1365e20, ad41053 | sent | open |
+| 26 | t4b0 | t49y | S4R1 (/boost) | ad41053 | GREEN, 2 advisory (name wording; workflow prose cannot override safety, permission or repository rules; queued for C3) | open |
+| 27 | t4b1 | t49y | C2R1 | 1365e20 | GREEN, 1 advisory (veto, not broad repository rules) | open |
+| 27 | t4b1 | t49y | S4R1 | ad41053 | GREEN | open |
+| 27 | t49y | fix/neon-s1s2 | Rebased C1, C2 onto ad41053; range-diff identical | 1a285d1 | done | closed |
+| 27 | t49y | t4b0 | C3 cleanup: name wording, workflow cannot override safety, veto wording | 1a285d1 | sent | open |
+| 28 | t49z | t49y | S5 commit | 313671e | committed; smoke exit 1 on Plan Usage timeouts, same on ad41053 under load 44.72; other suites pass | open |
+| 28 | t49y | t4b1 | S5R1 slice review | 313671e | sent | open |
+| 29 | t4b0 | t49y | C3 status | e36b72c | DONE; full smoke passed incl. Plan Usage 134/134 | open |
+| 29 | t49y | t4b0 (/boost) | S5R1 slice review | 313671e | sent | open |
+| 29 | t49y | t4b1 | C3R1 fix review | e36b72c | queued after S5R1 | open |
+| 30 | t4b0 | t49y | S5R1 (/boost) | 313671e | GREEN, 1 advisory (stale Codex startup gate fail labels in tests/smoke.sh; add agent_not_ready passthrough check) | open |
+| 30 | t4b1 | t49y | S5R1 | 313671e | GREEN, 1 advisory (same stale labels) | open |
+| 30 | t49y | t4b1 | Grok session showed always-approve after context compaction (from user config since Nov 20). t49y typed /always-approve off: session back to plan with approval, but the toggle also wrote ~/.grok/config.toml permission_mode to "ask". Restore was blocked by the harness classifier; reported to John | n/a | open for John | open |
+| 30 | t49y | t4b1 | C3R1 fix review | e36b72c | sent | open |
+| 31 | t4b1 | t49y | C3R1 | e36b72c | GREEN | open |
+| 31 | t49y | fix/neon-s1s2 | Rebased C1-C3 onto 313671e; range-diff identical | 307be38 | done | closed |
+| 31 | t49y | t4b0 | C4 cleanup: stale gate labels, agent_not_ready passthrough check | 307be38 | sent | open |
+| 32 | John | t49y | "you opened a second copy of herdr, i don't think we need it" | n/a | recorded | in force |
+| 32 | t49y | t49z | Close the S6 second Herdr copy and scratch servers; no new copy; record what S6 proved | 313671e | sent | open |
+| 33 | John | t49y | "can we get this all cleaned up, reviewed, docs updated, version bumped, merged, and version bumped on github?": landing authority (merge and GitHub release) for this run | 313671e | recorded | in force |
+| 33 | t49z | t49y | I1 status | 313671e | BLOCKED (S6 stopped at John request); desktop path proved; legacy Grok readiness defect | closed |
+| 33 | t49y | t4b1 | C4R1 fix review | a2b377f | sent | open |
+| 33 | t49y | t49z | I3: review C1-C4, integrate, fix legacy readiness, retest legacy Grok, commit S6 | 313671e | sent | open |
+| 34 | t49z | branch | S6 evidence commit; cherry-picked C1-C4 (range-diff identical) | 36e57f4 | done | open: Sol C1-C4 verdict line to confirm |
+| 35 | t4b1 | t49y | C4R1 | a2b377f | GREEN, no findings | closed |
+| 36 | t49z | t49y | I3 status; S6 commit | c809bb0 | DONE; legacy Grok retest passed; smoke exit 1 only on Plan Usage timeouts, same on 36e57f4 under load 28.41 | open |
+| 36 | t49y | t4b0 (/boost), t4b1 | F1 final review of origin/main..c809bb0 | c809bb0 | sent | open |
+| 36 | t49y | t49z | Confirm C1-C4 review verdict line | a2b377f | sent | open |
+| 37 | t49y | branch | Rebased onto origin/main 00e66da (PR 108); range-diff identical; backup branch backup/team-preferences-pre-rebase | 496df5f | done | closed |
+| 37 | t49y | t4b0, t4b1 | F1 scope correction to 00e66da..496df5f | 496df5f | sent | open |
+| 38 | t49z | t49y | C1-C4 review | a2b377f | GREEN | closed |
+| 39 | t4b0 | t49y | F1 final review (/boost) | 496df5f | GREEN, 2 advisory (herd-workflows.md:119 readiness wording, fixed in S7; ledger detail) | closed |
+| 40 | t4b1 | t49y | F1 final review | 496df5f | GREEN, 3 advisory (plan readiness line and herd-workflows.md:119, fixed in S7; I2 is ledger row 18) | closed |
+| 41 | t49y | branch | S7: CHANGELOG 0.19.0, version bump, readiness wording alignment, ledger merge | next commit | done | delta review sent |
 
 ## S6 live check evidence
 
