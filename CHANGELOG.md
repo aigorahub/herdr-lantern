@@ -8,6 +8,15 @@ All notable changes to Lantern, by Elves are documented here.
 
 - Optional Kata-backed same-chat monitoring for desktop Lantern packs.
 
+### Changed
+
+- Documentation: the README and both guides say the Herdr desktop app is
+  supported on macOS and Linux only for now, that its readouts include the
+  agents whose panes sit in a tab, which tools belong to the legacy plugin
+  workflow, and that legacy Field Status notes, Keep pins and mailbox state
+  aren't migrated. The README's Tests section lists the separate suites and
+  what CI runs (issues #92 and #88).
+
 ### Fixed
 
 - A Claude usage timeout, nonzero exit, unparseable result, error flag, or
