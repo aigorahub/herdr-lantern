@@ -1633,6 +1633,7 @@ if helper_argv_option_value --kind agent start reviewer --pane w1:p1 -- --kind c
     fail "a --kind after -- must not be read as the seat kind"
 fi
 
+unset LANTERN_LAUNCH_GUARD LANTERN_LOAD_WARN
 fake_start=$(mktemp -d)
 cat >"$fake_start/herdr" <<'EOF'
 #!/bin/sh
@@ -2239,6 +2240,257 @@ grep -q 'did not become ready' "$err" ||
 unset FAKE_START_DEAF
 export FAKE_GET_AGENT=codex
 rm -f "$FAKE_READY_FILE" "$FAKE_READ_N"
+
+(
+    guard_dir=$fake_start/launch-guard
+    mkdir -p "$guard_dir/hi" "$guard_dir/lo" "$guard_dir/none" "$guard_dir/err" \
+        "$guard_dir/noisy" "$guard_dir/stall" "$guard_dir/noisy-shim" \
+        "$guard_dir/pre-script" "$guard_dir/forking-shim"
+    cat >"$guard_dir/hi/sitecustomize.py" <<'PY'
+import os
+os.getloadavg = lambda: (30.0, 30.0, 30.0)
+os.cpu_count = lambda: 2
+PY
+    cat >"$guard_dir/lo/sitecustomize.py" <<'PY'
+import os
+os.getloadavg = lambda: (1.0, 1.0, 1.0)
+os.cpu_count = lambda: 2
+PY
+    cat >"$guard_dir/none/sitecustomize.py" <<'PY'
+import os
+if hasattr(os, "getloadavg"):
+    del os.getloadavg
+PY
+    cat >"$guard_dir/err/sitecustomize.py" <<'PY'
+import os
+def unavailable():
+    raise OSError("no load average")
+os.getloadavg = unavailable
+PY
+    cat >"$guard_dir/noisy/sitecustomize.py" <<'PY'
+import sys
+print("site startup stdout")
+print("site startup stderr", file=sys.stderr)
+PY
+    cat "$guard_dir/hi/sitecustomize.py" >>"$guard_dir/noisy/sitecustomize.py"
+    cat >"$guard_dir/stall/sitecustomize.py" <<'PY'
+import os
+import time
+with open(os.path.join(os.path.dirname(__file__), "pid"), "w") as stream:
+    stream.write(str(os.getpid()))
+time.sleep(15)
+PY
+    cat >"$guard_dir/noisy-shim/python3" <<'SH'
+#!/bin/sh
+printf '%s\n' 'failed launcher stdout'
+printf '%s\n' 'failed launcher stderr' >&2
+exit 1
+SH
+    for name in python py; do
+        printf '%s\n' '#!/bin/sh' 'exit 1' >"$guard_dir/noisy-shim/$name"
+    done
+    cat >"$guard_dir/pre-script/python3" <<'SH'
+#!/bin/sh
+printf '%s\n' "$$" >"$GUARD_PID_FILE"
+exec sleep 15
+SH
+    cat >"$guard_dir/forking-shim/python3" <<'SH'
+#!/bin/sh
+sleep 15 &
+printf '%s\n' "$!" >"$GUARD_PID_FILE"
+wait "$!"
+SH
+    chmod +x "$guard_dir/noisy-shim/"* "$guard_dir/pre-script/python3" "$guard_dir/forking-shim/python3"
+
+    export FAKE_START_OK=1 FAKE_START_LOG="$guard_dir/start.log"
+    export PYTHONDONTWRITEBYTECODE=1
+    guard_path=$PATH
+    guard_stdout=$guard_dir/stdout
+    guard_stderr=$guard_dir/stderr
+    printf '%s\n' 'agent start busy-reviewer' >"$guard_dir/expected-stdout"
+    printf '<%s>\n' agent start busy-reviewer --kind pi >"$guard_dir/expected-start"
+
+    guard_start() {
+        sh "$root/bin/herdr" agent start busy-reviewer --kind pi
+    }
+    run_guard_start() {
+        rm -f "$FAKE_START_LOG"
+        guard_status=0
+        (
+            if [ "${1:-}" = ignore-term ]; then trap '' TERM; fi
+            guard_start
+        ) >"$guard_stdout" 2>"$guard_stderr" || guard_status=$?
+    }
+    check_guard_start() {
+        [ "$guard_status" -eq "$1" ] || fail "$2 changed the launch exit status"
+        cmp -s "$guard_dir/expected-start" "$FAKE_START_LOG" || fail "$2 changed the launch argv"
+        if [ "$1" -eq 0 ]; then
+            cmp -s "$guard_dir/expected-stdout" "$guard_stdout" || fail "$2 changed launch stdout"
+        else
+            [ ! -s "$guard_stdout" ] || fail "$2 added stdout to a failed launch"
+        fi
+    }
+    check_guard_warning() {
+        awk 'NR == 1 && /^lantern: Machine busy: .*load 15[.]0 per core.*Starting the agent anyway[.]$/ { warning = 1 }
+             END { exit !(NR == 1 && warning) }' "$1" || fail "$2 should print one load warning on stderr"
+    }
+    guard_fixture() {
+        PYTHONPATH=$(helper_native_path "$guard_dir/$1")
+        export PYTHONPATH
+    }
+
+    guard_fixture hi
+    run_guard_start
+    check_guard_start 0 'unset launch guard'
+    [ ! -s "$guard_stderr" ] || fail 'unset launch guard wrote to stderr'
+    for value in hold WARN; do
+        export LANTERN_LAUNCH_GUARD=$value
+        run_guard_start
+        check_guard_start 0 "launch guard value $value"
+        [ ! -s "$guard_stderr" ] || fail "launch guard value $value wrote to stderr"
+    done
+
+    export LANTERN_LAUNCH_GUARD=warn
+    run_guard_start
+    check_guard_start 0 'high-load launch guard'
+    check_guard_warning "$guard_stderr" 'high-load launch guard'
+    guard_fixture noisy
+    run_guard_start
+    check_guard_start 0 'noisy Python startup'
+    check_guard_warning "$guard_stderr" 'noisy Python startup'
+
+    guard_fixture hi
+    unset FAKE_START_OK LANTERN_LAUNCH_GUARD
+    export FAKE_START_ERR=other
+    run_guard_start
+    check_guard_start 1 'failed launch with guard off'
+    cp "$guard_stderr" "$guard_dir/launch-error"
+    export LANTERN_LAUNCH_GUARD=warn
+    run_guard_start
+    check_guard_start 1 'failed launch with guard on'
+    sed -n '1p' "$guard_stderr" >"$guard_dir/first-line"
+    check_guard_warning "$guard_dir/first-line" 'failed launch with guard on'
+    sed '1d' "$guard_stderr" >"$guard_dir/rest-of-stderr"
+    cmp -s "$guard_dir/launch-error" "$guard_dir/rest-of-stderr" || fail 'guard changed launch stderr'
+    export FAKE_START_OK=1
+
+    guard_fixture lo
+    run_guard_start
+    check_guard_start 0 'low-load launch guard'
+    [ ! -s "$guard_stderr" ] || fail 'low load should not warn'
+    guard_fixture hi
+    export LANTERN_LOAD_WARN=0
+    run_guard_start
+    check_guard_start 0 'disabled load check'
+    [ ! -s "$guard_stderr" ] || fail 'disabled load check should not warn'
+    unset LANTERN_LOAD_WARN
+
+    for fixture in none err noisy-shim; do
+        if [ "$fixture" = noisy-shim ]; then
+            guard_fixture hi
+            PATH="$guard_dir/noisy-shim:$guard_path"
+        else
+            guard_fixture "$fixture"
+        fi
+        guard_started=$(date +%s)
+        run_guard_start
+        guard_elapsed=$(($(date +%s) - guard_started))
+        check_guard_start 0 "failed launch probe ($fixture)"
+        [ ! -s "$guard_stderr" ] || fail "failed launch probe ($fixture) wrote to stderr"
+        [ "$guard_elapsed" -lt 3 ] || fail "failed launch probe ($fixture) waited for the deadline"
+    done
+    PATH=$guard_path
+
+    case $(uname -s) in
+        MINGW* | MSYS* | CYGWIN*) guard_posix=0 ;;
+        *) guard_posix=1 ;;
+    esac
+    for fixture in stall pre-script; do
+        if [ "$fixture" = stall ]; then
+            guard_fixture stall
+            guard_pid_file=$guard_dir/stall/pid
+        else
+            guard_fixture hi
+            guard_pid_file=$guard_dir/pre-script/pid
+            export GUARD_PID_FILE=$guard_pid_file
+            PATH="$guard_dir/pre-script:$guard_path"
+        fi
+        guard_started=$(date +%s)
+        run_guard_start ignore-term
+        guard_elapsed=$(($(date +%s) - guard_started))
+        check_guard_start 0 "stalled launch probe ($fixture)"
+        [ ! -s "$guard_stderr" ] || fail "stalled launch probe ($fixture) wrote to stderr"
+        [ "$guard_elapsed" -lt 10 ] || fail "stalled launch probe ($fixture) held the launch"
+        [ -s "$guard_pid_file" ] || fail "the $fixture fixture did not enter its stall"
+        if [ "$guard_posix" -eq 1 ] && kill -0 "$(cat "$guard_pid_file")" 2>/dev/null; then
+            fail "the $fixture worker survived the deadline"
+        fi
+    done
+
+    PATH="$guard_dir/forking-shim:$guard_path"
+    export GUARD_PID_FILE="$guard_dir/forking-shim/pid"
+    rm -f "$FAKE_START_LOG"
+    guard_started=$(date +%s)
+    (
+        trap '' TERM
+        guard_status=0
+        guard_start || guard_status=$?
+        printf '%s\n' "$guard_status" >"$guard_dir/exit-status"
+    ) 2>&1 | cat >"$guard_stdout"
+    guard_elapsed=$(($(date +%s) - guard_started))
+    [ -s "$GUARD_PID_FILE" ] || fail 'the forking launcher did not start its child'
+    kill -9 "$(cat "$GUARD_PID_FILE")" 2>/dev/null || :
+    guard_status=$(cat "$guard_dir/exit-status")
+    check_guard_start 0 'forking launcher with captured stdout and stderr'
+    [ "$guard_elapsed" -lt 10 ] || fail 'the launcher child held the output pipe open'
+    PATH=$guard_path
+
+    if [ "$guard_posix" -eq 1 ]; then
+        guard_python=$(helper_detect_python) || fail 'full-pipe test needs a working Python 3'
+        rm -f "$FAKE_START_LOG"
+        # shellcheck disable=SC2086
+        $guard_python - "$root/bin/herdr" "$(helper_native_path "$guard_dir/hi")" <<'PY'
+import os
+import select
+import subprocess
+import sys
+import time
+
+reader, writer = os.pipe()
+with os.fdopen(reader, "rb", buffering=0) as stderr_pipe:
+    try:
+        os.set_blocking(writer, False)
+        for block in (b"x" * 4096, b"x"):
+            try:
+                while True:
+                    os.write(writer, block)
+            except BlockingIOError:
+                pass
+        os.set_blocking(writer, True)
+        env = dict(os.environ, PYTHONPATH=sys.argv[2])
+        launch = subprocess.run(
+            ["sh", sys.argv[1], "agent", "start", "busy-reviewer", "--kind", "pi"],
+            env=env, stdout=subprocess.PIPE, stderr=writer, timeout=8,
+        )
+    finally:
+        os.close(writer)
+    if launch.returncode != 0 or launch.stdout != b"agent start busy-reviewer\n":
+        raise SystemExit("a full stderr pipe changed the launch result")
+    deadline = time.monotonic() + 2
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([stderr_pipe], [], [], remaining)[0]:
+            raise SystemExit("the launch guard did not close its stderr writer")
+        data = stderr_pipe.read(65536)
+        if not data:
+            break
+        if data != b"x" * len(data):
+            raise SystemExit(f"the launch guard wrote to stderr after the launch: {data[-200:]!r}")
+PY
+        cmp -s "$guard_dir/expected-start" "$FAKE_START_LOG" || fail 'full-pipe launch changed argv'
+    fi
+)
+printf 'ok: opt-in launch guard\n'
 
 unset FAKE_PANE
 unset FAKE_PANE_NEXT

@@ -13,6 +13,11 @@ All notable changes to Lantern, by Elves are documented here.
   `LANTERN_DONE_WARN` finished agents are still open (default 20). Setting
   either to 0 turns that check off. The line is shortened to fit the pane
   width, only informs, and closes nothing.
+- `LANTERN_LAUNCH_GUARD=warn` makes `herdr agent start` through Lantern's wrapper
+  warn once on stderr when the one-minute load exceeds `LANTERN_LOAD_WARN`
+  times the CPU count. It gives up after a few seconds and preserves the
+  launch's output and exit code. The guard is off by default and has no effect
+  on Windows. It checks local load and leaves the done count to Field Status.
 
 ### Changed
 

@@ -242,6 +242,12 @@ anything when the one-minute load per core exceeds `LANTERN_LOAD_WARN` (default
 2) or the number of open finished agents reaches `LANTERN_DONE_WARN` (default 20).
 Set either variable to `0` to turn off its check.
 
+On platforms with a load average (Windows has none), set
+`LANTERN_LAUNCH_GUARD=warn` to have `herdr agent start` through Lantern's wrapper
+warn once on stderr when the one-minute load exceeds `LANTERN_LOAD_WARN` times
+the CPU count. The guard is off by default, checks only local load, and gives
+up after a few seconds with the launch's output and exit code unchanged.
+
 Register each new assignment with `field-status task <pane-id> <task-id>`. Run
 `field-status pending` to get JSON with the current task and token. Inspect the
 output and record the review:

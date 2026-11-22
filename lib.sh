@@ -982,6 +982,72 @@ helper_claude_startup_gate() {
     return 1
 }
 
+helper_guard_python() {
+    # Starting a candidate here would put interpreter startup outside the deadline.
+    for _helper_gp in python3 python; do
+        _helper_gp_path=$(command -v "$_helper_gp" 2>/dev/null) || continue
+        [ -s "$_helper_gp_path" ] || continue
+        printf '%s' "$_helper_gp"
+        return 0
+    done
+    command -v py >/dev/null 2>&1 && { printf '%s' 'py -3'; return 0; }
+    return 1
+}
+
+helper_guard_wait() {
+    _helper_guard_kill=
+    while kill -0 "$1" 2>/dev/null; do
+        if [ "$_helper_guard_left" -le 0 ]; then
+            [ -z "$_helper_guard_kill" ] || return 1
+            if kill -9 "$1" 2>/dev/null; then
+                _helper_guard_kill=sent
+            else
+                _helper_guard_kill=failed
+            fi
+            _helper_guard_left=5
+        fi
+        if sleep 0.1 2>/dev/null; then
+            _helper_guard_left=$((_helper_guard_left - 1))
+        else
+            sleep 1 2>/dev/null || :
+            _helper_guard_left=$((_helper_guard_left - 10))
+        fi
+    done
+    # Bash can report a killed job until it has been waited for.
+    [ "$_helper_guard_kill" != sent ] || wait "$1" 2>/dev/null || :
+    return 0
+}
+
+helper_launch_guard() {
+    case ${LANTERN_LAUNCH_GUARD:-} in
+    warn) ;;
+    *) return 0 ;;
+    esac
+    _helper_guard_py=$(helper_guard_python) || return 0
+    _helper_guard_now=$(date +%s 2>/dev/null) || return 0
+    _helper_guard_dir=$(mktemp -d 2>/dev/null) || return 0
+    # Interpreter startup can print or leave descendants holding inherited streams.
+    # shellcheck disable=SC2086
+    (exec $_helper_guard_py -S "$(helper_native_path "$1/launch_guard.py")" \
+        "$_helper_guard_now" "$(helper_native_path "$_helper_guard_dir")") \
+        </dev/null >/dev/null 2>&1 &
+    _helper_guard_left=40
+    helper_guard_wait "$!" 2>/dev/null || :
+    if [ -f "$_helper_guard_dir/result" ]; then
+        _helper_guard_line=$(sed -n 1p "$_helper_guard_dir/result" 2>/dev/null | tr -d '\r' 2>/dev/null) ||
+            _helper_guard_line=
+        if [ -n "$_helper_guard_line" ]; then
+            # A full stderr pipe can block a synchronous write indefinitely.
+            (printf '%s\n' "$_helper_guard_line" >&2) </dev/null >/dev/null &
+            _helper_guard_left=10
+            helper_guard_wait "$!" 2>/dev/null || :
+        fi
+    fi
+    rm -f "$_helper_guard_dir/result" "$_helper_guard_dir/result.tmp" 2>/dev/null || :
+    rmdir "$_helper_guard_dir" 2>/dev/null || :
+    return 0
+}
+
 helper_relay_agent_start() {
     # Codex and Claude first-run survival. Herdr returns agent_not_ready
     # as soon as detection reports blocked during startup, so a

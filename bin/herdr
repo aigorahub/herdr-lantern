@@ -60,6 +60,7 @@ case ${HERDR_HELPER_OK:-} in
                 $python "$self_dir/gemini-start-check.py" "$@"
             ) || exit 2
         fi
+        helper_launch_guard "$self_dir"
         helper_relay_agent_start "$real" "$@"
         exit $?
     fi
