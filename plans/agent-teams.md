@@ -233,9 +233,10 @@ Do not close tabs, stop unrelated processes, or close Lantern home.
 
 ## Routing and resource limits
 
-Extend existing Elves preferences for lead, proposer, investigator, implementer,
-critic, and reviewer roles. Lantern uses that resolved policy instead of creating
-a competing set of defaults. Preserve explicit run choices and repo vetoes.
+Use Elves preferences for lead, proposer, investigator, implementer, critic,
+and reviewer roles when the user names no team. A named Lantern team is an
+explicit route choice. Preserve provider qualification, explicit run choices,
+and repository limits.
 
 Cache capability checks by CLI version, route, relevant configuration, and expiry.
 Refresh on a changed binary, expired record, launch failure, or explicit request.

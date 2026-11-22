@@ -207,9 +207,10 @@ Elves team execution on Windows requires WSL2. Validate the executable, state,
 and credential paths inside that environment before configuring callbacks.
 Do not pass native Windows paths unchanged into WSL2.
 
-Reuse Elves saved role routes, substitutes, and provider qualification. Do not
-create a second helper route list in Lantern's `helper.conf`. Explicit user
-models, counts, scope, and stop points take priority. State the lead, helper
+Reuse Elves saved role routes and substitutes when the user names no team.
+A named Lantern team is an explicit route choice. Keep Elves provider
+qualification and respect explicit user models, counts, scope, and stop
+points. State the lead, helper
 assignments, expected result, and capacity at kickoff. A model comparison
 without a count starts with one lead and two proposers. Helpers may request
 help but cannot add seats, acquire write access, or enlarge their assignment.

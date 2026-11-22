@@ -617,8 +617,9 @@ Use Elves 2.37.0 or later for team assignments and the callback adapter.
 Lantern supports native Windows. Elves team execution on Windows requires
 WSL2. The executable, state, and credential paths must be valid inside the
 Elves environment; native Windows paths cannot be used unchanged in WSL2.
-Saved model routes and substitute choices belong to Elves. Lantern reuses
-them. Named models and team limits take priority. Without a requested count,
+When you name a saved team, Lantern uses its routes as your explicit choice.
+When you name no team, Lantern reuses the Elves routes and substitutes.
+Named models and team limits take priority. Without a requested count,
 a comparison starts with a lead and two proposers. Helpers cannot expand
 the team or change their own scope.
 
@@ -655,6 +656,36 @@ adjustments. Add your adjustments to `guidance.md` in the Lantern config
 directory. Lantern reads this optional file each time it sets up a team,
 so a change takes effect without restarting Lantern. The file changes
 management defaults only. Safety, permission, and authority rules still apply.
+Say “remember that as manager guidance” to add a line from chat.
+
+### Saved teams
+
+Save a team in `teams/<name>.json` in the Lantern config directory. Say
+“save this as my review team” to save it from chat. Open it by its name
+or an alias. Lantern reads the file on demand and checks each exact model
+and effort before it seats the team. An unavailable route stops the
+affected launch. Lantern reports it without substituting another model.
+
+```json
+{
+  "name": "review",
+  "aliases": ["review pair"],
+  "startup": "ask",
+  "agents": [
+    {"role": "lead", "harness": "codex", "model": "gpt-6-astra", "effort": "high"},
+    {"role": "reviewer", "harness": "codex", "model": "gpt-5.6-sol", "effort": "high"}
+  ]
+}
+```
+
+Use a lowercase file name slug with letters, digits, underscores, or
+hyphens. Start it with a letter or digit. A seat can also specify
+`service_tier` (use `fast` when the route supports it), `mode`, `label`, or
+`notes`. Put shared notes in the top-level `coordination` field. Set
+`startup` to `ask` to report a visible startup blocker without sending keys.
+The default is `auto`. The team receives its roster and the lead receives
+the guidance. The team waits for a task. The saved team grants no authority
+to change permissions, merge, deploy, publish, or take financial action.
 
 ### Other workflow phrases
 
