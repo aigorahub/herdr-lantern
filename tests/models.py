@@ -351,33 +351,36 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
             self.assertEqual(self.check("claude", "opus", "high")[0], 0)
 
     def test_claude_login_and_usage_preflight(self):
+        cost = json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"})
+        cost_only = json.dumps({"result": "Total cost: $0.00"})
+        # note is a substring of quota_note. None means the seat has no note.
         cases = (
-            ("oauth-token", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 0, "unknown"),
-            ("none", json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
-            ("login-source", json.dumps({"result": "Current session: 0% used"}), 0, None),
-            ("login-source", json.dumps({"result": "Current session: 100% used"}), 3, "100% used"),
-            (None, json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
-            ("", json.dumps({"result": "Total cost: $0.00"}), 2, "not logged in"),
-            ("   ", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
-            (True, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
-            (7, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
-            (["token"], json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
-            ({"status": "logged-out"}, json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
-            (" NONE ", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output"}), 2, "not logged in"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Failed to retrieve usage"}), 2, "unrecognized usage text"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "unparseable"}), 2, "unrecognized usage text"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": ""}), 2, "unrecognized usage text"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": True}), 2, "reported an error"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": "false"}), 2, "error flag is not boolean"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "error_during_execution"}), 2, "unsuccessful result"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Authentication failed: token expired\nTotal cost: $0.00\nUsage: 0 input, 0 output"}), 2, "unrecognized usage text"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output, malformed data"}), 2, "unrecognized usage text"),
-            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "success", "is_error": False}), 0, "unknown"),
-            (None, json.dumps({"result": "Current session: 0% used"}), 0, None),
-            ("oauth-token", "unparseable", 2, "unparseable usage JSON"),
-            ("oauth-token", json.dumps({"result": None}), 2, "usage result is not text"),
+            ("oauth-token", cost, 0, "unknown", None),
+            ("none", cost_only, 2, "not logged in", None),
+            ("login-source", json.dumps({"result": "Current session: 0% used"}), 0, None, None),
+            ("login-source", json.dumps({"result": "Current session: 100% used"}), 3, "100% used", None),
+            (None, cost_only, 0, "unknown", "unrecognized text"),
+            ("", cost_only, 0, "unknown", "unrecognized text"),
+            ("   ", cost, 0, "unknown", None),
+            (True, cost, 0, "unknown", None),
+            (7, cost, 0, "unknown", None),
+            (["token"], cost, 0, "unknown", None),
+            ({"status": "logged-out"}, cost, 0, "unknown", None),
+            (" NONE ", cost, 2, "not logged in", None),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Failed to retrieve usage"}), 0, "unknown", "unrecognized text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "unparseable"}), 0, "unknown", "unrecognized text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": ""}), 0, "unknown", "unrecognized text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": True}), 0, "unknown", "reported an error"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "is_error": "false"}), 0, "unknown", "error flag is not boolean"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "error_during_execution"}), 0, "unknown", "unsuccessful result"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Authentication failed: token expired\nTotal cost: $0.00\nUsage: 0 input, 0 output"}), 0, "unknown", "unrecognized text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output, malformed data"}), 0, "unknown", "unrecognized text"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", json.dumps({"result": "Total cost: $0.00\nUsage: 0 input, 0 output", "subtype": "success", "is_error": False}), 0, "unknown", None),
+            (None, json.dumps({"result": "Current session: 0% used"}), 0, None, None),
+            ("oauth-token", "unparseable", 0, "unknown", "unparseable JSON"),
+            ("oauth-token", json.dumps({"result": None}), 0, "unknown", "result is not text"),
         )
-        for token_source, usage, expected_code, expected in cases:
+        for token_source, usage, expected_code, expected, note in cases:
             with self.subTest(token_source=token_source, usage=usage):
                 catalog = json.loads(CLAUDE_CATALOG)
                 if token_source is None:
@@ -405,16 +408,122 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
                     if expected_code == 3:
                         self.assertIn(expected, payload["reason"])
                         self.assertEqual(payload["quota"], "unavailable")
+                        self.assertNotIn("quota_note", payload)
                     elif expected is None:
                         self.assertTrue(payload["available"])
                         self.assertEqual(payload["quota"], "available")
+                        self.assertNotIn("quota_note", payload)
                     else:
                         self.assertTrue(payload["available"])
                         self.assertEqual(payload["quota"], expected)
+                        if note:
+                            self.assertIn(note, payload["quota_note"])
+                        else:
+                            self.assertNotIn("quota_note", payload)
                         self.assertEqual(self.check("claude", "sonnet", "max")[0], 3)
                         unavailable_code, unavailable = self.check("claude", "invented", "high")
                         self.assertEqual(unavailable_code, 3)
                         self.assertNotIn("quota", unavailable)
+
+    def claude_run(self, usage):
+        def run(command, *, input_text=None, stdout_via_file=False, timeout=30, usage=usage, **_):
+            if command == ["claude", "/usage", "-p", "--output-format", "json"]:
+                self.usage_timeout = timeout
+                if isinstance(usage, BaseException):
+                    raise usage
+                return usage
+            if command == ["claude", "--help"]:
+                return CLAUDE_HELP
+            if command[0] == "agent":
+                if getattr(self, "cursor_error", None):
+                    raise self.cursor_error
+                return "gpt-5.6-sol-high-fast - GPT Sol\n"
+            return CLAUDE_CATALOG
+        return run
+
+    def test_claude_usage_timeout_seats_with_unknown_quota(self):
+        expired = subprocess.TimeoutExpired(["claude", "/usage"], 10)
+        failure = preflight.CheckError("availability check failed: claude (timed out)")
+        failure.__cause__ = expired
+        self.cursor_error = None
+        with patch.object(preflight, "run", side_effect=self.claude_run(failure)):
+            code, payload = self.check("claude", "opus", "high")
+        self.assertEqual(self.usage_timeout, 10)
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["quota"], "unknown")
+        self.assertEqual(payload["quota_note"], "usage read timed out after 10s")
+        self.assertNotIn("substitute", payload)
+
+    def test_run_timeout_argument_reaches_the_child(self):
+        completed = subprocess.CompletedProcess(["claude"], 0, stdout="ok", stderr="")
+        with patch.object(preflight.shutil, "which", return_value="claude"), \
+                patch.object(preflight.subprocess, "run", return_value=completed) as called:
+            self.assertEqual(preflight.run(["claude", "--version"]), "ok")
+            self.assertEqual(called.call_args.kwargs["timeout"], 30)
+            self.assertEqual(preflight.run(["claude", "/usage"], timeout=10), "ok")
+            self.assertEqual(called.call_args.kwargs["timeout"], 10)
+        with patch.object(preflight.shutil, "which", return_value="claude"), \
+                patch.object(preflight.subprocess, "run", side_effect=subprocess.TimeoutExpired(["claude"], 10)):
+            with self.assertRaises(preflight.CheckError) as raised:
+                preflight.run(["claude", "/usage"], timeout=10)
+        self.assertIsInstance(raised.exception.__cause__, subprocess.TimeoutExpired)
+        self.assertEqual(preflight.usage_problem_note(raised.exception), "usage read timed out after 10s")
+
+    def test_claude_usage_error_or_garbage_seats_with_unknown_quota(self):
+        nonzero = preflight.CheckError("availability check failed: claude (exit 1)")
+        nonzero.__cause__ = subprocess.CalledProcessError(1, ["claude", "/usage"])
+        samples = (
+            ("nonzero", nonzero, "usage read exited nonzero"),
+            ("garbage-json", "not json", "usage read returned unparseable JSON"),
+            ("error-flag", json.dumps({"result": "Current session: 100% used", "is_error": True}), "usage read reported an error"),
+            ("unrecognized", json.dumps({"result": "hello from claude"}), "usage read returned unrecognized text"),
+        )
+        self.cursor_error = None
+        for label, usage, note in samples:
+            with self.subTest(label=label):
+                with patch.object(preflight, "run", side_effect=self.claude_run(usage)):
+                    code, payload = self.check("claude", "opus", "high")
+                self.assertEqual(code, 0)
+                self.assertTrue(payload["available"])
+                self.assertEqual(payload["quota"], "unknown")
+                self.assertEqual(payload["quota_note"], note)
+
+    def test_claude_exhausted_bucket_keeps_substitute(self):
+        usage = json.dumps({
+            "result": "Current session: 12% used\nCurrent week (Fable): 100% used - resets Aug 23 at 4:59am",
+        })
+        self.cursor_error = None
+        with patch.object(preflight, "run", side_effect=self.claude_run(usage)):
+            code, payload = self.check("claude", "fable", "high")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["quota"], "unavailable")
+        self.assertIn("Current week (Fable) is 100% used", payload["reason"])
+        self.assertIn("resets Aug 23 at 4:59am", payload["reason"])
+        self.assertEqual(payload["substitute"]["kind"], "claude")
+        self.assertEqual(payload["substitute"]["model"], "opus")
+        self.assertEqual(payload["substitute"]["effort"], "xhigh")
+
+    def test_claude_catalog_miss_names_a_substitute(self):
+        self.cursor_error = None
+        with patch.object(preflight, "run", side_effect=self.claude_run(json.dumps({"result": "Current session: 0% used"}))):
+            code, payload = self.check("claude", "haiku", "high")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["available"])
+        self.assertIn("absent from the Claude initialization catalog", payload["reason"])
+        self.assertEqual(payload["substitute"]["kind"], "cursor")
+        self.assertEqual(payload["substitute"]["model"], "gpt-5.6-sol-high-fast")
+        self.assertNotIn("quota", payload)
+
+    def test_claude_catalog_miss_without_cursor_cli(self):
+        self.cursor_error = preflight.CheckError("availability check failed: agent command not found")
+        with patch.object(preflight, "run", side_effect=self.claude_run(json.dumps({"result": "Current session: 0% used"}))):
+            code, payload = self.check("claude", "haiku", "high")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["available"])
+        self.assertIn("absent from the Claude initialization catalog", payload["reason"])
+        self.assertIsNone(payload["substitute"])
 
     def test_claude_catalog_keeps_optional_account_metadata_optional(self):
         for account in (None, {}, {"tokenSource": None}, {"tokenSource": True}, "invalid"):
@@ -620,7 +729,7 @@ claude-opus-5-5-high-fast - Claude Opus 5.5 1M High Fast
 
         preflight_replies = iter([truncated_effort, truncated_model, CLAUDE_HELP])
 
-        def preflight_read(command, *, input_text=None, stdout_via_file=False):
+        def preflight_read(command, *, input_text=None, stdout_via_file=False, **_):
             if command == ["claude", "--help"]:
                 self.assertTrue(stdout_via_file)
                 return next(preflight_replies)

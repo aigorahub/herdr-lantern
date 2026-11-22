@@ -434,12 +434,15 @@ $onboard_note
 - After model resolution, run
   \`\$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]\`. Run it
   before you seat anything. Do not create, start, or prompt
-  when it fails. A missing command, timeout, or unparseable check stops the
-  route. A usage line with no reset time is still valid. A harness with no
-  quota command is not a failed check. Claude token logins with no usage buckets
-  can report quota: unknown after login, model, and effort checks pass. This does
-  not measure remaining quota. Missing login evidence and failed or malformed
-  usage still fail the check. If the model is unavailable, report
+  when the catalog check fails. A missing catalog command, a catalog
+  timeout, or an unparseable catalog stops the route. Do not seat on a guess.
+  A usage line with no reset time is still valid. A harness with no
+  quota command is not a failed check. Claude token logins with no usage
+  buckets report quota: unknown. A usage timeout or failed usage read also
+  reports quota: unknown and seating continues. This does not measure
+  remaining quota. An explicitly logged-out Claude account still fails. A
+  parsed bucket at 100% or a line that says the limit was hit still makes
+  that model unavailable. If the model is unavailable, report
   its bucket and reset time when known. Name the one live substitute from
   the result and ask the user to confirm it. Never switch models in silence.
   The route wrappers do not cover Pi: skip both for \`--kind pi\` and pass

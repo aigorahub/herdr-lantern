@@ -23,6 +23,17 @@ All notable changes to Lantern, by Elves are documented here.
   aren't migrated. The README's Tests section lists the separate suites and
   what CI runs (issues #92 and #88).
 
+### Fixed
+
+- A Claude usage timeout, nonzero exit, unparseable result, error flag, or
+  unrecognized usage text no longer blocks seating. Preflight still reads
+  usage, on its own 10 second timeout, and reports `quota: unknown` with a
+  short `quota_note`. The initialization catalog remains the hard gate for
+  model and effort. A parsed bucket at 100% or a hit-limit line still marks
+  that model unavailable and keeps the substitute list. An explicitly
+  logged-out Claude account still fails. A missing Cursor CLI on a Claude
+  catalog miss returns no substitute instead of exit 2.
+
 ## [0.18.1] - 2026-11-10
 
 ### Fixed
