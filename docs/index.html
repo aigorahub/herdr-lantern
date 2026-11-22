@@ -374,6 +374,24 @@
         </li>
       </ol>
       <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, its chat tab closes. The readout panes can remain open. Herdr reuses workspace and pane ids after a restart, so Lantern checks the remembered ids before it trusts them: keep the <code>🔥 lantern</code> label if you want that workspace reused after the chat closes.</p>
+
+      <h2>Herdr desktop app</h2>
+      <p>The Herdr desktop app (<code>hc</code> and <code>herdr-app</code>) has a separate Lantern entry point; the legacy plugin stays supported. Supported on macOS and Linux only for now; on Windows, keep using the legacy plugin.</p>
+      <ol class="steps">
+        <li>
+          <div>
+            From this checkout, with the app open:
+            <pre>sh bin/lantern-app open</pre>
+          </div>
+        </li>
+        <li>
+          <div>
+            On macOS or Linux, <code>sh bin/lantern-app install</code> adds <code>lantern-app</code> to <code>~/.local/bin</code>; with that folder on your <code>PATH</code>, run <code>lantern-app open</code> from any folder.
+          </div>
+        </li>
+      </ol>
+      <p class="note">This opens a native chat in the first space with Field Status and Plan Usage to its right. The readouts show local spaces only (remote app spaces are omitted) and include the agents whose panes sit in a tab (a sub-agent parked outside any tab isn't shown).</p>
+      <p class="note"><code>hsh</code>, <code>evening.sh</code>, <code>bin/lantern_session.py</code>, <code>bin/team_observer.py</code> and <code>bin/agent_switch.py start</code> are part of the legacy plugin workflow and aren't supported for native desktop sessions; <code>bin/onboard</code> also runs from the legacy plugin, and the spawn defaults it saves in <code>helper.conf</code> are the ones the desktop app reads by default; legacy Field Status notes, Keep pins and mailbox state aren't migrated.</p>
     </div>
 
     <div class="wrap wide">
