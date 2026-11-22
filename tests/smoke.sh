@@ -267,7 +267,7 @@ esac
 grep -q 'helper_force_front_path "$plugin_root/bin"' "$root/launch.sh" ||
     fail "launch.sh should force the wrapper to the front of PATH"
 grep -q 'helper_relay_agent_start' "$root/bin/herdr" ||
-    fail "bin/herdr should relay agent start for the Codex startup gate"
+    fail "bin/herdr should relay agent start for Codex unattended flag positioning"
 rm -rf "$resolve_dir"
 
 # The plugin must never invoke bare `bash`. On Windows the bash on PATH is the
@@ -1470,7 +1470,15 @@ case "$1 $2" in
     fi
     printf '{"error":{"code":"agent_not_ready","message":"%s is blocked during startup and is not ready for prompts"}}\n' \
         "$3" >&2
-    exit 1
+    exit "${FAKE_START_EXIT:-1}"
+    ;;
+"agent get")
+    printf '{"result":{"agent":{"pane_id":"w1:p1","agent":"codex","interactive_ready":false,"agent_status":"blocked"}}}\n'
+    exit 0
+    ;;
+"agent read")
+    printf 'Do you trust the contents of this directory?\n'
+    exit 0
     ;;
 esac
 printf '%s\n' "$*"
@@ -1574,6 +1582,16 @@ check_start_log "$codex_start_head
 <resume>
 <exact-session-id>" "exact resume must preserve model and session with unattended flag"
 unset FAKE_START_OK
+
+rm -f "$FAKE_START_LOG"
+start_status=0
+out=$(FAKE_START_EXIT=7 sh "$root/bin/herdr" agent start reviewer --kind codex --pane w1:p1 2>"$err") ||
+    start_status=$?
+[ "$start_status" -eq 7 ] ||
+    fail "agent_not_ready start should return the real nonzero exit status (got $start_status)"
+if printf '%s\n' "$out" | grep -q 'agent send-keys'; then
+    fail "agent_not_ready start must not send keys from the wrapper"
+fi
 
 (
     guard_dir=$fake_start/launch-guard
@@ -2535,9 +2553,9 @@ grep -q 'helper_agent_takes_effort' "$root/launch.sh" ||
 grep -qF 'This chat runs $chat_identity' "$root/launch.sh" ||
     fail "the launch.sh appendix should name what the chat runs"
 grep -qF 'agent_not_ready' "$root/prompt.md" ||
-    fail "prompt.md does not describe the Codex startup gate"
+    fail "prompt.md does not handle agent_not_ready in the startup rule"
 grep -qF 'agent_not_ready' "$root/launch.sh" ||
-    fail "the launch.sh appendix does not describe the Codex startup gate"
+    fail "the launch.sh appendix does not handle agent_not_ready in the startup rule"
 grep -qF '`pi -c`' "$root/prompt.md" ||
     fail "prompt.md does not carry the Pi session route"
 grep -qF 'Pi \`--continue\` or \`--session <id>\`' "$root/launch.sh" ||
