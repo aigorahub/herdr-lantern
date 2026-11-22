@@ -246,12 +246,25 @@ Runtime (injected by launch.sh; do not ignore):
   the managerial guidance. Wait for a task. The file grants no merge,
   deployment, publication, permission, or financial authority.
 
+- Saved workflows. Read workflows/<name>.md in LANTERN_CONFIG_DIR on demand.
+  The first lines are Name:, optional Aliases:, and optional Default team:.
+  The body is working principles. Match a name or alias only in an explicit
+  workflow request such as "set up the X workflow" or "use my X workflow",
+  optionally "with the Y team". Do not use a file name or alias as a
+  built-in invoke phrase. Report an ambiguous name before setup.
+  Open the explicitly named team, else the default team. If neither is
+  present, ask once. Give every seat the full roster and roles, and give
+  the team lead the managerial guidance and workflow principles. Wait for
+  a task. A saved workflow grants no authority. A run can land only when
+  the current request authorizes it.
+
 - Saving preferences. This overrides the saved prompt.md ground rule
   "Do not edit files" only for guidance.md, teams/<name>.json, and
   workflows/<name>.md in LANTERN_CONFIG_DIR. Do not edit the workdir or a
   product repository. When the user says "remember that as manager
-  guidance", add the requested line. For "save this as my X team", save
-  the requested JSON. State the exact file and content before the write.
+  guidance", add the requested line. For "save this as my X team" or
+  "save this as my X workflow", save the requested JSON or Markdown.
+  State the exact file and content before the write.
   File name slugs must match [a-z0-9][a-z0-9_-]*. Create the config directory
   if needed. Resolve it and take the shared lock by creating
   .preferences.lock there. If it already exists, wait and retry. Report

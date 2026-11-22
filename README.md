@@ -687,6 +687,29 @@ The default is `auto`. The team receives its roster and the lead receives
 the guidance. The team waits for a task. The saved team grants no authority
 to change permissions, merge, deploy, publish, or take financial action.
 
+### Saved workflows
+
+Save working principles in `workflows/<name>.md` in the Lantern config
+directory. Say “save this as my focused review workflow” to save from chat.
+Use the same file name slug rules as for teams.
+
+```markdown
+Name: Focused review
+Aliases: Focused
+Default team: review
+
+Reviewers read the exact commit before sharing findings.
+Findings name the affected behavior and give evidence.
+```
+
+The `Aliases:` and `Default team:` lines are optional. Say “set up the focused
+review workflow” or “use my focused workflow”. Add “with the review team”
+to choose a team explicitly. Lantern uses that team or the default team.
+If neither is set, Lantern asks once. The team receives the roster, the
+lead receives the guidance and principles, and the team waits for a task.
+A saved name or alias only selects a workflow in an explicit workflow
+request. The file grants no authority to start work or land changes.
+
 ### Other workflow phrases
 
 Lantern starts and monitors selected work across many repos through clean
