@@ -561,6 +561,9 @@ monitoring block.
 
 ### Permission handling during monitoring
 
+Start this procedure only after the seat reaches initial readiness. Use the
+startup rule before then. The cutoff recovery procedure below is separate.
+
 The user authorizes Lantern to grant routine permissions needed by selected
 runs. A blocked permission prompt is a monitoring event. It is not a working
 chat prompt and does not need a second user confirmation when it is within

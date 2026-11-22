@@ -2823,7 +2823,8 @@ argv_is() {
     esac
 }
 
-printf '%s\n' 'Saved custom prompt' >"$argv_dir/config/prompt.md"
+printf '%s\n' 'Saved custom prompt' 'Do not send y or Enter yourself for those startup gates.' \
+    'If an agent start fails, wait two seconds and retry once.' >"$argv_dir/config/prompt.md"
 run_launch 'HELPER_AGENT="codex"
 HELPER_KATA_PROJECT="example-project"' >/dev/null
 [ -f "$argv_dir/state/workdir/AGENTS.md" ] || fail "legacy launch did not render AGENTS.md with Kata project"
@@ -2859,6 +2860,10 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
         fail "$rendered_file lacks the native Codex receipt path in runtime instructions"
     grep -qF 'Saved custom prompt' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file lost the custom prompt"
+    grep -qF 'This overrides the saved prompt.md first-run gate paragraph' "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file startup rule does not override the saved prompt gate"
+    grep -qF 'prompt.md instruction to retry any failed agent start.' "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file startup rule does not override the saved retry rule"
 done
 
 # Launch refresh must preserve unfinished monitoring records.

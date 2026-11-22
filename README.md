@@ -411,9 +411,14 @@ after resume or review. Kinds without a listed tier get no extra flags.
 bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
 unless the user asks for yolo and confirms the exact flag and the protections it removes.
 Pi has no permission modes: `HELPER_PERMISSION` is accepted and ignored for
-Pi, and Lantern never passes any approval-bypass flag to it. A Claude folder
-trust card that highlights `No, exit` gets Down, then Enter only when the
-marker is on `Yes, I trust this folder`. An older card still gets one Enter.
+Pi, and Lantern never passes any approval-bypass flag to it.
+
+Lantern can clear startup screens on a seat it just opened. Examples
+include trust for that exact workspace, a new chat confirmation, and a
+welcome screen. It reads the exact pane before each key and checks the
+result. It reports login, account, quota, payment, tool permission, and
+other blocks that need a decision. Cutoff recovery for an existing run
+keeps its separate login restart procedure.
 
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok", "Grok Build", and
@@ -671,7 +676,8 @@ from its home tab and raises only decisions that need you.
 For `landable loop` and `parallel pack`, omit `merge when clean` to stop at a
 landable PR unless you already gave merge authority for that run. A sweep, harvest, or stage never grants merge authority.
 Lantern never merges or edits product repositories. It never prompts a working
-chat. A login picker gets one exact process restart, with no input keys.
+chat. During cutoff recovery, a login picker gets one exact process
+restart with the recorded resume arguments and no input keys.
 Lantern grants routine permissions within the selected run's scope. It reads
 the blocked prompt, selects a visible allow once option, and checks progress.
 It does not enable broad bypass settings or approve work outside that scope.
