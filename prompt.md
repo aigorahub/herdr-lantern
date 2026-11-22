@@ -507,10 +507,12 @@ words name that task.
      Wait about two seconds after each key, then read again. A move to the
      intended selection, an entered answer, or a changed or cleared blocker
      counts as progress. Before Enter, verify the intended choice or typed
-     answer. Move off an exit default first. If a recognized startup yes/no
-     question does not echo its answer, one Enter may follow the
-     answer key after a fresh read confirms the same active question. This
-     answer key counts as progress. Otherwise stop on no progress. Stop
+     answer, except for the one submitting Enter on a non-echoing yes/no
+     question below. Move off an exit default first. If a recognized startup
+     yes/no question does not echo its answer, one Enter may follow the
+     answer key after a fresh read confirms the same active question, with no
+     visible answer required. This answer key counts as progress. Otherwise
+     stop on no progress. Stop
      after three keys without clearing the same blocker. Start monitoring
      permissions only after readiness.
    - To seat: `herdr workspace create --cwd <dir> --label <label> --no-focus`

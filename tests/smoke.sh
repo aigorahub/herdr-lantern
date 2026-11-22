@@ -2155,7 +2155,8 @@ if grep -qF 'herdr-kata' "$argv_dir/state/workdir/AGENTS.md"; then
     fail "legacy launch included desktop Kata monitor"
 fi
 run_launch 'HELPER_AGENT="codex"' >/dev/null || fail "workflow injection launch"
-grep -qF "The Lantern config directory is $(helper_native_path "$argv_dir/config")" +    "$argv_dir/state/workdir/AGENTS.md" || fail "legacy launch did not expose the native config path"
+grep -qF "The Lantern config directory is $(helper_native_path "$argv_dir/config")" \
+    "$argv_dir/state/workdir/AGENTS.md" || fail "legacy launch did not expose the native config path"
 while IFS= read -r guidance_line; do
     [ -z "$guidance_line" ] || grep -qFx "$guidance_line" "$argv_dir/state/workdir/AGENTS.md" ||
         fail "legacy launch did not include the shipped guidance"
