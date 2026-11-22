@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import shlex
@@ -9,9 +10,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
+from itertools import count
 from pathlib import Path
 from unittest.mock import patch
 
@@ -544,6 +548,281 @@ class FieldStatusTests(unittest.TestCase):
                                    "note", "done", "set", "w2:p1", "Not done"],
                                   capture_output=True, text=True, check=False)
             self.assertNotEqual(proc.returncode, 0)
+
+
+class ReapTests(unittest.TestCase):
+    eligible = ("w1:p1", "done", "complete")
+    protected = (
+        ("w1:p2", "done", None, "no Complete outcome"),
+        ("w1:p3", "done", "incomplete", "outcome incomplete"),
+        ("w1:p4", "working", None, "working"),
+        ("w1:p5", "blocked", None, "blocked"),
+        ("w1:p6", "error", None, "error"),
+        ("w1:p7", "idle", "complete", "idle"),
+        ("w1:p8", "done", "complete", "pinned keep"),
+        ("w1:p9", "done", "complete", "Lantern home"),
+    )
+
+    def reviewed(self, run, state, pane, result):
+        for args in (("task", pane, pane), ("refresh",)):
+            reply = run(*args)
+            self.assertIn(reply.returncode, (0, 3), reply.stderr)
+        rows = json.loads((state / "field-status-rows.json").read_text(encoding="utf-8"))["rows"]
+        token = next(row["outcome_token"] for row in rows if row["pane_id"] == pane)
+        reply = run("outcome", pane, "--task", pane, "--token", token, "--status", result,
+                    "--evidence", "Reviewed the commit and checks", "--summary", "Verified result")
+        self.assertEqual(reply.returncode, 0, reply.stderr)
+
+    def legacy(self, *cases):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        state = root / "state"
+        state.mkdir()
+        source = root / "source.json"
+        helper = root / "fake_herdr.py"
+        log = root / "closed"
+        reads = root / "agent-reads"
+        log.touch()
+        reads.write_text("0", encoding="utf-8")
+        helper.write_text(textwrap.dedent("""\
+            import json
+            import os
+            import sys
+            from pathlib import Path
+
+            root = Path(__file__).parent
+            data = json.loads((root / "source.json").read_text(encoding="utf-8"))
+            args = sys.argv[1:]
+            if args in (["tab", "list"], ["agent", "list"], ["workspace", "list"]):
+                key = args[0] + "s"
+                if key == "agents":
+                    counter = root / "agent-reads"
+                    count = int(counter.read_text(encoding="utf-8"))
+                    counter.write_text(str(count + 1), encoding="utf-8")
+                    if count and data.get("changed"):
+                        data["agents"][0]["completion_seq"] += 1
+                result = {key: data[key]}
+            elif args[:3] == ["pane", "process-info", "--pane"] and len(args) == 4:
+                pane = args[3]
+                result = {"process_info": {"pane_id": pane, "shell_pid": 10,
+                          "foreground_processes": data["foreground"][pane]}}
+            elif args[:2] == ["pane", "close"] and len(args) == 3:
+                if os.environ.get("HERDR_HELPER_OK") != "1":
+                    sys.exit("missing wrapper approval")
+                with (root / "closed").open("a", encoding="utf-8") as closed:
+                    print(args[2], file=closed)
+                if data.get("empty_close"):
+                    sys.exit(0)
+                result = {}
+            else:
+                sys.exit("unexpected Fake Herdr arguments: " + repr(args))
+            print(json.dumps({"result": result}))
+            """), encoding="utf-8")
+        fake = root / "herdr"
+        command = " ".join(shlex.quote(path.as_posix()) for path in (Path(sys.executable), helper))
+        fake.write_bytes(f'#!/bin/sh\nexec {command} "$@"\n'.encode("utf-8"))
+        fake.chmod(0o755)
+        base = [sys.executable, str(BIN / "field_status.py"), "--state-dir", str(state),
+                "--herdr", str(fake), "--plain"]
+        env = os.environ.copy()
+        env.pop("HERDR_HELPER_OK", None)
+
+        def run(*args):
+            return subprocess.run([*base, *args], capture_output=True, text=True, encoding="utf-8",
+                                  timeout=15, env=env)
+
+        data = {"tabs": [], "agents": [], "workspaces": [{"workspace_id": "w1", "label": "Local"}],
+                "foreground": {}}
+        for pane, lifecycle, _ in cases:
+            tab = pane.replace(":p", ":t")
+            data["tabs"].append({"tab_id": tab, "workspace_id": "w1", "label": f"Helper {pane}"})
+            data["agents"].append({"tab_id": tab, "pane_id": pane, "terminal_id": f"term-{pane}",
+                                   "agent": "codex", "name": "Sol Reviewer", "agent_status": lifecycle,
+                                   "state_change_seq": 1, "completion_seq": 1})
+            data["foreground"][pane] = [{"pid": 11, "name": "codex", "argv": ["codex"]}]
+
+        def update():
+            source.write_text(json.dumps(data), encoding="utf-8")
+            reads.write_text("0", encoding="utf-8")
+
+        update()
+        status.write_json(state / "views.json", {"home_pane_id": "w1:p9"})
+        for pane, _, outcome in cases:
+            if outcome:
+                self.reviewed(run, state, pane, outcome)
+        if any(pane == "w1:p8" for pane, _, _ in cases):
+            self.assertEqual(run("note", "keep", "set", "w1:p8", "Retain this helper").returncode, 0)
+        return run, data, update, log
+
+    def assert_protected(self, output):
+        lines = output.splitlines()
+        for pane, _, _, reason in self.protected:
+            with self.subTest(protected=pane):
+                self.assertTrue(any(line.startswith(f"skipped {pane} ") and line.endswith(f": {reason}")
+                                    for line in lines), output)
+
+    def test_reap_dry_run_closes_nothing(self):
+        run, _, _, closed = self.legacy(self.eligible, *(case[:3] for case in self.protected))
+        reply = run("reap")
+        self.assertEqual(reply.returncode, 0, reply.stderr)
+        self.assertIn("finished agents open: 5", reply.stdout)
+        offered = [line.split()[2] for line in reply.stdout.splitlines() if line.startswith("would close ")]
+        self.assertEqual(offered, ["w1:p1"])
+        self.assert_protected(reply.stdout)
+        self.assertEqual(closed.read_text(encoding="utf-8"), "")
+
+    def test_reap_yes_closes_only_done_complete_agents(self):
+        run, data, update, closed = self.legacy(self.eligible, *(case[:3] for case in self.protected))
+        data["empty_close"] = True
+        data["foreground"]["w1:p1"].append({"pid": 10, "argv": ["-zsh"]})
+        update()
+        reply = run("reap", "--yes")
+        self.assertEqual(reply.returncode, 0, reply.stderr)
+        self.assertIn("closed w1:p1 ", reply.stdout)
+        self.assert_protected(reply.stdout)
+        self.assertEqual(closed.read_text(encoding="utf-8").splitlines(), ["w1:p1"])
+
+    def test_reap_yes_with_pane_closes_only_the_named_helper(self):
+        run, _, _, closed = self.legacy(self.eligible, ("w1:p2", "done", "complete"),
+                                         ("w1:p3", "done", None))
+        reply = run("reap", "--pane", "w1:p1", "--pane", "w1:p3", "--pane", "missing", "--yes")
+        self.assertEqual(reply.returncode, 0, reply.stderr)
+        self.assertIn("would close w1:p2 ", reply.stdout)
+        self.assertIn("skipped w1:p3: no Complete outcome", reply.stdout)
+        self.assertIn("skipped missing: not found", reply.stdout)
+        self.assertEqual(closed.read_text(encoding="utf-8").splitlines(), ["w1:p1"])
+
+    def test_reap_yes_keeps_a_done_helper_whose_pane_runs_another_program(self):
+        run, data, update, closed = self.legacy(self.eligible)
+        for pid, name, argv in ((11, "vim", ["vim", "notes.md"]), (11, "codex-notes", ["codex-notes"]),
+                                (10, "sh", ["sh"]), (11, "node", ["node", "/repo/codex.js"])):
+            with self.subTest(program=name):
+                data["foreground"]["w1:p1"] = [{"pid": pid, "name": name, "argv": argv}]
+                update()
+                reply = run("reap", "--yes")
+                self.assertEqual(reply.returncode, 0, reply.stderr)
+                self.assertIn("foreground is not the agent", reply.stdout)
+                self.assertEqual(closed.read_text(encoding="utf-8"), "")
+
+    def test_reap_yes_skips_a_pane_that_changed_since_listing(self):
+        run, data, update, closed = self.legacy(self.eligible)
+        data["changed"] = True
+        update()
+        reply = run("reap", "--yes")
+        self.assertEqual(reply.returncode, 0, reply.stderr)
+        self.assertIn("skipped w1:p1 Sol Reviewer: changed since listing", reply.stdout)
+        self.assertEqual(closed.read_text(encoding="utf-8"), "")
+
+    def desktop_reap(self, scenario, command):
+        import desktop
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            cwd = str(state.resolve())
+            panes = {"target": "t1", "parent": "t2", "bridge": "t3", "home": "t4", "other-home": "t5"}
+            if scenario in {"missing-spaces", "null-spaces", "missing-tab", "null-close"}:
+                panes["next"] = "t7"
+            terminals = {}
+            for pid, address in enumerate(panes.values(), 100):
+                terminals[address] = {"address": address, "pid": pid, "cwd": cwd, "state": "live",
+                                      "status": {"app": "codex", "state": "done"}, "status_ms": 1,
+                                      "foreground": {"pid": pid, "name": "codex", "argv": ["codex"]}}
+            terminals["t3"]["foreground"]["argv"] = [str(state.resolve() / "herdr"), "terminal", "attach", "legacy"]
+            terminals["t5"]["labels"] = {"lantern.desktop": "home"}
+            terminals["t6"] = {"address": "t6", "state": "live", "parent": "t2"}
+            if scenario == "wrapper":
+                terminals["t1"]["foreground"].update(
+                    name="zsh", argv=["/bin/zsh", "-ic", '"$@"; exec "$0" -i', "/bin/zsh", "codex", "--no-daemon"])
+            if scenario == "cursor":
+                terminals["t1"]["status"]["app"] = "cursor"
+                terminals["t1"]["foreground"].update(
+                    name="node", argv=[str(state / "agent"), "--use-system-ca", "/app/index.js"])
+            sources = {str(state.resolve() / "herdr"): {
+                "legacy": {"pane_id": "legacy-pane", "agent": "codex", "agent_status": "done"}}}
+            status.write_json(state / "home.json", {"terminal": "t4"})
+
+            def inventory():
+                tabs = [{"id": pane, "name": "Lantern" if pane == "other-home" else pane,
+                         "terminals": [{"pane": pane, "terminal": address}]} for pane, address in panes.items()]
+                return {"spaces": [{"id": "space1", "name": "Local", "machine": None, "tabs": tabs}]}
+
+            closes = []
+            inventory_reads = 0
+
+            def external(argv, timeout=15):
+                nonlocal inventory_reads
+                if argv == [desktop.APP, "ls"]:
+                    layout = inventory()
+                    inventory_reads += 1
+                    if inventory_reads == 1:
+                        if scenario == "missing-spaces":
+                            return "{}"
+                        if scenario == "null-spaces":
+                            return '{"spaces": null}'
+                        if scenario == "missing-tab":
+                            del layout["spaces"][0]["tabs"][0]["id"]
+                        if scenario == "moved":
+                            layout["spaces"][0]["tabs"][0]["id"] = "moved-tab"
+                    return json.dumps(layout)
+                if argv[:3] == [desktop.APP, "do", "pane.close"]:
+                    pane = json.loads(argv[3])["pane"]
+                    closes.append(pane)
+                    if scenario != "pending":
+                        del panes[pane]
+                    return "null" if scenario == "null-close" and pane == "target" else "{}"
+                raise AssertionError(argv)
+
+            def snapshot(_timeout):
+                return desktop.World({}, desktop.snapshot(inventory(), terminals, sources), terminals)
+
+            def run(*args):
+                argv = [str(BIN / "field_status.py"), "--state-dir", str(state), "--herdr", str(desktop.READER),
+                        "--plain", *args]
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with patch.object(sys, "argv", argv), redirect_stdout(stdout), redirect_stderr(stderr):
+                    try:
+                        result = status.main()
+                    except SystemExit as exc:
+                        result = exc.code
+                return subprocess.CompletedProcess(argv, result, stdout.getvalue(), stderr.getvalue())
+
+            with patch.object(desktop, "reads", return_value=True), patch.object(desktop, "read_world", snapshot), \
+                    patch.object(desktop, "run", external):
+                for pane in panes:
+                    self.reviewed(run, state, pane, "complete")
+                if scenario == "pending":
+                    with patch.object(status.time, "monotonic", side_effect=count(step=0.25)), \
+                            patch.object(status.time, "sleep"):
+                        reply = run(*command)
+                else:
+                    reply = run(*command)
+            return reply, closes
+
+    def test_reap_desktop_closes_with_pane_close_and_protects_home_children_and_bridges(self):
+        cases = (
+            ("direct", 0, ["target"], "closed target "),
+            ("wrapper", 0, ["target"], "closed target "),
+            ("cursor", 0, ["target"], "closed target "),
+            ("moved", 0, [], "changed since listing"),
+            ("missing-spaces", 1, ["next"], "failed target "),
+            ("null-spaces", 1, ["next"], "failed target "),
+            ("missing-tab", 1, ["next"], "failed target "),
+            ("null-close", 1, ["target", "next"], "failed target "),
+            ("pending", 1, ["target"], "close still pending"),
+        )
+        for scenario, code, expected_closes, phrase in cases:
+            with self.subTest(scenario=scenario):
+                reply, closes = self.desktop_reap(scenario, ("reap", "--yes"))
+                self.assertEqual(reply.returncode, code, reply.stderr)
+                self.assertEqual(closes, expected_closes)
+                self.assertIn(phrase, reply.stdout)
+                for pane, reason in (("parent", "running child t6"), ("bridge", "bridged legacy pane"),
+                                     ("home", "Lantern home"), ("other-home", "Lantern home")):
+                    self.assertTrue(any(line.startswith(f"skipped {pane} ") and line.endswith(f": {reason}")
+                                        for line in reply.stdout.splitlines()), reply.stdout)
+                if "next" in expected_closes:
+                    self.assertIn("closed next ", reply.stdout)
 
 
 if __name__ == "__main__":
