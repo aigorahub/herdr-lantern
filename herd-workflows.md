@@ -209,7 +209,7 @@ Do not pass native Windows paths unchanged into WSL2.
 
 Reuse Elves saved role routes and substitutes when the user names no team.
 A named Lantern team is an explicit route choice, but repository vetoes and
-repository rules still outrank it. Keep Elves provider qualification and
+safety rules still outrank it. Keep Elves provider qualification and
 respect explicit user models, counts, scope, and stop points. State the
 lead, helper
 assignments, expected result, and capacity at kickoff. A model comparison

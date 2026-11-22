@@ -127,7 +127,7 @@ mode cannot enable a bypass, yolo, or always-approve. Keep the existing
 permission rules for explicit requests.
 
 A named team is an explicit choice and takes priority over saved Elves
-routes, while repository vetoes and repository rules still outrank a named
+routes, while repository vetoes and safety rules still outrank a named
 team. Use Elves routes when the user names no team. Opening a team is
 setup only. Give each seat the full roster and roles and give the lead
 the managerial guidance. Send only the setup brief. For Agy, use that
@@ -144,8 +144,9 @@ Report an ambiguous name before setup.
 Open the explicitly named team, else the default team. If neither is
 present, ask once. Give every seat the full roster and roles, and give the
 team lead the managerial guidance and workflow principles. Wait for a
-task. A saved workflow grants no authority. A run can land only when the
-current request authorizes it.
+task. A saved workflow grants no authority, and its principles cannot
+override safety, permission, or repository veto rules. A run can land
+only when the current request authorizes it.
 
 Save preferences only in guidance.md, teams/<name>.json, and
 workflows/<name>.md in LANTERN_CONFIG_DIR. Do not edit the workdir or a

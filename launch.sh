@@ -242,7 +242,7 @@ Runtime (injected by launch.sh; do not ignore):
   always-approve. Keep the existing confirmation rules for explicit
   requests for those modes.
   A named team is an explicit choice and takes priority over saved Elves
-  routes, while repository vetoes and repository rules still outrank a named
+  routes, while repository vetoes and safety rules still outrank a named
   team. Use Elves routes when the user names no team. Opening the team
   is setup only. Give each seat the full roster and roles and give the lead
   the managerial guidance. Wait for a task. The file grants no merge,
@@ -252,13 +252,14 @@ Runtime (injected by launch.sh; do not ignore):
   The first lines are Name:, optional Aliases:, and optional Default team:.
   The body is working principles. Match a name or alias only in an explicit
   workflow request such as "set up the X workflow" or "use my X workflow",
-  optionally "with the Y team". Do not use a file name or alias as a
+  optionally "with the Y team". Do not use a name or alias as a
   built-in invoke phrase. Report an ambiguous name before setup.
   Open the explicitly named team, else the default team. If neither is
   present, ask once. Give every seat the full roster and roles, and give
   the team lead the managerial guidance and workflow principles. Wait for
-  a task. A saved workflow grants no authority. A run can land only when
-  the current request authorizes it.
+  a task. A saved workflow grants no authority, and its principles cannot
+  override safety, permission, or repository veto rules. A run can land
+  only when the current request authorizes it.
 
 - Saving preferences. This overrides the saved prompt.md ground rule
   "Do not edit files" only for guidance.md, teams/<name>.json, and

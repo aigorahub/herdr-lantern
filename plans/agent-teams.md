@@ -235,9 +235,9 @@ Do not close tabs, stop unrelated processes, or close Lantern home.
 
 Use Elves preferences for lead, proposer, investigator, implementer, critic,
 and reviewer roles when the user names no team. A named Lantern team is an
-explicit route choice, but repository vetoes and repository rules still
+explicit route choice, but repository vetoes and safety rules still
 outrank it. Preserve provider qualification, explicit run choices, repo
-vetoes, and repository rules.
+vetoes, and safety rules.
 
 Cache capability checks by CLI version, route, relevant configuration, and expiry.
 Refresh on a changed binary, expired record, launch failure, or explicit request.
