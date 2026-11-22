@@ -127,7 +127,8 @@ mode cannot enable a bypass, yolo, or always-approve. Keep the existing
 permission rules for explicit requests.
 
 A named team is an explicit choice and takes priority over saved Elves
-routes. Use Elves routes when the user names no team. Opening a team is
+routes, while repository vetoes and repository rules still outrank a named
+team. Use Elves routes when the user names no team. Opening a team is
 setup only. Give each seat the full roster and roles and give the lead
 the managerial guidance. Send only the setup brief. For Agy, use that
 brief as the initial interactive prompt. Wait for a task. The file grants no merge,
@@ -160,9 +161,9 @@ entire read, change, and replace,
 including path checks. Verify that the destination is inside the real
 config directory. Refuse a symbolic link at the target or its containing
 directory. Create the preference subdirectory if needed. Write a temporary
-file in the same directory and rename it
-into place. Remove only your own lock when the operation ends, even on
-error. Use this procedure for all preference writes.
+file in the same directory and rename it into place. On failure, remove any
+temporary file you created. Remove only your own lock when the operation
+ends, even on error. Use this procedure for all preference writes.
 
 Field Status and Plan Usage run beside this chat. They include native and
 bridged legacy agents. Use `$LANTERN_DESKTOP_COMMAND open` to show this chat.

@@ -208,9 +208,10 @@ and credential paths inside that environment before configuring callbacks.
 Do not pass native Windows paths unchanged into WSL2.
 
 Reuse Elves saved role routes and substitutes when the user names no team.
-A named Lantern team is an explicit route choice. Keep Elves provider
-qualification and respect explicit user models, counts, scope, and stop
-points. State the lead, helper
+A named Lantern team is an explicit route choice, but repository vetoes and
+repository rules still outrank it. Keep Elves provider qualification and
+respect explicit user models, counts, scope, and stop points. State the
+lead, helper
 assignments, expected result, and capacity at kickoff. A model comparison
 without a count starts with one lead and two proposers. Helpers may request
 help but cannot add seats, acquire write access, or enlarge their assignment.
