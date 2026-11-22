@@ -135,6 +135,12 @@ def snapshot(binary: str, timeout: float) -> tuple[list[dict], list[dict], list[
             herdr_list(binary, "workspace", timeout))
 
 
+class HerdrTimeout(RuntimeError):
+    # Plan Usage can retain a verified binding when only the Herdr read timed out.
+    checked = None
+    provider = None
+
+
 def control(binary: str, args: list[str], timeout: float) -> dict:
     """Use Lantern's gated Herdr wrapper for layout changes."""
     command = herdr_command(binary, args)
@@ -147,7 +153,7 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
                               encoding="utf-8", errors="replace", timeout=timeout,
                               env=env, check=False)
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"Herdr {' '.join(args[:2])} timed out after {timeout:g}s") from None
+        raise HerdrTimeout(f"Herdr {' '.join(args[:2])} timed out after {timeout:g}s") from None
     except OSError as exc:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} unavailable: {exc}") from exc
     if proc.returncode:

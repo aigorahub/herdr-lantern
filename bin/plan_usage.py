@@ -44,6 +44,9 @@ def routed(hint: str):
         if hint == "fugu":
             exc.provider = "fugu"
         raise
+    except field.HerdrTimeout as exc:
+        exc.provider = "fugu" if hint == "fugu" else None
+        raise
     except (OSError, RuntimeError, ValueError, TypeError, KeyError):
         raise sources.SourceError("Account unknown", provider=hint) from None
 
@@ -72,17 +75,27 @@ def inspect_process(provider: str, before: dict) -> dict:
     return {"process": process, "start": start, "scope": scope, "hint": hint}
 
 
+def inspection_identity(checked: dict) -> dict:
+    process = checked["process"]
+    return {"pid": process["pid"], "start": checked["start"],
+            "argv": process["argv"], "executable": process["executable"]}
+
+
 def confirm_process(checked: dict, read_after) -> dict:
     """Accept a scope only if a later read still shows the same process and account files."""
     process, scope, pid = checked["process"], checked["scope"], checked["process"]["pid"]
     with routed(checked["hint"]):
-        after = read_after()
+        try:
+            after = read_after()
+        except field.HerdrTimeout as exc:
+            exc.checked = checked
+            raise
         current = next((p for p in after.get("foreground_processes", []) if p.get("pid") == pid), {})
         if (current.get("argv") != process["argv"] or runtime.process_start(pid) != checked["start"]
                 or runtime.process_executable(pid) != process["executable"]
                 or sources.current_stamp(scope) != scope["stamp"]):
             raise sources.SourceError("Account unknown")
-    return scope
+    return dict(scope, process_identity=inspection_identity(checked))
 
 
 def verified_scope(binary: str, provider: str, agent: dict) -> dict:
@@ -113,6 +126,37 @@ def confirm_on(second: desktop.World, first: desktop.World, pane: str, checked: 
     return confirm_process(checked, read_after)
 
 
+def stamp_matches(scope: dict) -> bool:
+    try:
+        return sources.current_stamp(scope) == scope["stamp"]
+    except CHECK_ERRORS:
+        return False
+
+
+def association_matches(record: dict | None, previous: dict, route: tuple | None, checked: dict | None) -> bool:
+    if record is None or record["key"] not in previous or record["route"] != route:
+        return False
+    identity = record["identity"]
+    if identity is None:
+        return False
+    if checked is not None and (checked["scope"]["key"] != record["key"]
+                                or inspection_identity(checked) != identity):
+        return False
+    pid = identity["pid"]
+    try:
+        return (runtime.process_start(pid) == identity["start"]
+                and runtime.process_executable(pid) == identity["executable"])
+    except Exception:
+        return False
+
+
+def desktop_confirmation_timeout(error: field.HerdrTimeout, checked: dict) -> field.HerdrTimeout:
+    result = field.HerdrTimeout(str(error))
+    result.checked = checked
+    result.provider = "fugu" if checked["hint"] == "fugu" else None
+    return result
+
+
 class Collector:
     def __init__(self, state: Path, shared: Path, binary: str, server: dict, owner_fd: int | None = None):
         self.state, self.shared, self.binary, self.server = state, shared, binary, server
@@ -137,6 +181,9 @@ class Collector:
                                for row in cached.get("rows", [])]
         # Cached quota stays hidden until the current binding is verified.
         self.bindings = {}
+        self.associations = {}
+        self.epochs = {}
+        self.configured_keys = set()
         self.notices = {}
         self.scan_error = False
         self.validated = False
@@ -163,7 +210,10 @@ class Collector:
         except (RuntimeError, OSError, ValueError):
             self.scan_error = True
             return
+        previous = self.bindings
         bindings, notices, checks = {}, {}, []
+        associations = {}
+        confirmation_failed = confirmation_timed_out = False
         for provider, rows in eligible(tabs, agents).items():
             # This branch must precede every process and dependency inspection.
             if provider not in sources.SUPPORTED:
@@ -186,48 +236,103 @@ class Collector:
                 attempt(lambda: self.adopt(second.server))
                 self.scan_error = True
                 return
-            if isinstance(second, Exception):
-                # The first read already showed which accounts may have changed. Hide those
-                # before keeping the rest as stale; untabbed bindings had no check this pass.
-                inspected = {result["scope"]["key"] for result in results if not isinstance(result, Exception)}
-                dropped = {key for key, entry in self.bindings.items() if entry["tabs"] and key not in inspected}
-                self.bindings = {key: entry for key, entry in self.bindings.items() if key not in dropped}
-                self.cache = {key: value for key, value in self.cache.items() if key not in dropped}
-                self.scan_error = True
-                return
-            results = [result if isinstance(result, Exception) else
-                       attempt(lambda a=agent, r=result: confirm_on(second, world, a["pane_id"], r))
-                       for (_, agent), result in zip(checks, results)]
+            confirmation_failed = isinstance(second, Exception)
+            confirmation_timed_out = isinstance(second, field.HerdrTimeout)
+            if confirmation_timed_out:
+                results = [result if isinstance(result, Exception) else desktop_confirmation_timeout(second, result)
+                           for result in results]
+                open_tabs = {tab.get("tab_id") for tab in tabs if tab.get("tab_id")}
+                notices = {}
+                for notice, old_tabs in self.notices.items():
+                    remaining = old_tabs & open_tabs
+                    if remaining or not old_tabs:
+                        notices[notice] = remaining
+            elif not confirmation_failed:
+                results = [result if isinstance(result, Exception) else
+                           attempt(lambda a=agent, r=result: confirm_on(second, world, a["pane_id"], r))
+                           for (_, agent), result in zip(checks, results)]
         for (provider, agent), result in zip(checks, results):
-            if isinstance(result, sources.SourceError):
-                notices.setdefault((result.provider or provider, result.state), set()).add(agent["tab_id"])
+            tab, pane = agent["tab_id"], agent["pane_id"]
+            association = (tab, pane, agent["agent"])
+            record = self.associations.get(association)
+            is_timeout = isinstance(result, field.HerdrTimeout)
+            route = None
+            if world is not None and (is_timeout or not isinstance(result, Exception)):
+                route = desktop.pane_route(world, pane)
+            if confirmation_failed and not confirmation_timed_out:
+                if isinstance(result, Exception) or not association_matches(record, previous, route, result):
+                    continue
+                scope = previous[record["key"]]["scope"]
+            elif (is_timeout and record is not None and record["timeouts"] == 0
+                  and association_matches(record, previous, route, result.checked)
+                  and stamp_matches(previous[record["key"]]["scope"])):
+                scope = previous[record["key"]]["scope"]
+                record = dict(record, timeouts=1)
             elif isinstance(result, Exception):
-                notices.setdefault((provider, "Account unknown"), set()).add(agent["tab_id"])
+                notice_provider = result.provider if isinstance(result, (sources.SourceError, field.HerdrTimeout)) else None
+                state = result.state if isinstance(result, sources.SourceError) else "Account unknown"
+                notices.setdefault((notice_provider or provider, state), set()).add(tab)
+                continue
             else:
-                entry = bindings.setdefault(result["key"], {"scope": result, "tabs": set()})
-                entry["tabs"].add(agent["tab_id"])
+                scope = dict(result)
+                identity = scope.pop("process_identity", None)
+                record = {"key": scope["key"], "identity": identity, "route": route, "timeouts": 0}
+            associations[association] = record
+            entry = bindings.setdefault(scope["key"], {"scope": scope, "tabs": set()})
+            entry["tabs"].add(tab)
+        self.associations = associations
+
+        if confirmation_failed:
+            for key, entry in previous.items():
+                if key in bindings:
+                    continue
+                if not entry["tabs"] or (key in self.configured_keys and stamp_matches(entry["scope"])):
+                    bindings[key] = {"scope": entry["scope"], "tabs": set()}
+                else:
+                    self.cache.pop(key, None)
+            self.replace_bindings(bindings)
+            if confirmation_timed_out:
+                self.notices = notices
+            self.scan_error = True
+            return
+
+        configured_keys = set()
         try:
             configured = sources.configured_fugu_scope(os.environ)
             if configured:
                 bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
+                configured_keys.add(configured["key"])
         except sources.SourceError as exc:
             notices.setdefault(("fugu", exc.state), set())
         try:
             configured = sources.configured_teamclaude_scope(os.environ)
             if configured:
                 bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
+                configured_keys.add(configured["key"])
         except sources.SourceError as exc:
             notices.setdefault(("teamclaude", exc.state), set())
-        self.bindings, self.notices = bindings, notices
+        self.configured_keys = configured_keys
+        self.replace_bindings(bindings)
+        self.notices = notices
         self.cache = {key: self.cache[key] for key in bindings if key in self.cache}
         self.validated, self.scan_error = True, False
         self.prior_rows, self.prior_membership = [], []
+
+    def replace_bindings(self, bindings: dict) -> None:
+        # A returning tab set must not make work from before a drop valid again.
+        for key, entry in self.bindings.items():
+            current = bindings.get(key)
+            if current is None or entry["tabs"] - current["tabs"]:
+                self.epochs[key] = self.epochs.get(key, 0) + 1
+        self.bindings = bindings
 
     def adopt(self, current: dict) -> None:
         """Forget every binding when the core's lifetime changes; refuse another endpoint."""
         if current == self.server:
             return
-        self.bindings, self.notices, self.cache = {}, {}, {}
+        self.replace_bindings({})
+        self.associations, self.notices, self.cache = {}, {}, {}
+        self.configured_keys.clear()
         self.prior_rows, self.prior_membership = [], []
         self.validated = False
         if current["key"] != self.server["key"]:
@@ -262,7 +367,8 @@ class Collector:
                     self.cache[key]["result"] = old["result"]
 
     def generation(self, entry: dict) -> str:
-        return runtime.digest([self.server, entry["scope"]["key"], sorted(entry["tabs"])])
+        key = entry["scope"]["key"]
+        return runtime.digest([self.server, key, sorted(entry["tabs"]), self.epochs.get(key, 0)])
 
     def schedule(self, force: bool = False) -> None:
         if not self.validated or self.scan_error:

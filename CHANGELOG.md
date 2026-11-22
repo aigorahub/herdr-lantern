@@ -32,6 +32,10 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Fixed
 
+- Plan Usage keeps a tab's last verified account binding, and any usage read
+  already in progress, through one Herdr read timeout. A second timeout in a
+  row, or any account, process or file change, still drops it at once, and a
+  read started before a drop is never applied afterward (#87).
 - A Claude usage timeout, nonzero exit, unparseable result, error flag, or
   unrecognized usage text no longer blocks seating. Preflight still reads
   usage, on its own 10 second timeout, and reports `quota: unknown` with a
