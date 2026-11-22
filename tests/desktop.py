@@ -248,7 +248,7 @@ class DesktopTests(unittest.TestCase):
                 desktop.read_config(path)
             self.assertFalse(marker.exists())
 
-    def test_kata_opt_in_adds_only_desktop_monitor_instructions(self):
+    def test_desktop_prompt_includes_manager_rules_with_or_without_kata(self):
         with tempfile.TemporaryDirectory() as tmp:
             home, state = Path(tmp) / "home", Path(tmp) / "state"
             config = home / ".config/herdr/plugins/config/aigora.lantern"
@@ -265,6 +265,7 @@ class DesktopTests(unittest.TestCase):
                     desktop.chat()
                     prompt = execute.call_args.args[1][1]
                     self.assertIn((desktop.ROOT / "guidance.md").read_text(encoding="utf-8"), prompt)
+                    self.assertIn((desktop.ROOT / "manager-duty.md").read_text(encoding="utf-8"), prompt)
                     self.assertEqual(os.environ["LANTERN_CONFIG_DIR"], str(config.resolve()))
                     settings = prompt.split("\nSaved settings: ", 1)[1].split("\n", 1)[0]
                     self.assertNotIn("HELPER_KATA_PROJECT", json.loads(settings))

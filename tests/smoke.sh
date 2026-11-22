@@ -2165,7 +2165,9 @@ argv_is() {
 }
 
 printf '%s\n' 'Saved custom prompt' 'Do not send y or Enter yourself for those startup gates.' \
-    'If an agent start fails, wait two seconds and retry once.' >"$argv_dir/config/prompt.md"
+    'If an agent start fails, wait two seconds and retry once.' \
+    'Stop and report file permissions. Start monitoring permissions only after readiness.' \
+    >"$argv_dir/config/prompt.md"
 run_launch 'HELPER_AGENT="codex"
 HELPER_KATA_PROJECT="example-project"' >/dev/null
 [ -f "$argv_dir/state/workdir/AGENTS.md" ] || fail "legacy launch did not render AGENTS.md with Kata project"
@@ -2179,6 +2181,7 @@ while IFS= read -r guidance_line; do
     [ -z "$guidance_line" ] || grep -qFx "$guidance_line" "$argv_dir/state/workdir/AGENTS.md" ||
         fail "legacy launch did not include the shipped guidance"
 done <"$root/guidance.md"
+[ -s "$root/manager-duty.md" ] || fail "missing shipped manager rules"
 for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rules/lantern.md; do
     for invoke in 'ship high ROI issue fixes in <repos>' \
         'ship performance improvements in <repos>' 'ship <task> in <repo>' \
@@ -2206,6 +2209,12 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
         fail "$rendered_file startup rule does not override the saved prompt gate"
     grep -qF 'prompt.md instruction to retry any failed agent start.' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file startup rule does not override the saved retry rule"
+    grep -qF 'permission grants to selected runs, delay them until readiness' "$argv_dir/state/workdir/$rendered_file" ||
+        fail "$rendered_file does not override the saved permission limits"
+    while IFS= read -r duty_line; do
+        [ -z "$duty_line" ] || grep -qFx "$duty_line" "$argv_dir/state/workdir/$rendered_file" ||
+            fail "$rendered_file did not include the shipped manager rules"
+    done <"$root/manager-duty.md"
 done
 
 # Launch refresh must preserve unfinished monitoring records.
@@ -2628,5 +2637,7 @@ $model_test_python "$root/tests/models.py" || fail "model regression tests"
 $model_test_python "$root/tests/gemini_models.py" || fail "Gemini model regression tests"
 $model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests"
 $model_test_python "$root/tests/field_status.py" || fail "Field Status tests"
+$model_test_python "$root/tests/desktop.py" DesktopTests.test_desktop_prompt_includes_manager_rules_with_or_without_kata ||
+    fail "desktop launch did not include the shipped manager rules"
 $model_test_python "$root/tests/plan_usage.py" || fail "Plan Usage tests"
 $model_test_python "$root/tests/session_cleanup.py" || fail "Lantern session cleanup tests"

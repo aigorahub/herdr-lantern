@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.0** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -417,10 +417,12 @@ Lantern can clear startup screens on a seat it just opened. Examples
 include trust for that exact workspace, a new chat confirmation, and a
 welcome screen. It reads the exact pane before each key and checks the
 result. On both paths, readiness requires a fresh read of the exact pane
-that shows the usable harness input prompt with no active dialog. It
-reports login, account, quota, payment, tool permission, and
-other blocks that need a decision. Cutoff recovery for an existing run
-keeps its separate login restart procedure.
+that shows the usable harness input prompt with no active dialog. The
+manager grants routine tool, command, file, and network permissions
+needed to start the seat in its configured state in that workspace.
+It reports blocks that need a decision, such as login, account choice,
+quota, payment, or requests outside that scope. Cutoff recovery for an
+existing run keeps its separate login restart procedure.
 
 Seat language selects the CLI and model separately. "Cursor" uses `--kind
 cursor` with the live Cursor Sol default. Bare "Grok", "Grok Build", and
@@ -653,11 +655,13 @@ See the [team rules](herd-workflows.md#teams-on-one-task) and
 
 ### Managerial guidance
 
-Lantern gives each team lead the shipped managerial guidance and your
-adjustments. Add your adjustments to `guidance.md` in the Lantern config
-directory. Lantern reads this optional file each time it sets up a team,
+Lantern gives each team lead the roster, shipped manager rules, and
+managerial guidance with your adjustments. Add your adjustments to
+`guidance.md` in the Lantern config directory. Lantern reads this optional
+file each time it sets up a team,
 so a change takes effect without restarting Lantern. The file changes
-management defaults only. Safety, permission, and authority rules still apply.
+management defaults only. The shipped manager rules, safety, permissions,
+and authority still apply.
 Say “remember that as manager guidance” to add a line from chat.
 
 ### Saved teams
@@ -686,8 +690,10 @@ hyphens. Start it with a letter or digit. A seat can also specify
 `notes`. Put shared notes in the top-level `coordination` field. Set
 `startup` to `ask` to report a visible startup blocker without sending keys.
 The default is `auto`. The team receives its roster and the lead receives
-the guidance. The team waits for a task. The saved team grants no authority
-to change permissions, merge, deploy, publish, or take financial action.
+the guidance and manager rules. The team waits for a task. A saved team
+cannot raise permission modes, grant permanent broad access, or authorize
+merge, deployment, publication, or financial actions. Managers grant
+routine permissions within the assigned task and role.
 
 ### Saved workflows
 
@@ -708,7 +714,8 @@ The `Aliases:` and `Default team:` lines are optional. Say “set up the focused
 review workflow” or “use my focused workflow”. Add “with the review team”
 to choose a team explicitly. Lantern uses that team or the default team.
 If neither is set, Lantern asks once. The team receives the roster, the
-lead receives the guidance and principles, and the team waits for a task.
+lead receives the guidance, manager rules, and workflow principles, and
+the team waits for a task.
 A saved name or alias only selects a workflow in an explicit workflow
 request. The file grants no authority to start work or land changes.
 
@@ -734,9 +741,12 @@ landable PR unless you already gave merge authority for that run. A sweep, harve
 Lantern never merges or edits product repositories. It never prompts a working
 chat. During cutoff recovery, a login picker gets one exact process
 restart with the recorded resume arguments and no input keys.
-Lantern grants routine permissions within the selected run's scope. It reads
-the blocked prompt, selects a visible allow once option, and checks progress.
-It does not enable broad bypass settings or approve work outside that scope.
+Lantern and its team leads keep their managed seats moving. They answer
+questions within scope, inspect stalls, and advance idle seats with work
+left. They grant routine permissions for the accepted Elves run, the
+assigned task and role, or the configured startup in the exact workspace.
+They read the prompt, choose the narrowest visible option, and verify the
+seat resumes. See the [shipped manager rules](manager-duty.md).
 Lantern never closes its home tab. See [the herd contract](herd-workflows.md).
 
 Run ownership and phase records come from the installed Elves skill. Prewalk
