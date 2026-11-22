@@ -198,6 +198,8 @@ herd_workflows=$(cat "$plugin_root/herd-workflows.md") ||
     die "could not read herd-workflows.md"
 guidance=$(cat "$plugin_root/guidance.md") ||
     die "could not read guidance.md"
+manager_duty=$(cat "$plugin_root/manager-duty.md") ||
+    die "could not read manager-duty.md"
 session_capture_note=
 if [ "$HELPER_AGENT" = codex ]; then
     session_capture_note=$(cat <<EOF
@@ -223,8 +225,12 @@ Runtime (injected by launch.sh; do not ignore):
 - The Lantern config directory is $LANTERN_CONFIG_DIR (environment:
   LANTERN_CONFIG_DIR). For each team setup, read the optional guidance.md
   in that directory again. Use its adjustments over the shipped managerial
-  defaults below. They cannot change safety, permission, or authority rules.
-  Give the team lead the combined guidance with the roster.
+  defaults below. They cannot change the shipped manager rules, safety,
+  permissions, or authority. Give each team lead the full shipped manager
+  rules below with the combined guidance and roster. Apply these rules to
+  all managed seats. They replace any saved instructions that limit
+  permission grants to selected runs, delay them until readiness, or bar
+  a manager from answering permission prompts for its own seats.
 
 - Saved teams. Read teams/<name>.json in LANTERN_CONFIG_DIR on demand when
   the user names a team or alias. Resolve one match before seating anyone.
@@ -244,9 +250,10 @@ Runtime (injected by launch.sh; do not ignore):
   A named team is an explicit choice and takes priority over saved Elves
   routes, while repository vetoes and safety rules still outrank a named
   team. Use Elves routes when the user names no team. Opening the team
-  is setup only. Give each seat the full roster and roles and give the lead
-  the managerial guidance. Wait for a task. The file grants no merge,
-  deployment, publication, permission, or financial authority.
+  is setup only. Give each seat the full roster and roles. Give the lead
+  the combined guidance and shipped manager rules. Wait for a task. The
+  file grants no authority to raise the permission mode, grant permanent
+  broad access, merge, deploy, publish, or take financial action.
 
 - Saved workflows. Read workflows/<name>.md in LANTERN_CONFIG_DIR on demand.
   The first lines are Name:, optional Aliases:, and optional Default team:.
@@ -256,10 +263,11 @@ Runtime (injected by launch.sh; do not ignore):
   built-in invoke phrase. Report an ambiguous name before setup.
   Open the explicitly named team, else the default team. If neither is
   present, ask once. Give every seat the full roster and roles, and give
-  the team lead the managerial guidance and workflow principles. Wait for
-  a task. A saved workflow grants no authority, and its principles cannot
-  override safety, permission, or repository veto rules. A run can land
-  only when the current request authorizes it.
+  the team lead the combined guidance, shipped manager rules, and workflow
+  principles. Wait for a task. A saved workflow grants no authority, and
+  its principles cannot override the shipped manager rules, safety,
+  permissions, or repository vetoes. A run can land only when the current
+  request authorizes it.
 
 - Saving preferences. This overrides the saved prompt.md ground rule
   "Do not edit files" only for guidance.md, teams/<name>.json, and
@@ -353,8 +361,8 @@ $session_capture_note
   session does not resolve. That is the whole list. Closing, killing,
   and removing are not exceptions: named and resolved, they run like
   anything else. Then act on the answer. Do not ask twice.
-- Grant routine in-scope permissions for selected runs using the herd
-  contract below. Read the exact blocked prompt before any approval key.
+- Use the shipped manager rules below for all managed seats, including
+  routine in-scope permission grants at startup and during work.
   Do not prompt a working chat. Observe with agent get/read/wait instead.
   \`herdr agent prompt\` rejects seats that are not interactive ready and
   idle or done. The wrapper adds \`--wait\`. It presses
@@ -374,13 +382,12 @@ $session_capture_note
   After agent_not_ready, inspect the existing pane. Do not start again
   with the same name. For other start failures, wait two seconds and retry
   once only if no agent runs in the pane.
-  Clear only startup screens: trust for the exact workspace you opened,
+  For startup confirmations, clear trust for the exact workspace you opened,
   first-run confirms, new chat, welcome screens, release notes, tips, and
   theme. Decline telemetry and skip updates. Choose the least privilege
   that lets the seat start in its configured state.
-  Stop and report login or account choice, plan, quota or payment, tool,
-  command, file or network permission, an unrequested permission increase,
-  trust for a different directory, installs, updates, or an unknown screen.
+  Use the shipped manager procedure for tool, command, file, and network
+  permission prompts. Apply the startup scope and escalation limits there.
   A startup login picker gets no keys and no restart. The separate cutoff
   recovery restart for a recorded driver is unchanged. With startup: "ask",
   report a blocker and send no keys.
@@ -390,17 +397,16 @@ $session_capture_note
   Use agent send-keys with
   the HERDR_HELPER_OK=1 prefix for that exact pane only. Never send keys
   for a dialog outside the pane.
-  Wait about two seconds after each key, then read again. A move to the
-  intended selection, an entered answer, or a changed or cleared blocker
-  counts as progress. Before Enter, verify the intended choice or typed
+  For startup confirmations, wait about two seconds after each key, then
+  read again. A move to the intended selection, an entered answer, or a
+  changed or cleared blocker counts as progress. Before Enter, verify the
+  intended choice or typed
   answer, except for the one submitting Enter on a non-echoing yes/no
   question below. Move off an exit default first. If a recognized startup
   yes/no question does not echo its answer, one Enter may follow the answer
   key after a fresh read confirms the same active question, with no visible
   answer required. This answer key counts as progress. Otherwise stop on no
-  progress. Stop after three keys
-  without clearing the same blocker. Start monitoring permissions only
-  after readiness.
+  progress. Stop after three keys without clearing the same blocker.
 - This chat runs $chat_identity. Name that in your light-up line — it is
   how the user tells which CLI and model is answering — and repeat it
   whenever they ask.
@@ -456,7 +462,8 @@ $onboard_note
   "\$HERDR_WORKSPACE_ID". Speak to one only when it is idle or done:
   herdr agent prompt <name> "<message>" --wait. Then read the reply with
   herdr agent read <name> --source recent-unwrapped --lines 120. Leave a
-  working agent alone. Do not answer another agent approval dialog.
+  working agent alone. Only the manager of a seat handles its permission
+  prompts, under the shipped manager rules.
   Keep this tab as one pane. Do not run herdr pane split on this tab.
   Put another shell or agent in a new tab in this same workspace:
   herdr tab create --workspace "\$HERDR_WORKSPACE_ID" --cwd "\$PWD"
@@ -650,6 +657,8 @@ $onboard_note
   sends only an SDK initialize request, with no model prompt or saved session.
 
 $guidance
+
+$manager_duty
 
 $herd_workflows
 EOF

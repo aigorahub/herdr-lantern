@@ -424,6 +424,7 @@ def chat() -> None:
     prompt += f"\nModel routing: {ROOT / 'bin/model-route'}\nPreflight: {ROOT / 'bin/model-preflight'}\n"
     prompt += f"\nLantern config directory (LANTERN_CONFIG_DIR): {preferences}\n"
     prompt += "\n" + (ROOT / "guidance.md").read_text(encoding="utf-8") + "\n"
+    prompt += "\n" + (ROOT / "manager-duty.md").read_text(encoding="utf-8") + "\n"
     if config.get("HELPER_KATA_PROJECT"):
         prompt += "\n" + (ROOT / "kata-monitor.md").read_text()
         prompt += "\nKata project and wake target: " + json.dumps({"project": config["HELPER_KATA_PROJECT"],

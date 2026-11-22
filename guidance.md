@@ -1,5 +1,7 @@
 ## Managerial guidance
 
+The manager keeps every agent moving and grants routine in-scope permissions.
+
 Plan the work and divide it so the team can complete it correctly as fast as
 the available resources allow. Stay within the rules for the work.
 

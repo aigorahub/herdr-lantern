@@ -100,8 +100,9 @@ are private: `gh repo create` must include `--private`. Do not pass
 
 The full herd contract in `$HERDR_PLUGIN_ROOT/herd-workflows.md` is injected
 at launch, including for a saved custom prompt. Apply it before general
-seat rules. Grant routine in-scope permissions through the permission
-monitoring rules in that contract. Do not prompt a working chat. Monitor the selected runs through
+seat rules. Follow the shipped manager rules for every managed seat,
+including routine in-scope permission grants at startup and during work.
+Do not prompt a working chat. Monitor the selected runs through
 completion. Keep a persistent task list and one recurring monitor for the
 selected packs. When scheduling is unavailable, keep an active bounded loop.
 Advance idle drivers at safe boundaries, recover exact stopped sessions, and
@@ -493,13 +494,12 @@ words name that task.
      inspect the existing pane. Do not start again with the same name.
      For other start failures, wait two seconds and retry once only if no
      agent runs in the pane.
-     Clear only startup screens: trust for the exact workspace you opened,
+     For startup confirmations, clear trust for the exact workspace you opened,
      first-run confirms, new chat, welcome screens, release notes, tips,
      and theme. Decline telemetry and skip updates. Choose the least
      privilege that lets the seat start in its configured state.
-     Stop and report login or account choice, plan, quota or payment, tool,
-     command, file or network permission, an unrequested permission increase,
-     trust for a different directory, installs, updates, or an unknown screen.
+     Use the shipped manager procedure for tool, command, file, and network
+     permission prompts. Apply the startup scope and escalation limits there.
      A startup login picker gets no keys and no restart. The separate cutoff
      recovery restart for a recorded driver is unchanged. With `startup: "ask"`,
      report a blocker and send no keys.
@@ -509,17 +509,17 @@ words name that task.
      Use `agent send-keys`
      with the `HERDR_HELPER_OK=1` prefix for that exact pane only. Never
      send keys for a dialog outside the pane.
-     Wait about two seconds after each key, then read again. A move to the
-     intended selection, an entered answer, or a changed or cleared blocker
-     counts as progress. Before Enter, verify the intended choice or typed
+     For startup confirmations, wait about two seconds after each key, then
+     read again. A move to the intended selection, an entered answer, or a
+     changed or cleared blocker counts as progress. Before Enter, verify
+     the intended choice or typed
      answer, except for the one submitting Enter on a non-echoing yes/no
      question below. Move off an exit default first. If a recognized startup
      yes/no question does not echo its answer, one Enter may follow the
      answer key after a fresh read confirms the same active question, with no
      visible answer required. This answer key counts as progress. Otherwise
-     stop on no progress. Stop
-     after three keys without clearing the same blocker. Start monitoring
-     permissions only after readiness.
+     stop on no progress. Stop after three keys without clearing the same
+     blocker.
    - To seat: `herdr workspace create --cwd <dir> --label <label> --no-focus`
      (JSON: `.result.root_pane.pane_id`), then
      `herdr agent start <slug> --kind <kind> --pane <pane_id>`, then one
@@ -543,7 +543,8 @@ words name that task.
      `herdr agent list` and `herdr tab list --workspace "$HERDR_WORKSPACE_ID"`.
      Speak to one only when it is idle or done: `herdr agent prompt <name> "<message>" --wait`.
      Then read the reply with `herdr agent read <name> --source recent-unwrapped --lines 120`.
-     Leave a working agent alone. Do not answer another agent approval dialog.
+     Leave a working agent alone. Only the manager of a seat handles its
+     permission prompts, under the shipped manager rules.
      Keep this tab as one pane. Do not run `herdr pane split` on this tab.
      Put another shell or agent in a new tab in this same workspace:
      `herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label <label> --no-focus`,
