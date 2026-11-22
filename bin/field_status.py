@@ -7,6 +7,7 @@ import calendar
 import hashlib
 import uuid
 import json
+import math
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from terminal_readout import Readout
@@ -28,6 +30,8 @@ RESET = "\x1b[0m"
 ORDER = {"working": 0, "blocked": 1, "error": 1, "done": 2, "idle": 3, "unknown": 4}
 # An agent in one of these states has stopped its turn and awaits review.
 STOPPED = ("done", "idle", "blocked", "error")
+LOAD_WARN_DEFAULT = 2.0
+DONE_WARN_DEFAULT = 20.0
 
 
 def clean(value: object, limit: int = 90) -> str:
@@ -363,6 +367,65 @@ def fit(text: str, width: int) -> str:
     return text if len(text) <= width else text[: max(0, width - 1)] + "…"
 
 
+def _warn_threshold(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if math.isfinite(value) and value >= 0 else default
+
+
+def machine_warning(rows: list[dict], load: Optional[float] = None,
+                    cores: Optional[int] = None, *,
+                    load_factor: Optional[float] = None,
+                    done_limit: Optional[float] = None,
+                    width: Optional[int] = None) -> Optional[str]:
+    if load_factor is None:
+        load_factor = _warn_threshold("LANTERN_LOAD_WARN", LOAD_WARN_DEFAULT)
+    if done_limit is None:
+        done_limit = _warn_threshold("LANTERN_DONE_WARN", DONE_WARN_DEFAULT)
+
+    reasons = []
+    if load_factor > 0:
+        if load is None:
+            getloadavg = getattr(os, "getloadavg", None)
+            if getloadavg is not None:
+                try:
+                    load = getloadavg()[0]
+                except OSError:
+                    pass
+        if load is not None and cores is None:
+            cores = os.cpu_count()
+        if load is not None and cores is not None and cores > 0 and load > load_factor * cores:
+            per_core = f"{load / cores:.1f}"
+            reasons.append((f"load {per_core} per core", f"load {per_core}/core", f"{per_core}/core"))
+
+    if done_limit > 0:
+        count = sum(1 for row in rows if row.get("raw_status") == "done")
+        if count >= done_limit:
+            agents = "agent" if count == 1 else "agents"
+            reasons.append((f"{count} finished {agents} still open",
+                            f"{count} done still open", f"{count} done open"))
+
+    if not reasons:
+        return None
+
+    tiers = [", ".join(clauses) for clauses in zip(*reasons)]
+    candidates = [
+        f"{prefix}{clauses}.{advice}"
+        for advice in (" Close verified helpers to free memory.", " Close verified helpers.", "")
+        for prefix in ("Machine busy: ", "Busy: ")
+        for clauses in tiers
+    ]
+    if width is None:
+        return candidates[0]
+    width = max(1, width)
+    for candidate in candidates:
+        if len(candidate) <= width:
+            return candidate
+    return fit(candidates[-1], width)
+
+
 def display_name(row: dict) -> str:
     workspace = clean(row.get("workspace"))
     if workspace.casefold() == "🔥 lantern":
@@ -434,7 +497,7 @@ def append_note_section(lines: list[str], title: str, actions: dict, shade: str,
 
 
 def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True,
-           width: int = 88, home_pane_id: str = "") -> str:
+           width: int = 88, home_pane_id: str = "", *, warning: Optional[str] = None) -> str:
     width = max(38, width)
     local_time = eastern(now)
     stamp = local_time.strftime("%a %b %d, %Y · %I:%M %p ET")
@@ -443,7 +506,11 @@ def render(rows: list[dict], note_data: dict, now: datetime, colors: bool = True
     if len(heading) > width:
         separator = ": " if scope else " · "
         heading = f"{scope}FIELD STATUS{separator}{local_time.strftime('%b %d %I:%M %p ET')}"
-    lines = [heading, ""]
+    lines = [heading]
+    warning_text = clean(warning, 240)
+    if warning_text:
+        lines.append(color(fit(warning_text, width), "red", colors))
+    lines.append("")
     append_note_section(lines, "IMPORTANT", note_data.get("important", {}), "red", width, colors)
     append_note_section(lines, "NEEDS YOU", note_data.get("needs_you", {}), "purple", width, colors)
     ordered = sorted(rows, key=lambda item: (ORDER.get(item["raw_status"], 4), item["sort_index"]))
@@ -502,7 +569,10 @@ def refresh_locked(state_dir: Path, binary: str, timeout: float, now: datetime, 
     home_pane_id = clean(pane_record.get("home_pane_id"))
     if previous.get("rows") != rows:
         write_json(path, {"schema": 1, "rows": rows})
-    return render(rows, note_data, now, colors, shutil.get_terminal_size((88, 24)).columns, home_pane_id)
+    # The viewport clips at the measured width even below render's layout floor.
+    columns = shutil.get_terminal_size((88, 24)).columns
+    return render(rows, note_data, now, colors, columns, home_pane_id,
+                  warning=machine_warning(rows, width=columns))
 
 
 def main() -> int:

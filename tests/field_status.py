@@ -45,7 +45,108 @@ def field(agent_status="working", include_done=True):
     return tabs, agents, workspaces
 
 
+def done_rows(n):
+    return [{"raw_status": "done"} for _ in range(n)]
+
+
 class FieldStatusTests(unittest.TestCase):
+    def test_many_open_finished_agents_warn_at_default_limit(self):
+        with patch.dict(os.environ):
+            os.environ.pop("LANTERN_LOAD_WARN", None)
+            os.environ.pop("LANTERN_DONE_WARN", None)
+            warning = status.machine_warning(done_rows(25), load=0.0, cores=12)
+            self.assertIsNotNone(warning)
+            self.assertIn("25", warning)
+            self.assertIsNotNone(status.machine_warning(done_rows(20), load=0.0, cores=12))
+            self.assertIsNone(status.machine_warning(done_rows(19), load=0.0, cores=12))
+
+    def test_load_above_twice_the_cores_warns(self):
+        with patch.dict(os.environ):
+            os.environ.pop("LANTERN_LOAD_WARN", None)
+            os.environ.pop("LANTERN_DONE_WARN", None)
+            warning = status.machine_warning([], load=30.0, cores=12)
+            self.assertIsNotNone(warning)
+            self.assertIn("2.5", warning)
+            self.assertNotIn("finished", warning)
+            self.assertIsNone(status.machine_warning([], load=24.0, cores=12))
+
+    def test_zero_env_values_turn_each_check_off(self):
+        rows = done_rows(25)
+        with patch.dict(os.environ, {"LANTERN_LOAD_WARN": "0", "LANTERN_DONE_WARN": "0"}):
+            self.assertIsNone(status.machine_warning(rows, load=30.0, cores=12))
+
+            os.environ.pop("LANTERN_LOAD_WARN")
+            load_warning = status.machine_warning(rows, load=30.0, cores=12)
+            self.assertIsNotNone(load_warning)
+            self.assertIn("2.5", load_warning)
+            self.assertNotIn("finished", load_warning)
+
+            os.environ["LANTERN_LOAD_WARN"] = "0"
+            os.environ.pop("LANTERN_DONE_WARN")
+            done_warning = status.machine_warning(rows, load=30.0, cores=12)
+            self.assertIsNotNone(done_warning)
+            self.assertIn("25", done_warning)
+            self.assertNotIn("per core", done_warning)
+
+            os.environ.update(LANTERN_LOAD_WARN="abc", LANTERN_DONE_WARN="-1")
+            warning = status.machine_warning(rows, load=30.0, cores=12)
+            self.assertIsNotNone(warning)
+            self.assertIn("2.5", warning)
+            self.assertIn("25", warning)
+
+    def test_missing_getloadavg_does_not_raise(self):
+        with patch.dict(os.environ):
+            os.environ.pop("LANTERN_LOAD_WARN", None)
+            os.environ.pop("LANTERN_DONE_WARN", None)
+            getloadavg = getattr(status.os, "getloadavg", None)
+            try:
+                if getloadavg is not None:
+                    delattr(status.os, "getloadavg")
+                self.assertIsNone(status.machine_warning([]))
+                self.assertIsNotNone(status.machine_warning(done_rows(25)))
+            finally:
+                if getloadavg is not None:
+                    status.os.getloadavg = getloadavg
+
+            with patch.object(status.os, "getloadavg", side_effect=OSError, create=True):
+                self.assertIsNone(status.machine_warning([]))
+
+    def test_busy_warning_renders_under_heading(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(status, "snapshot", return_value=field("done")), \
+                patch.dict(os.environ, {"LANTERN_DONE_WARN": "1", "LANTERN_LOAD_WARN": "0", "COLUMNS": "200"}):
+            state_dir = Path(root)
+            lines = status.refresh(state_dir, "herdr", 1, NOW, False).splitlines()
+            self.assertIn("FIELD STATUS", lines[0])
+            self.assertTrue(lines[1].startswith("Machine busy"))
+            self.assertIn("free memory", lines[1])
+            self.assertEqual(lines[2], "")
+
+            os.environ["LANTERN_DONE_WARN"] = "0"
+            lines = status.refresh(state_dir, "herdr", 1, NOW, False).splitlines()
+            self.assertEqual(lines[1], "")
+
+            os.environ.update(LANTERN_DONE_WARN="1", COLUMNS="25")
+            lines = status.refresh(state_dir, "herdr", 1, NOW, False).splitlines()
+            self.assertTrue(lines[1].startswith(("Machine busy", "Busy")))
+            self.assertLessEqual(len(lines[1]), 25)
+            self.assertIn("1 done", lines[1])
+
+        rows = status.rows_for(*field("done"))
+        for width in (38, 60, 88):
+            with self.subTest(width=width):
+                warning = status.machine_warning(done_rows(34), load=34.8, cores=12,
+                                                 load_factor=2.0, done_limit=20.0, width=width)
+                lines = status.render(rows, {}, NOW, False, width=width, warning=warning).splitlines()
+                self.assertTrue(lines[1].startswith(("Machine busy", "Busy")))
+                self.assertLessEqual(len(lines[1]), width)
+                self.assertIn("2.9", lines[1])
+                self.assertIn("34", lines[1])
+                self.assertEqual(lines[2], "")
+                if width >= 60:
+                    self.assertIn("Close verified helpers", lines[1])
+                if width == 88:
+                    self.assertIn("free memory", lines[1])
+
     def test_keep_shows_only_lantern_by_default(self):
         rows = status.rows_for(*field("idle"))
         self.assertEqual([row["agent"] for row in rows], ["lantern", "notes", "Sol Reviewer"])
