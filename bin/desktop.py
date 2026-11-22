@@ -134,7 +134,7 @@ def boundary_errors(action):
     try:
         return action()
     except subprocess.TimeoutExpired:
-        raise RuntimeError("Herdr desktop read timed out") from None
+        raise field.HerdrTimeout("Herdr desktop read timed out") from None
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         raise RuntimeError("Herdr desktop returned an unexpected reply") from None
 

@@ -2355,6 +2355,147 @@ if __name__ == "sitecustomize":
             self.assertEqual(opened.call_args.args[-1], 15)
 
 
+class HerdrTimeoutTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.endpoint = self.root / "socket"
+        self.endpoint.touch()
+        self.auth = self.root / "auth.json"
+        self.auth.write_text("{}")
+        self.set_provider("codex")
+        self.tabs = [{"tab_id": "t1"}]
+        self.agents = [{"agent": "codex", "tab_id": "t1", "pane_id": "p1"}]
+        self.timed_out = False
+        self.mismatch_pids = set()
+
+        patches = contextlib.ExitStack()
+        self.addCleanup(patches.close)
+        patches.enter_context(patch.object(runtime.subprocess, "run", side_effect=self.run_herdr))
+        patches.enter_context(patch.object(field, "snapshot", side_effect=lambda *_: (self.tabs, self.agents, [])))
+        patches.enter_context(patch.object(runtime, "process_start", return_value="started"))
+        patches.enter_context(patch.object(runtime, "process_executable", return_value="/bin/codex"))
+        patches.enter_context(patch.object(runtime, "process_environment", return_value={}))
+        patches.enter_context(patch.object(sources, "scope_for", side_effect=self.scope_for))
+        patches.enter_context(patch.object(sources, "configured_fugu_scope", return_value=None))
+        patches.enter_context(patch.object(sources, "configured_teamclaude_scope", return_value=None))
+
+    def set_provider(self, provider):
+        self.scope = {"provider": provider, "key": provider, "files": [str(self.auth)]}
+        self.scope["stamp"] = sources.current_stamp(self.scope)
+
+    def run_herdr(self, command, **kwargs):
+        if command[-2:] == ["status", "--json"]:
+            response = {"server": {"running": True, "socket": str(self.endpoint)}}
+        elif "process-info" in command:
+            if self.timed_out:
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            argv = ["codex", "-p", "fugu"] if self.scope["provider"] == "fugu" else ["codex"]
+            process = {"pid": 100 + int(command[-1][1:]), "argv": argv}
+            response = {"result": {"process_info": {"shell_pid": 10, "foreground_processes": [process]}}}
+        else:
+            self.fail(f"Unexpected Herdr command: {command}")
+        return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+    def scope_for(self, provider, process, env):
+        if process["pid"] in self.mismatch_pids:
+            raise sources.SourceError("Account unknown")
+        return self.scope
+
+    def collector(self):
+        server = runtime.server_identity("herdr", 2)
+        collector = usage.Collector(self.root / "state", self.root / "shared", "herdr", server)
+        self.addCleanup(collector.close)
+        return collector
+
+    def test_one_herdr_timeout_keeps_binding_and_in_flight_read(self):
+        for provider in ("codex", "fugu"):
+            with self.subTest(provider=provider):
+                self.set_provider(provider)
+                self.timed_out = False
+                collector = self.collector()
+                collector.scan()
+                entry = collector.bindings[provider]
+                future = Future()
+                result = measured(provider)
+                result["provider"] = provider
+                future.set_result(result)
+                collector.pending[provider] = future, collector.generation(entry)
+
+                self.timed_out = True
+                collector.scan()
+                self.assertIn(provider, collector.bindings)
+                self.assertEqual(collector.bindings[provider]["tabs"], {"t1"})
+                self.assertEqual(collector.notices, {})
+                collector.drain()
+                self.assertEqual(collector.cache[provider]["result"], result)
+                self.assertNotIn(provider, collector.pending)
+
+    def test_second_consecutive_timeout_drops_until_verified_again(self):
+        collector = self.collector()
+        collector.scan()
+        self.timed_out = True
+        collector.scan()
+        self.assertIn("codex", collector.bindings)
+        collector.scan()
+        self.assertNotIn("codex", collector.bindings)
+        self.assertEqual(collector.notices, {("codex", "Account unknown"): {"t1"}})
+
+        self.timed_out = False
+        collector.scan()
+        self.timed_out = True
+        collector.scan()
+        self.assertIn("codex", collector.bindings)
+        self.timed_out = False
+        collector.scan()
+        self.timed_out = True
+        collector.scan()
+        self.assertIn("codex", collector.bindings)
+
+    def test_mismatch_drops_binding_and_its_unfinished_read(self):
+        for with_sibling in (False, True):
+            with self.subTest(with_sibling=with_sibling):
+                if with_sibling:
+                    self.tabs.append({"tab_id": "t2"})
+                    self.agents.append({"agent": "codex", "tab_id": "t2", "pane_id": "p2"})
+                collector = self.collector()
+                collector.scan()
+                future = Future()
+                collector.pending["codex"] = future, collector.generation(collector.bindings["codex"])
+
+                self.mismatch_pids = {101}
+                collector.scan()
+                self.mismatch_pids.clear()
+                if with_sibling:
+                    self.assertEqual(collector.bindings["codex"]["tabs"], {"t2"})
+                else:
+                    self.assertNotIn("codex", collector.bindings)
+                self.assertEqual(collector.notices, {("codex", "Account unknown"): {"t1"}})
+                collector.drain()
+
+                collector.scan()
+                self.assertEqual(collector.bindings["codex"]["tabs"], {tab["tab_id"] for tab in self.tabs})
+                future.set_result(measured("old"))
+                collector.drain()
+                self.assertNotIn("codex", collector.cache)
+                self.assertNotIn("codex", collector.pending)
+
+    def test_confirming_read_timeout_is_not_an_account_error(self):
+        process = {"pid": 101, "argv": ["codex"], "executable": "/bin/codex"}
+        checked = {"process": process, "start": "started", "scope": self.scope, "hint": "codex"}
+
+        def read_after():
+            return field.control("herdr", ["pane", "process-info", "--pane", "p1"], 2)
+
+        self.timed_out = True
+        with self.assertRaises(RuntimeError) as failure:
+            usage.confirm_process(checked, read_after)
+        self.assertNotIsInstance(failure.exception, sources.SourceError)
+        self.assertIn("timed out", str(failure.exception))
+        self.assertIs(getattr(failure.exception, "checked", None), checked)
+
+
 HERE = str(Path(__file__).resolve().parent)
 
 
@@ -2538,6 +2679,153 @@ class DesktopScanTests(unittest.TestCase):
                 collector.scan()
                 self.assertEqual(bool(collector.bindings), bound)
                 self.assertEqual(calls, [legacy] * (2 if bound else 1))
+
+    def scan_desktop_pair(self, collector, first, second):
+        def raise_error():
+            raise second
+
+        def confirming_read():
+            if isinstance(second, Exception):
+                return usage.desktop.boundary_errors(raise_error)
+            return second
+
+        reads = iter((lambda: first, confirming_read))
+        with patch.object(usage.desktop, "read_world", side_effect=lambda: next(reads)()):
+            collector.scan()
+
+    def test_desktop_failed_confirmation_keeps_binding_once(self):
+        for provider in ("codex", "fugu"):
+            with self.subTest(provider=provider), logins():
+                collector = self.collector()
+                argv = ["codex", "-p", "fugu"] if provider == "fugu" else ["codex"]
+                world = desktop_world(argv=argv)
+                scope = {"key": provider, "provider": provider, "stamp": "stamp"}
+                timeout = subprocess.TimeoutExpired("desktop read", 2)
+                with patch.object(sources, "scope_for", return_value=scope):
+                    self.scan_desktop_pair(collector, world, world)
+                    cached = {"state": "Measured", "result": measured()}
+                    collector.cache[provider] = cached
+                    self.scan_desktop_pair(collector, world, timeout)
+                    self.assertTrue(collector.scan_error)
+                    self.assertEqual(collector.bindings[provider]["tabs"], {"t0"})
+                    self.assertEqual(collector.cache[provider], cached)
+                    self.assertEqual(collector.notices, {})
+                    self.scan_desktop_pair(collector, world, timeout)
+                self.assertNotIn(provider, collector.bindings)
+                self.assertNotIn(provider, collector.cache)
+                self.assertEqual(collector.notices, {(provider, "Account unknown"): {"t0"}})
+
+    def test_desktop_confirmation_timeout_preserves_first_read_source_error(self):
+        collector = self.collector()
+        world = desktop_world(argv=["codex", "-p", "fugu"])
+        state = sources.FUGU_KEY_MISSING
+        errors = [sources.SourceError(state), sources.SourceError(state)]
+        with logins(), patch.object(sources, "scope_for", side_effect=errors):
+            self.scan_desktop_pair(collector, world, world)
+            self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
+
+        rows = collector.write()["rows"]
+        self.assertEqual(rows, [{"provider": "fugu", "state": state, "tabs": 1}])
+
+    def test_desktop_failed_confirmation_with_changed_account_drops_at_once(self):
+        collector = self.collector()
+        world = desktop_world()
+        with logins():
+            self.scan_desktop_pair(collector, world, world)
+            self.assertIn("codex-100", collector.bindings)
+            changed = {"key": "changed", "provider": "codex", "stamp": "stamp"}
+            with patch.object(sources, "scope_for", return_value=changed):
+                self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
+        self.assertEqual(collector.bindings, {})
+
+    def test_desktop_failed_confirmation_with_restarted_process_drops_at_once(self):
+        collector = self.collector()
+        world = desktop_world()
+        with logins():
+            self.scan_desktop_pair(collector, world, world)
+            self.assertIn("codex-100", collector.bindings)
+            with patch.object(runtime, "process_start", return_value="restarted"):
+                self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
+        self.assertEqual(collector.bindings, {})
+
+    def test_desktop_malformed_confirmation_applies_known_change(self):
+        collector = self.collector()
+        world = desktop_world(("codex", "codex"))
+        scope = {"key": "same", "provider": "codex", "stamp": "stamp"}
+        changed = dict(scope, key="changed")
+
+        def resolve(provider, process, env):
+            return changed if process["pid"] == 100 else scope
+
+        def first_read_timeout():
+            raise subprocess.TimeoutExpired("desktop process info", 2)
+
+        process_info = usage.desktop.process_info
+
+        def read_process(world, pane, timeout):
+            if pane == "p0":
+                return usage.desktop.boundary_errors(first_read_timeout)
+            return process_info(world, pane, timeout)
+
+        with logins():
+            with patch.object(sources, "scope_for", return_value=scope):
+                self.scan_desktop_pair(collector, world, world)
+                self.assertEqual(collector.bindings["same"]["tabs"], {"t0", "t1"})
+            with patch.object(sources, "scope_for", side_effect=resolve):
+                self.scan_desktop_pair(collector, world, ValueError("unexpected reply"))
+            self.assertEqual(collector.bindings["same"]["tabs"], {"t1"})
+            self.assertNotIn("changed", collector.bindings)
+            with patch.object(sources, "scope_for", return_value=scope), \
+                    patch.object(usage.desktop, "process_info", side_effect=read_process):
+                self.scan_desktop_pair(collector, world, world)
+            self.assertEqual(collector.bindings["same"]["tabs"], {"t1"})
+
+    def test_confirming_timeout_after_process_exit_drops(self):
+        collector = self.collector()
+        world = desktop_world()
+        with logins():
+            self.scan_desktop_pair(collector, world, world)
+            self.assertIn("codex-100", collector.bindings)
+            with patch.object(runtime, "process_start", side_effect=["started", ""]):
+                self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
+        self.assertEqual(collector.bindings, {})
+
+    def test_closed_tab_is_removed_from_failed_confirmation_notice(self):
+        collector = self.collector()
+        world = desktop_world()
+        timeout = subprocess.TimeoutExpired("desktop read", 2)
+        with logins():
+            self.scan_desktop_pair(collector, world, world)
+            self.scan_desktop_pair(collector, world, timeout)
+            self.scan_desktop_pair(collector, world, timeout)
+            self.assertEqual(collector.notices, {("codex", "Account unknown"): {"t0"}})
+            self.scan_desktop_pair(collector, desktop_world(()), timeout)
+        snapshot = collector.write()
+        self.assertEqual(snapshot["rows"], [])
+        self.assertEqual(snapshot["membership"], [])
+
+    def test_configured_binding_with_a_changed_stamp_is_removed_after_last_tab(self):
+        collector = self.collector()
+        world = desktop_world(argv=["codex", "-p", "fugu"])
+        config = self.root / "fugu.config.toml"
+        config.write_text("old configuration")
+        scope = {"key": "old", "provider": "fugu", "files": [str(config)]}
+        current_stamp = sources.current_stamp
+        scope["stamp"] = current_stamp(scope)
+        with logins(), patch.object(sources, "current_stamp", side_effect=current_stamp), \
+                patch.object(sources, "configured_fugu_scope", return_value=scope), \
+                patch.object(sources, "scope_for", return_value=scope):
+            self.scan_desktop_pair(collector, world, world)
+            self.assertEqual(collector.bindings["old"]["tabs"], {"t0"})
+            collector.cache["old"] = {"state": "Measured", "result": measured()}
+            config.write_text("new configuration with a changed stamp")
+            changed = dict(scope, key="new", stamp=current_stamp(scope))
+            self.assertNotEqual(changed["stamp"], scope["stamp"])
+            with patch.object(sources, "scope_for", return_value=changed):
+                self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
+        self.assertEqual(collector.bindings, {})
+        self.assertNotIn("old", collector.cache)
+
 
 class ViewTests(unittest.TestCase):
     maxDiff = None
