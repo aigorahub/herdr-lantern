@@ -29,9 +29,11 @@ read first. Do not resend blindly. Keep the original transcript on handoff.
 
 Startup rule. This rule applies only to a seat you opened, until it is ready.
 A native seat is ready when the hc terminal is live, the expected harness
-is in the foreground, status is idle or done, and a fresh read shows the
-harness input prompt with no dialog. Check the existing terminal after a
-failed start. Retry once after two seconds only if no agent runs there.
+is in the foreground, status is idle or done, and a fresh read of that
+terminal shows the usable harness input prompt with no active dialog.
+Read the terminal even when the launch succeeds or status is already idle
+or done. Check the existing terminal after a failed start. Retry once
+after two seconds only if no agent runs there.
 
 Clear only startup screens: trust for the exact workspace you opened,
 first-run confirms, new chat, welcome screens, release notes, tips, and

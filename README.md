@@ -416,7 +416,9 @@ Pi, and Lantern never passes any approval-bypass flag to it.
 Lantern can clear startup screens on a seat it just opened. Examples
 include trust for that exact workspace, a new chat confirmation, and a
 welcome screen. It reads the exact pane before each key and checks the
-result. It reports login, account, quota, payment, tool permission, and
+result. On both paths, readiness requires a fresh read of the exact pane
+that shows the usable harness input prompt with no active dialog. It
+reports login, account, quota, payment, tool permission, and
 other blocks that need a decision. Cutoff recovery for an existing run
 keeps its separate login restart procedure.
 

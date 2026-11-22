@@ -643,3 +643,74 @@ and the native core. The scratch app process, PID `26808`, exited and
 its window closed. The final `ps` check found zero live S6 processes.
 It confirmed John's Herdr PID `29763` still had its original start time.
 The cleanup log is `/private/tmp/li1live.Ow6pZQ/stop-s6-ps.log`.
+
+
+### I3 legacy Grok Build retest
+
+Recorded before launch. Scratch root `/private/tmp/l3g.rlXGjJ`. The Herdr session is
+`l3g`. The legacy config and state are
+`/private/tmp/l3g.rlXGjJ/xc/herdr/plugins/config/aigora.lantern` and
+`/private/tmp/l3g.rlXGjJ/xs/herdr/plugins/aigora.lantern`. The empty Grok directory is
+`/private/tmp/l3g.rlXGjJ/case/grok`. The alternate desktop app home and core socket
+stay unused. The legacy socket is
+`/private/tmp/l3g.rlXGjJ/xc/herdr/sessions/l3g/herdr.sock`.
+
+The test launcher and its two command wrappers are
+`/private/tmp/l3g.rlXGjJ/run.sh`, `/private/tmp/l3g.rlXGjJ/control.sh`, and
+`/private/tmp/l3g.rlXGjJ/lead-shell.sh`. The runner starts with this command.
+
+```sh
+sh '/private/tmp/l3g.rlXGjJ/run.sh'
+```
+
+The runner checks for an empty scratch workspace before it links and
+opens Lantern. It uses these commands.
+
+```sh
+scratch='/private/tmp/l3g.rlXGjJ'
+repo='/Users/john/aigora/dev/herdr-lantern-team-preferences'
+sh "$scratch/control.sh" server >"$scratch/server.log" 2>&1 &
+server_pid=$!
+sh "$scratch/control.sh" plugin link "$repo"
+sh "$scratch/control.sh" plugin action invoke aigora.lantern.open
+```
+
+The scratch config uses the saved prompt from `d614403` and pins
+the Codex test lead to `gpt-6.2-sol` at high effort with `--no-daemon`.
+The runner checks the rendered appendix for the fresh pane rule before
+it sends `/private/tmp/l3g.rlXGjJ/request.md` to the scratch lead. The lead resolves
+and checks only the Grok Build route. It records launch argv, the
+foreground process, the screen before any key, each key and its sender,
+and the final readiness check. The exit trap stops only the scratch
+session and checks its process tree and John's Herdr PID with `ps`.
+
+The headless retest passed. The rendered legacy appendix contained the
+fresh pane rule and its override of the saved workspace brief rule.
+The scratch lead `w1:p2` opened Grok Build `grok-4.7-build-fast` at
+medium effort in pane `w2:p1`. Preflight passed and the start exited 0.
+Herdr reported `idle` and `interactive_ready: true`. A fresh read still
+showed “Do you trust the contents of this directory?” for the empty
+scratch directory. The foreground process was Grok Build 1.0.92.
+
+The lead sent one `y` to `w2:p1` through the branch guard. After the
+settle wait, a second pane read showed the empty Grok Build input prompt
+with no active dialog. The same foreground process still reported idle
+and interactive ready. The full launch, screen, and key trace is in
+`/private/tmp/l3g.rlXGjJ/evidence.md`. This closes the legacy readiness
+defect. The earlier native pane evidence remains the desktop proof.
+
+The scratch server stop exited 0. The final `ps` check found zero live
+retest processes and the same PID and start time for John's Herdr
+`29763`. The retest used a background legacy server and opened no
+desktop window. The cleanup record is `/private/tmp/l3g.rlXGjJ/cleanup-ps.log`.
+Grok Build kept the scratch trust entry in `~/.grok/trusted_folders.toml`
+and its session under `~/.grok/sessions/%2Fprivate%2Ftmp%2Fl3g.rlXGjJ%2Fcase%2Fgrok`.
+
+After C1 to C4, shell syntax and full smoke passed at `36e57f4`.
+After the readiness fix, shell syntax and the five separate suites
+passed. The full smoke run exited 1 with nine Plan Usage timeouts.
+The 30 second direct launch timeout also occurred on a clean
+`36e57f4` worktree at load 28.41. The other eight errors were in
+`pane get` calls on the unchanged readout path. The comparison
+worktree was removed. I2 allows the local commit with these results.
+The full smoke pass for the final commit remains a PR gate.

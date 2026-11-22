@@ -485,7 +485,11 @@ words name that task.
      fails rather than guess when nothing shows the message went in.
      Read the pane before telling the user it was sent.
    - Startup rule. This rule applies only to a seat you opened, until it
-     is `interactive_ready` and idle or done. After `agent_not_ready`,
+     is ready. Verify the same pane and expected foreground harness. The
+     seat must report `interactive_ready` and a status of idle or done.
+     A fresh read of that pane must show the usable harness input prompt
+     with no active dialog. Read the pane even when `agent start` succeeds
+     or the status already reports readiness. After `agent_not_ready`,
      inspect the existing pane. Do not start again with the same name.
      For other start failures, wait two seconds and retry once only if no
      agent runs in the pane.
@@ -524,8 +528,8 @@ words name that task.
      default launch injects (kind, model phrase, effort). Do not ask which
      model or kind. An explicit phrase always wins. Kinds include claude,
      devin, codex, grok, gemini, cursor, opencode, and more.
-   - Workspace brief. After a fresh `agent start` is idle or done and
-     interactive ready, send one gated `herdr agent prompt`. The text
+   - Workspace brief. After a fresh seat meets the startup readiness rule,
+     send one gated `herdr agent prompt`. The text
      starts with the brief below, then the user task when there is one.
      With no task, send the brief alone. Resume and continue do not send
      it again. A one-shot review puts this same brief in front of the

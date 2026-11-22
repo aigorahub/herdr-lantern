@@ -364,11 +364,16 @@ $session_capture_note
   saying sent.
 - Startup rule. This overrides the saved prompt.md first-run gate paragraph,
   including its instruction not to send y or Enter yourself, and the saved
-  prompt.md instruction to retry any failed agent start.
-  This rule applies only to a seat you opened, until it is interactive_ready
-  and idle or done. After agent_not_ready, inspect the existing pane. Do not
-  start again with the same name. For other start failures, wait two seconds
-  and retry once only if no agent runs in the pane.
+  prompt.md instruction to retry any failed agent start. This also overrides
+  any saved workspace brief rule that uses only the fresh seat status.
+  This rule applies only to a seat you opened, until it is ready. Verify
+  the same pane and expected foreground harness. Require interactive_ready
+  and a status of idle or done. A fresh read of that pane must show the
+  usable harness input prompt with no active dialog. Read the pane
+  even when agent start succeeds or the status already reports readiness.
+  After agent_not_ready, inspect the existing pane. Do not start again
+  with the same name. For other start failures, wait two seconds and retry
+  once only if no agent runs in the pane.
   Clear only startup screens: trust for the exact workspace you opened,
   first-run confirms, new chat, welcome screens, release notes, tips, and
   theme. Decline telemetry and skip updates. Choose the least privilege
@@ -437,8 +442,8 @@ $onboard_note
   gets no extra args. Never omit the Codex unattended flag. Never pass
   bypassPermissions, --yolo, --force, or --always-approve unless the
   user explicitly asks for yolo in that request.
-- Workspace brief. After a fresh agent start is idle or done and
-  interactive ready, send one gated \`herdr agent prompt\`. Its text
+- Workspace brief. After a fresh seat meets the startup readiness rule,
+  send one gated \`herdr agent prompt\`. Its text
   starts with the brief below, then the user task when there is one.
   With no task, send the brief alone. Resume and continue do not send
   it again. A one-shot review puts this same brief in front of the
