@@ -555,8 +555,8 @@ class DesktopTests(unittest.TestCase):
     def test_live_process_argv_preserves_spaces_empty_and_non_ascii_arguments(self):
         import select
 
-        argv = [sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(30)", "a b", "", "ü"]
-        with subprocess.Popen(argv, stdout=subprocess.PIPE, text=True) as child:
+        argv = ["/bin/sh", "-c", "echo ready; read x", "a b", "", "ü"]
+        with subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as child:
             try:
                 self.assertTrue(select.select([child.stdout], [], [], 5)[0], "child did not become ready")
                 self.assertEqual(child.stdout.readline(), "ready\n")
