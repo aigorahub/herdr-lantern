@@ -62,7 +62,7 @@ The appendix overrides the old "Do not edit files" ground rule for exactly these
 
 ### Startup blockers: one general rule
 
-Scope: the window from the start of a seat that the lead itself opened until that seat is ready. In that window this rule applies. The existing permission and login procedures in `herd-workflows.md` do not apply until the seat is ready. After that, they apply unchanged.
+Scope: the window from the start of a seat that the lead itself opened until that seat is ready. In that window this rule applies. The existing monitoring permission procedure in `herd-workflows.md` does not apply until the seat is ready. After that, it applies unchanged. The cutoff recovery login restart is a separate procedure and is unchanged.
 
 Goal: the seat is ready. Legacy: `interactive_ready` and idle or done. Desktop: the `hc` terminal is live, its foreground process is the expected harness, its status is idle or done, and a fresh read shows the harness input prompt with no dialog.
 

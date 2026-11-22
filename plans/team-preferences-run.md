@@ -76,3 +76,8 @@ Each row records one assignment or reply. A verdict names its commit. When the b
 | 8 | t4b0 | t49y | R4 delta re-review (/boost) | 130f47d | GREEN | stale, branch moved to revision 5 |
 | 8 | t49z | t49y | R4 delta re-review | 130f47d | BLOCKING: 1 (cutoff login restart behind readiness in S2 acceptance), advisory | stale, answered in revision 5 |
 | 8 | t4b1 | t49y | R4 delta re-review | 130f47d | GREEN, 4 advisory | stale, answered in revision 5 |
+| 9 | t49y | t49z, t4b0 (/boost), t4b1 | R5 delta re-review (sign-off) | 8b4b537 | sent | closed |
+| 10 | t49z | t49y | R5 sign-off | 8b4b537 | GREEN | signed off |
+| 10 | t4b0 | t49y | R5 sign-off (/boost) | 8b4b537 | GREEN | signed off |
+| 10 | t4b1 | t49y | R5 sign-off | 8b4b537 | GREEN, 1 advisory (narrow the scope sentence) | signed off |
+| 10 | t49y | branch | Docs-only alignment of the plan scope sentence to the signed-off S2 acceptance (Grok R5 advisory); no new review needed | next commit | done | closed |
