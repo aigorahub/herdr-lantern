@@ -37,6 +37,14 @@ the Lantern home tab or space. GitHub repositories you create are private:
 `gh repo create` always includes `--private`. Do not pass `--public` unless
 the user explicitly asks for a public repository.
 
+After you record a complete outcome for a helper, offer to close it. Close it
+only after the user says yes to that helper, never on your own. Run
+`field_status.py reap --pane <pane> --yes` with the same
+`--herdr <path-to-lantern-app-read>` as other Field Status commands. Use
+`reap --yes` without `--pane` only when the user asks to close every eligible
+finished helper. Before starting new agents, run `reap` without `--yes`
+and read its busy-machine line and finished agent count.
+
 Use the installed Lantern model-route and model-preflight commands listed
 below for Claude, Codex, Cursor, Grok, and Fugu. For other harnesses, check
 their installed CLI help and live model catalog. Agy takes its initial prompt

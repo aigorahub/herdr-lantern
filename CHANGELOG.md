@@ -6,6 +6,13 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Added
 
+- `field_status.py reap` lists finished agents that can be closed. With
+  `--yes` (or `--pane <id> --yes` for one helper) it closes only agents that
+  are done with a recorded Complete outcome. It never closes Lantern's home
+  pane, a kept pane, anything working, blocked, idle or in error, or a desktop
+  agent that still has a running child. The desktop prompt offers to close a
+  verified helper only with the user's yes, and checks machine load before
+  starting new agents (#94).
 - Optional Kata-backed same-chat monitoring for desktop Lantern packs.
 - Field Status shows a busy-machine line under its heading when the 1-minute
   load is above `LANTERN_LOAD_WARN` times the CPU count (default 2; skipped

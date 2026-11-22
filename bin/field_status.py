@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compact, persistent, read-only Herdr field view for Lantern."""
+"""Compact, persistent Herdr field view and reviewed-session cleanup for Lantern."""
 from __future__ import annotations
 
 import argparse
@@ -19,10 +19,13 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, NamedTuple, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from terminal_readout import Readout
+
+if TYPE_CHECKING:
+    from desktop import World
 
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 ANSI = {"yellow": "\x1b[33m", "green": "\x1b[32m", "blue": "\x1b[34m", "red": "\x1b[31m", "purple": "\x1b[35m"}
@@ -32,6 +35,25 @@ ORDER = {"working": 0, "blocked": 1, "error": 1, "done": 2, "idle": 3, "unknown"
 STOPPED = ("done", "idle", "blocked", "error")
 LOAD_WARN_DEFAULT = 2.0
 DONE_WARN_DEFAULT = 20.0
+AGENT_PROGRAMS = {
+    "codex": {"codex"},
+    "claude": {"claude"},
+    "grok": {"grok", "grok-build"},
+    "agy": {"agy", "antigravity"},
+    "cursor": {"agent", "cursor-agent"},
+    "devin": {"devin"},
+    "pi": {"pi"},
+    "gemini": {"gemini"},
+}
+SHELL_PROGRAMS = {"sh", "bash", "zsh", "dash", "fish", "nu", "pwsh", "powershell", "cmd"}
+
+
+class Field(NamedTuple):
+    rows: list[dict]
+    agents: list[dict]
+    home_pane_id: str
+    home_terminal: str
+    world: World | None
 
 
 def clean(value: object, limit: int = 90) -> str:
@@ -146,7 +168,7 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
     command = herdr_command(binary, args)
     env = herdr_environment(binary)
     if args[:2] in (["pane", "run"], ["pane", "split"], ["pane", "move"],
-                    ["pane", "rename"], ["pane", "send-keys"], ["tab", "create"]):
+                    ["pane", "rename"], ["pane", "send-keys"], ["pane", "close"], ["tab", "create"]):
         env["HERDR_HELPER_OK"] = "1"
     try:
         proc = subprocess.run(command, capture_output=True, text=True,
@@ -158,9 +180,8 @@ def control(binary: str, args: list[str], timeout: float) -> dict:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} unavailable: {exc}") from exc
     if proc.returncode:
         raise RuntimeError(f"Herdr {' '.join(args[:2])} failed ({proc.returncode}): {clean(proc.stderr, 180)}")
-    if args[:2] in (["pane", "run"], ["pane", "send-keys"]) and not proc.stdout.strip():
-        # The installed CLI returns no body after a successful submission or
-        # key press. Callers still confirm the pane's processes afterward.
+    if args[:2] in (["pane", "run"], ["pane", "send-keys"], ["pane", "close"]) and not proc.stdout.strip():
+        # These operations can succeed without a JSON result.
         return {}
     try:
         result = json.loads(proc.stdout)["result"]
@@ -563,22 +584,211 @@ def refresh(state_dir: Path, binary: str, timeout: float, now: datetime, colors:
         return refresh_locked(state_dir, binary, timeout, now, colors)
 
 
-def refresh_locked(state_dir: Path, binary: str, timeout: float, now: datetime, colors: bool) -> str:
-    tabs, agents, workspaces = snapshot(binary, timeout)
+def live_field(state_dir: Path, binary: str, timeout: float, now: datetime) -> Field:
+    import desktop
+
+    world = desktop.read_world(timeout) if desktop.reads(binary) else None
+    if world is None:
+        tabs, agents, workspaces = snapshot(binary, timeout)
+        home_terminal = ""
+    else:
+        tabs, agents, workspaces = (world.view[key] for key in ("tabs", "agents", "workspaces"))
+        home_terminal = desktop.read_state(state_dir / "home.json").get("terminal")
+        if not isinstance(home_terminal, str):
+            home_terminal = ""
     path = state_dir / "field-status-rows.json"
     previous = read_json(path, {"rows": []})
-    live = rows_for(tabs, agents, workspaces)
-    rows = reconcile(live, previous, now)
+    rows = reconcile(rows_for(tabs, agents, workspaces), previous, now)
     apply_outcomes(rows, acceptance_state(state_dir))
-    note_data = notes(state_dir)
-    pane_record = read_json(state_dir / "views.json", {})
-    home_pane_id = clean(pane_record.get("home_pane_id"))
+    home_pane_id = clean(read_json(state_dir / "views.json", {}).get("home_pane_id"))
     if previous.get("rows") != rows:
         write_json(path, {"schema": 1, "rows": rows})
+    return Field(rows, agents, home_pane_id, home_terminal, world)
+
+
+def refresh_locked(state_dir: Path, binary: str, timeout: float, now: datetime, colors: bool) -> str:
+    note_data = notes(state_dir)
+    field = live_field(state_dir, binary, timeout, now)
     # The viewport clips at the measured width even below render's layout floor.
     columns = shutil.get_terminal_size((88, 24)).columns
-    return render(rows, note_data, now, colors, columns, home_pane_id,
-                  warning=machine_warning(rows, width=columns))
+    return render(field.rows, note_data, now, colors, columns, field.home_pane_id,
+                  warning=machine_warning(field.rows, width=columns))
+
+
+def running_children(terminals: dict[str, dict]) -> dict[str, str]:
+    children = {}
+    for address, terminal in terminals.items():
+        if "/" in address or terminal.get("state") != "live":
+            continue
+        visited = {address}
+        parent = terminal.get("parent")
+        while isinstance(parent, str) and "/" not in parent and parent in terminals and parent not in visited:
+            children.setdefault(parent, address)
+            visited.add(parent)
+            parent = terminals[parent].get("parent")
+    return children
+
+
+def reap_skip_reason(row: dict, agent: dict, field: Field, keep: dict, children: dict[str, str]) -> str:
+    pane, terminal_id = row["pane_id"], row["terminal_id"]
+    terminal = field.world.terminals.get(terminal_id, {}) if field.world is not None else {}
+    labels = terminal.get("labels")
+    role = labels.get("lantern.desktop") if isinstance(labels, dict) else None
+    if (pane and pane == field.home_pane_id or terminal_id and terminal_id == field.home_terminal
+            or is_lantern_home(row, field.home_pane_id) or isinstance(role, str) and role):
+        return "Lantern home"
+    if pane in keep or row["tab_id"] in keep:
+        return "pinned keep"
+    if not pane or (field.world is not None and not terminal_id):
+        return "no pane identity"
+    if agent.get("legacy_binary"):
+        return "bridged legacy pane"
+    if row["raw_status"] != "done":
+        return row["raw_status"]
+    outcome = row["outcome"]
+    if outcome is None:
+        return "no Complete outcome"
+    if outcome.get("status") != "complete":
+        return f'outcome {clean(outcome.get("status")) or "unknown"}'
+    if terminal_id in children:
+        return f"running child {children[terminal_id]}"
+    return ""
+
+
+def reap_plan(field: Field, keep: dict) -> list[tuple[dict, str, str]]:
+    agents = {clean(agent.get("pane_id")): agent for agent in field.agents}
+    children = running_children(field.world.terminals) if field.world is not None else {}
+    plan = []
+    for row in field.rows:
+        if row["has_agent"]:
+            reason = reap_skip_reason(row, agents.get(row["pane_id"], {}), field, keep, children)
+            plan.append((row, "skip" if reason else "close", reason))
+    return plan
+
+
+def identities(process: dict) -> set[str]:
+    argv = process.get("argv")
+    first_arg = argv[0] if isinstance(argv, list) and argv else None
+    return {os.path.normcase(Path(value).name).removesuffix(".exe")
+            for value in (first_arg, process.get("argv0"), process.get("name"))
+            if isinstance(value, str) and value}
+
+
+def foreground_matches(field: Field, binary: str, pane: str, timeout: float) -> bool:
+    agent = next((agent for agent in field.agents if clean(agent.get("pane_id")) == pane), {})
+    provider = agent.get("agent")
+    programs = AGENT_PROGRAMS.get(provider.casefold()) if isinstance(provider, str) else None
+    if not programs:
+        return False
+
+    if field.world is not None:
+        import desktop
+        info = desktop.boundary_errors(lambda: desktop.process_info(field.world, pane, timeout))
+    else:
+        info = control(binary, ["pane", "process-info", "--pane", pane], timeout).get("process_info")
+        if isinstance(info, dict) and info.get("pane_id", pane) != pane:
+            return False
+    if not isinstance(info, dict):
+        return False
+    processes = info.get("foreground_processes")
+    if not isinstance(processes, list) or not all(isinstance(process, dict) for process in processes):
+        return False
+
+    shell_pid = info.get("shell_pid")
+    found_agent = False
+    for process in processes:
+        names = identities(process)
+        if names & programs:
+            found_agent = True
+        elif not (type(shell_pid) is int and shell_pid > 0 and process.get("pid") == shell_pid
+                  and any(name.removeprefix("-") in SHELL_PROGRAMS for name in names)):
+            return False
+    return found_agent
+
+
+def close_desktop_pane(row: dict, timeout: float) -> bool:
+    import desktop
+
+    def mounted(read_timeout: float) -> tuple[bool, str, str] | None:
+        inventory = json.loads(desktop.run([desktop.APP, "ls"], read_timeout))
+        location = desktop.locate(inventory, row["terminal_id"])
+        if location is None:
+            return None
+        space, tab, pane = location
+        return bool(space.get("machine")), tab["id"], pane["pane"]
+
+    where = desktop.boundary_errors(lambda: mounted(timeout))
+    if where != (False, row["tab_id"], row["pane_id"]):
+        return False
+
+    reply = desktop.boundary_errors(lambda: desktop.app("pane.close", pane=row["pane_id"]))
+    if not isinstance(reply, dict):
+        raise RuntimeError("Herdr desktop returned an unexpected close reply")
+    end = time.monotonic() + 3
+    while (remaining := end - time.monotonic()) > 0:
+        try:
+            if desktop.boundary_errors(lambda: mounted(min(timeout, remaining))) is None:
+                return True
+        except HerdrTimeout:
+            break
+        time.sleep(min(0.05, max(0, end - time.monotonic())))
+    raise RuntimeError("close still pending")
+
+
+def reap_candidate(state_dir: Path, binary: str, timeout: float, listed: dict) -> str:
+    pane = listed["pane_id"]
+    current = live_field(state_dir, binary, timeout, datetime.now(timezone.utc))
+    row = next((row for row, verdict, _ in reap_plan(current, notes(state_dir)["keep"])
+                if row["pane_id"] == pane and verdict == "close"
+                and row["outcome_token"] == listed["outcome_token"]), None)
+    if row is None:
+        return "changed since listing"
+    if not foreground_matches(current, binary, pane, timeout):
+        return "foreground is not the agent"
+    if current.world is not None:
+        if not close_desktop_pane(row, timeout):
+            return "changed since listing"
+    else:
+        control(binary, ["pane", "close", pane], timeout)
+    return ""
+
+
+def reap(state_dir: Path, binary: str, timeout: float, panes: list[str], yes: bool) -> int:
+    with state_lock(state_dir):
+        field = live_field(state_dir, binary, timeout, datetime.now(timezone.utc))
+        plan = reap_plan(field, notes(state_dir)["keep"])
+        warning = machine_warning(field.rows)
+        if warning:
+            print(warning)
+        finished = sum(row["has_agent"] and row["raw_status"] == "done" for row in field.rows)
+        print(f"finished agents open: {finished}")
+
+        requested = dict.fromkeys(panes)
+        listed_panes = set()
+        failed = False
+        for row, verdict, reason in plan:
+            pane = row["pane_id"]
+            listed_panes.add(pane)
+            label = f'{pane} {row["agent"]}'
+            if verdict == "skip":
+                print(f"skipped {pane if pane in requested else label}: {reason}")
+            elif not yes or (requested and pane not in requested):
+                print(f"would close {label}")
+            else:
+                try:
+                    reason = reap_candidate(state_dir, binary, timeout, row)
+                except (RuntimeError, OSError, ValueError, KeyError, TypeError, IndexError,
+                        subprocess.SubprocessError) as exc:
+                    print(f"failed {label}: {exc}")
+                    failed = True
+                else:
+                    print(f"skipped {label}: {reason}" if reason else f"closed {label}")
+        for pane in requested:
+            if pane not in listed_panes:
+                print(f"skipped {pane}: not found")
+        if not any(verdict == "close" for _, verdict, _ in plan):
+            print("nothing to close")
+        return int(failed)
 
 
 def main() -> int:
@@ -589,6 +799,10 @@ def main() -> int:
     parser.add_argument("--plain", action="store_true", help="omit ANSI colors")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("refresh", help="refresh and print compact field view")
+    reap_cmd = sub.add_parser("reap", help="list or close verified finished agents on this machine")
+    reap_cmd.add_argument("--pane", action="append", default=[], metavar="PANE_ID",
+                          help="limit closing to this pane, repeatable")
+    reap_cmd.add_argument("--yes", action="store_true", help="close eligible agents after rechecking")
     sub.add_parser("pending", help="list stopped agents without a current outcome; exit 3 when any")
     task = sub.add_parser("task", help="register new work and invalidate the previous outcome")
     task.add_argument("pane")
@@ -651,6 +865,8 @@ def main() -> int:
             print(f"Field Status pane {pane_id} {'opened' if created else 'reused'}")
             return 0
         binary = resolve_herdr(args.herdr)
+        if args.command == "reap":
+            return reap(state_dir, binary, args.timeout, args.pane, args.yes)
         if args.command in ("task", "outcome", "pending"):
             with state_lock(state_dir):
                 refresh_locked(state_dir, binary, args.timeout, datetime.now(timezone.utc), False)
