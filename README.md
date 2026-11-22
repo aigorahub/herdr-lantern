@@ -45,6 +45,9 @@ for context. Use the current instructions below for setup.
 The desktop app uses `hc` and `herdr-app`. It has a separate Lantern entry
 point. The legacy plugin and its commands stay supported.
 
+The desktop app is supported on macOS and Linux only for now. On Windows,
+keep using the legacy plugin.
+
 From this checkout, with the app open:
 
 ```sh
@@ -52,7 +55,8 @@ sh bin/lantern-app open
 ```
 
 On macOS or Linux, `sh bin/lantern-app install` adds `lantern-app` to
-`~/.local/bin`. Then run `lantern-app open` from any folder.
+`~/.local/bin`. With that folder on your `PATH`, run `lantern-app open` from
+any folder.
 
 This opens a native Lantern chat in the first space. Field Status and Plan
 Usage sit to its right. It reads your existing `helper.conf` and spawn
@@ -80,6 +84,18 @@ and keep local work visible. The legacy plugin keeps its remote support.
 Use `LANTERN_CONFIG_DIR` to select another helper configuration directory.
 Use `LANTERN_DESKTOP_STATE_DIR` to select separate private desktop state.
 The checkout must stay available while its desktop sessions run.
+
+Field Status and Plan Usage include the agents whose panes sit in a tab of a
+local space. A sub-agent parked outside any tab isn't shown in either readout.
+
+These tools are part of the legacy plugin workflow and aren't supported for
+native desktop sessions: `hsh` (including `hsh morning` and `hsh evening`),
+`evening.sh`, `bin/lantern_session.py`, `bin/team_observer.py`, and
+`bin/agent_switch.py start`. `bin/onboard` also runs from the legacy plugin,
+which supplies its config folder; the spawn defaults it saves in `helper.conf`
+are the ones the desktop app reads by default. The desktop app keeps its own
+state. Legacy Field Status notes, Keep pins and team mailbox state aren't
+migrated to it.
 
 For an optional same-chat recurring monitor, set `HELPER_KATA_PROJECT` in
 `helper.conf` to a Kata project enrolled in herdr-kata with a
@@ -871,8 +887,23 @@ On Windows, run it through Git Bash:
 & 'C:\Program Files\Git\bin\sh.exe' tests/smoke.sh
 ```
 
-GitHub Actions runs the same suite on Linux, macOS, and Windows for every pull
-request.
+The smoke test also runs `tests/day-boundary.sh` and the model, Gemini model,
+Codex job, Field Status, Plan Usage and session cleanup suites. Run the other
+three suites separately:
+
+```bash
+python tests/teams.py
+python tests/agent_switch.py
+python tests/desktop.py
+```
+
+GitHub Actions (`.github/workflows/tests.yml`) runs on pushes to `main`, on
+pull requests, and on demand. On Ubuntu, macOS and Windows it runs
+`sh tests/smoke.sh`, then sets up current Python 3 and runs `tests/codex_jobs.py`,
+`tests/session_cleanup.py`, `tests/teams.py`, `tests/agent_switch.py` and
+`tests/desktop.py`. A separate Ubuntu job runs the `models`, `gemini_models`,
+`codex_jobs`, `field_status`, `plan_usage`, `session_cleanup`, `teams`, `desktop`
+and `agent_switch` suites from `tests/` on Python 3.9.
 
 ## Trust
 
