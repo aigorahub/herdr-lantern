@@ -7,6 +7,12 @@ All notable changes to Lantern, by Elves are documented here.
 ### Added
 
 - Optional Kata-backed same-chat monitoring for desktop Lantern packs.
+- Field Status shows a busy-machine line under its heading when the 1-minute
+  load is above `LANTERN_LOAD_WARN` times the CPU count (default 2; skipped
+  where load isn't available, such as Windows) or when at least
+  `LANTERN_DONE_WARN` finished agents are still open (default 20). Setting
+  either to 0 turns that check off. The line is shortened to fit the pane
+  width, only informs, and closes nothing.
 
 ### Changed
 

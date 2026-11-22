@@ -237,6 +237,10 @@ Keep entry. A stopped agent appears under Verification Pending. Only a recorded
 review with evidence can move it to Done. An incomplete, blocked, cancelled, or
 superseded outcome appears under Not Complete. Old `note done` text cannot accept
 work.
+Field Status displays a “Machine busy” line under the heading without closing
+anything when the one-minute load per core exceeds `LANTERN_LOAD_WARN` (default
+2) or the number of open finished agents reaches `LANTERN_DONE_WARN` (default 20).
+Set either variable to `0` to turn off its check.
 
 Register each new assignment with `field-status task <pane-id> <task-id>`. Run
 `field-status pending` to get JSON with the current task and token. Inspect the
