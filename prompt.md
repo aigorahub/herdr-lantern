@@ -125,7 +125,8 @@ For a request such as "have Codex review battle-paddle #166":
    Never check out the pull request in the product repository.
 4. Resolve the requested kind and model. Use the named model phrase when one
    was supplied. Otherwise use the live default. Run `model-preflight` now.
-   Stop on any failed or unavailable result. Finish this step before any
+   Stop on any failed or unavailable result. A Claude usage timeout or
+   failed usage read leaves quota unknown and seating continues. Finish this step before any
    workspace, worktree, tab, prompt, or agent mutation.
 5. If the current worktree is not the pull request head, offer a separate
    gated Herdr worktree based on that exact OID.
@@ -388,9 +389,10 @@ Composer 2.5 as a default.
 ### Availability preflight
 
 Claude token logins can return costs without quota buckets. A successful
-preflight then reports `quota: unknown`. This confirms the login and model
-route, but does not measure remaining quota. Missing login evidence and
-failed or malformed usage still fail the check.
+preflight then reports `quota: unknown`. This confirms the model route, but
+does not measure remaining quota. A usage timeout or failed usage read also
+reports `quota: unknown` and seating continues. An explicitly logged-out
+Claude account still fails the check.
 
 Run `$HERDR_PLUGIN_ROOT/bin/model-preflight <kind> <model> [effort]` after
 model resolution and before you state the seat plan and run it. Do not
@@ -401,19 +403,24 @@ passes.
   `.result` text. A session, all-models, or requested family bucket at 100%
   is unavailable. A result that says the user hit a limit is unavailable.
   A usage line with no reset time is still a valid bucket. Report the reset
-  only when the text has one. Claude model identity and effort must appear
-  in the live initialization response. The wrapper sends only the SDK
-  initialize control request in safe mode with session persistence off.
-  It sends no model prompt. Help examples are not a model allowlist.
-  Do not require every usage bucket or a reset time just to pass.
+  only when the text has one. If the usage read times out, exits nonzero,
+  returns unparseable JSON, sets an error, or returns text you do not
+  recognize, quota is unknown and seating continues. Claude model identity
+  and effort must appear in the live initialization response. That catalog
+  check is the hard gate. The wrapper sends only the SDK initialize control
+  request in safe mode with session persistence off. It sends no model
+  prompt. Help examples are not a model allowlist. Do not require every
+  usage bucket or a reset time just to pass.
 - Cursor checks the exact ID in `agent --list-models`. It does not scrape a
   dashboard or use account tokens because the CLI has no quota command.
 - Grok Build checks the exact ID in `grok models`. It does not scrape
   grok.com.
 - Codex checks the exact ID in `codex debug models`.
-- If a command is missing, times out, or returns unparseable data, stop and
-  report that the availability check failed. Do not seat on a guess. A
-  harness with no usage or quota command is not a failed check.
+- If a catalog command is missing, times out, or returns unparseable data,
+  stop and report that the availability check failed. Do not seat on a guess.
+  A usage timeout or failed usage read is not that failure: quota is unknown
+  and seating continues. A harness with no usage or quota command is not a
+  failed check.
 - Lantern's route and preflight wrappers do not cover Pi: for `--kind pi`
   skip `model-route` and `model-preflight` and pass the configured
   `--provider`/`--model` argv through. Pi resolves those itself.
