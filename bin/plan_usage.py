@@ -204,7 +204,8 @@ class Collector:
                 current = runtime.server_identity(self.binary, 2)
             self.adopt(current)
             if world is not None:
-                tabs, agents = world.view["tabs"], world.view["agents"]
+                tabs = world.view["tabs"]
+                agents = world.view["agents"] + world.view.get("sub_agents", [])
             else:
                 tabs, agents, _ = field.snapshot(self.binary, 2)
         except (RuntimeError, OSError, ValueError):
@@ -214,16 +215,22 @@ class Collector:
         bindings, notices, checks = {}, {}, []
         associations = {}
         confirmation_failed = confirmation_timed_out = False
+        sub_agent_notices = []
         for provider, rows in eligible(tabs, agents).items():
             # This branch must precede every process and dependency inspection.
             if provider not in sources.SUPPORTED:
                 state = "Account unknown" if provider == "agy" else "Limits unavailable"
-                notices[(provider, state)] = {row["tab_id"] for row in rows}
+            elif os.name == "nt" and provider in ("claude", "grok"):
+                state = sources.CODEXBAR_WINDOWS
+            else:
+                checks.extend((provider, agent) for agent in rows)
                 continue
-            if os.name == "nt" and provider in ("claude", "grok"):
-                notices[(provider, sources.CODEXBAR_WINDOWS)] = {row["tab_id"] for row in rows}
-                continue
-            checks += [(provider, agent) for agent in rows]
+            notice = (provider, state)
+            for agent in rows:
+                if world is not None and agent.get("sub_agent"):
+                    sub_agent_notices.append((notice, agent))
+                else:
+                    notices.setdefault(notice, set()).add(agent["tab_id"])
         if world is None:
             results = [attempt(lambda p=provider, a=agent: verified_scope(self.binary, p, a)) for provider, agent in checks]
         else:
@@ -248,9 +255,23 @@ class Collector:
                     if remaining or not old_tabs:
                         notices[notice] = remaining
             elif not confirmation_failed:
-                results = [result if isinstance(result, Exception) else
-                           attempt(lambda a=agent, r=result: confirm_on(second, world, a["pane_id"], r))
-                           for (_, agent), result in zip(checks, results)]
+                confirmed_sub_agents = {
+                    (agent["terminal_id"], agent["tab_id"])
+                    for agent in second.view.get("sub_agents", [])
+                }
+                confirmed_checks, confirmed_results = [], []
+                for check, result in zip(checks, results):
+                    _, agent = check
+                    if agent.get("sub_agent") and (agent["terminal_id"], agent["tab_id"]) not in confirmed_sub_agents:
+                        continue
+                    confirmed_checks.append(check)
+                    if not isinstance(result, Exception):
+                        result = attempt(lambda: confirm_on(second, world, agent["pane_id"], result))
+                    confirmed_results.append(result)
+                checks, results = confirmed_checks, confirmed_results
+                for notice, agent in sub_agent_notices:
+                    if (agent["terminal_id"], agent["tab_id"]) in confirmed_sub_agents:
+                        notices.setdefault(notice, set()).add(agent["tab_id"])
         for (provider, agent), result in zip(checks, results):
             tab, pane = agent["tab_id"], agent["pane_id"]
             association = (tab, pane, agent["agent"])

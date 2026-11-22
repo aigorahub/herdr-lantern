@@ -2513,6 +2513,28 @@ def desktop_world(agents=("codex",), argv=None, bridge=None, server=None):
     return usage.desktop.World(server or {"key": "core", "lifetime": "one"}, view, terminals)
 
 
+def core_terminal(address, pid, app=None, **fields):
+    return {
+        "address": address,
+        "state": "live",
+        "cwd": HERE,
+        "pid": pid - 50,
+        "status": {"app": app, "state": "working"} if app else None,
+        "foreground": {"pid": pid, "argv": [app or "sh"], "cwd": HERE},
+        **fields,
+    }
+
+
+def outside_tab_world(*parked, parent_tab="tb1", parent_app="claude-code"):
+    tabs = [] if parent_tab is None else [
+        {"id": parent_tab, "name": parent_tab, "terminals": [{"pane": "p1", "terminal": "t1"}]}
+    ]
+    inventory = {"spaces": [{"id": "w1", "name": "Local", "tabs": tabs}]}
+    terminals = {row["address"]: row for row in (core_terminal("t1", 101, parent_app), *parked)}
+    view = usage.desktop.snapshot(inventory, terminals, {})
+    return usage.desktop.World({"key": "core", "lifetime": "one"}, view, terminals)
+
+
 @contextlib.contextmanager
 def logins(starts=None, stamps=None):
     """Each agent process has its own login, named after its pid and service."""
@@ -2825,6 +2847,88 @@ class DesktopScanTests(unittest.TestCase):
                 self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
         self.assertEqual(collector.bindings, {})
         self.assertNotIn("old", collector.cache)
+
+
+    def scan_outside_tab_worlds(self, collector, first, second):
+        with logins(), patch.object(usage.desktop, "read_world", side_effect=[first, second]):
+            collector.scan()
+        self.assertFalse(collector.scan_error)
+
+    def test_out_of_tab_sub_agent_counts_under_parent_tab(self):
+        for name in ({}, {"name": None}):
+            with self.subTest(name=name):
+                collector = self.collector()
+                child = core_terminal("t2", 102, "codex", parent="t1", **name)
+                world = outside_tab_world(child)
+                self.scan_outside_tab_worlds(collector, world, world)
+                codex = [entry for entry in collector.bindings.values()
+                         if entry["scope"]["provider"] == "codex"]
+                self.assertEqual([entry["tabs"] for entry in codex], [{"tb1"}])
+                rows = [row for row in collector.write()["rows"] if row["provider"] == "codex"]
+                self.assertEqual([row["tabs"] for row in rows], [1])
+
+    def test_nested_sub_agent_counts_under_root_tab(self):
+        collector = self.collector()
+        first_child = core_terminal("t2", 102, "codex", parent="t1")
+        nested = core_terminal("t3", 103, "codex", parent="t2")
+        world = outside_tab_world(first_child, nested)
+        self.scan_outside_tab_worlds(collector, world, world)
+        self.assertIn("codex-103", collector.bindings)
+        self.assertEqual(collector.bindings["codex-103"]["tabs"], {"tb1"})
+
+    def test_sub_agent_through_a_non_agent_intermediate_counts(self):
+        collector = self.collector()
+        intermediate = core_terminal("t7", 107, parent="t1")
+        reviewer = core_terminal("t8", 108, "codex", parent="t7")
+        world = outside_tab_world(intermediate, reviewer)
+        self.scan_outside_tab_worlds(collector, world, world)
+        self.assertIn("codex-108", collector.bindings)
+        self.assertEqual(collector.bindings["codex-108"]["tabs"], {"tb1"})
+
+    def test_unconfirmed_sub_agent_publishes_nothing_for_that_scan(self):
+        for scenario, provider, second_tab in (("moved", "codex", "tb2"),
+                                               ("parent_closed", "codex", None),
+                                               ("unsupported_moved", "gemini", "tb2")):
+            with self.subTest(scenario=scenario):
+                collector = self.collector()
+                child = core_terminal("t2", 102, provider, parent="t1")
+                first = outside_tab_world(child, parent_app=None)
+                second = outside_tab_world(child, parent_tab=second_tab, parent_app=None)
+                self.scan_outside_tab_worlds(collector, first, second)
+                self.assertFalse(any(e["scope"]["provider"] == provider for e in collector.bindings.values()))
+                self.assertFalse(any(key[0] == provider for key in collector.notices))
+                snapshot = collector.write()
+                self.assertFalse(any(row["provider"] == provider for row in snapshot["rows"]))
+                self.assertFalse(any("tb1" in entry["tabs"] for entry in snapshot["membership"]))
+
+                if second_tab is not None:
+                    self.scan_outside_tab_worlds(collector, second, second)
+                    membership = [entry for entry in collector.write()["membership"] if entry["provider"] == provider]
+                    self.assertEqual(membership, [{"provider": provider, "tabs": [second_tab]}])
+
+    def test_sub_agent_without_a_determinable_parent_is_not_counted(self):
+        valid = core_terminal("t2", 102, "codex", parent="t1")
+        cases = {
+            "null_parent": [core_terminal("t3", 103, "codex", parent=None)],
+            "omitted_parent": [core_terminal("t3", 103, "codex")],
+            "non_string_parent": [core_terminal("t3", 103, "codex", parent=12)],
+            "remote_parent": [core_terminal("t3", 103, "codex", parent="mini/t4")],
+            "unknown_parent": [core_terminal("t3", 103, "codex", parent="t99")],
+            "cycle": [core_terminal("t5", 105, "codex", parent="t6"),
+                      core_terminal("t6", 106, "codex", parent="t5")],
+            "invalid_status": [core_terminal("t3", 103, "codex", parent="t1", status=["codex"])],
+        }
+        for scenario, invalid in cases.items():
+            with self.subTest(scenario=scenario):
+                collector = self.collector()
+                world = outside_tab_world(valid, *invalid)
+                self.assertEqual([row["terminal_id"] for row in world.view["agents"]], ["t1"])
+                self.assertEqual([row["terminal_id"] for row in world.view.get("sub_agents", [])], ["t2"])
+                self.scan_outside_tab_worlds(collector, world, world)
+                codex = {key for key, entry in collector.bindings.items()
+                         if entry["scope"]["provider"] == "codex"}
+                self.assertEqual(codex, {"codex-102"})
+                self.assertFalse(any(provider == "codex" for provider, _ in collector.notices))
 
 
 class ViewTests(unittest.TestCase):

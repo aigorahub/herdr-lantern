@@ -86,7 +86,8 @@ Use `LANTERN_DESKTOP_STATE_DIR` to select separate private desktop state.
 The checkout must stay available while its desktop sessions run.
 
 Field Status and Plan Usage include the agents whose panes sit in a tab of a
-local space. A sub-agent parked outside any tab isn't shown in either readout.
+local space. Plan Usage also counts a sub-agent parked outside any tab under
+its parent's tab; Field Status doesn't show it.
 
 These tools are part of the legacy plugin workflow and aren't supported for
 native desktop sessions: `hsh` (including `hsh morning` and `hsh evening`),

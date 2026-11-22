@@ -246,6 +246,23 @@ class FieldStatusTests(unittest.TestCase):
         read.assert_called_once_with(5)
         self.assertIn("Plugin Update", output)
 
+    def test_desktop_sub_agent_outside_tabs_stays_out_of_field_status(self):
+        import desktop
+
+        inventory = {"spaces": [{"id": "w1", "name": "Local", "tabs": [
+            {"id": "tb1", "name": "Parent", "terminals": [{"pane": "p1", "terminal": "t1"}]},
+        ]}]}
+        cwd = str(Path(__file__).resolve().parent)
+        terminals = {
+            "t1": {"state": "live", "cwd": cwd, "status": {"app": "claude-code"}},
+            "t2": {"state": "live", "cwd": cwd, "status": {"app": "codex"}, "parent": "t1"},
+        }
+        view = desktop.snapshot(inventory, terminals, {})
+        world = desktop.World({}, view, terminals)
+        with patch.object(desktop, "read_world", return_value=world):
+            rows = status.rows_for(*status.snapshot(str(desktop.READER), 2))
+        self.assertEqual([(row["terminal_id"], row["agent"]) for row in rows], [("t1", "claude")])
+
     def test_refresh_keeps_notes_and_removes_closed_agent(self):
         with tempfile.TemporaryDirectory() as root:
             state_dir = Path(root)

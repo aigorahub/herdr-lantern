@@ -32,6 +32,9 @@ All notable changes to Lantern, by Elves are documented here.
 
 ### Fixed
 
+- On the desktop, Plan Usage counts a sub-agent parked outside any tab, such as
+  a background reviewer, under its parent's tab, so its provider row no longer
+  disappears. Field Status still lists only agents in tabs (#88).
 - Plan Usage keeps a tab's last verified account binding, and any usage read
   already in progress, through one Herdr read timeout. A second timeout in a
   row, or any account, process or file change, still drops it at once, and a
