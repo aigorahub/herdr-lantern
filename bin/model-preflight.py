@@ -20,11 +20,22 @@ class CheckError(RuntimeError):
     pass
 
 
+# The catalog read keeps the 30s default on run(). Usage is advisory and
+# must not sit on that longer deadline.
+USAGE_TIMEOUT = 10
+
+
 @dataclass(frozen=True)
 class UsageBucket:
     label: str
     percent: int
     reset: str
+
+
+@dataclass(frozen=True)
+class ClaudeUsage:
+    buckets: list[UsageBucket]
+    note: str | None = None
 
 
 def fail(message: str) -> None:
@@ -53,7 +64,11 @@ def resolve_command(name: str) -> list[str]:
 
 
 def run(
-    command: list[str], *, input_text: str | None = None, stdout_via_file: bool = False
+    command: list[str],
+    *,
+    input_text: str | None = None,
+    stdout_via_file: bool = False,
+    timeout: float = 30,
 ) -> str:
     prefix = resolve_command(command[0])
     if len(prefix) > 1:
@@ -72,7 +87,7 @@ def run(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=timeout,
         )
 
     try:
@@ -80,7 +95,7 @@ def run(
             return model_catalog.capture_to_file(invoke)
         return invoke(subprocess.PIPE).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        fail(f"availability check failed: {command[0]} ({error})")
+        raise CheckError(f"availability check failed: {command[0]} ({error})") from error
 
 
 def words(value: str) -> set[str]:
@@ -160,21 +175,41 @@ def exhausted_reason(bucket: UsageBucket) -> str:
     return reason
 
 
-def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
+def usage_problem_note(error: CheckError) -> str:
+    cause = error.__cause__
+    if isinstance(cause, subprocess.TimeoutExpired):
+        limit = USAGE_TIMEOUT if cause.timeout is None else cause.timeout
+        if isinstance(limit, bool) or not isinstance(limit, (int, float)):
+            limit = USAGE_TIMEOUT
+        if int(limit) == limit:
+            limit = int(limit)
+        return f"usage read timed out after {limit}s"
+    if isinstance(cause, subprocess.CalledProcessError):
+        return "usage read exited nonzero"
+    return "usage read failed"
+
+
+def read_claude_usage() -> ClaudeUsage:
+    """Read print-mode usage. Problems become quota notes; they do not fail the seat."""
+    command = ["claude", "/usage", "-p", "--output-format", "json"]
     try:
-        payload = json.loads(run(["claude", "/usage", "-p", "--output-format", "json"]))
+        raw = run(command, timeout=USAGE_TIMEOUT)
+    except CheckError as error:
+        return ClaudeUsage([], usage_problem_note(error))
+    try:
+        payload = json.loads(raw)
         result = payload["result"]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
-        fail(f"availability check failed: Claude returned unparseable usage JSON ({error})")
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return ClaudeUsage([], "usage read returned unparseable JSON")
     if not isinstance(result, str):
-        fail("availability check failed: Claude usage result is not text")
+        return ClaudeUsage([], "usage read result is not text")
     is_error = payload.get("is_error", False)
     if not isinstance(is_error, bool):
-        fail("availability check failed: Claude usage error flag is not boolean")
+        return ClaudeUsage([], "usage read error flag is not boolean")
     if is_error:
-        fail("availability check failed: Claude usage command reported an error")
+        return ClaudeUsage([], "usage read reported an error")
     if "subtype" in payload and payload["subtype"] != "success":
-        fail("availability check failed: Claude usage returned an unsuccessful result")
+        return ClaudeUsage([], "usage read returned an unsuccessful result")
     buckets = []
     limit = re.search(r"hit your\s+(.+?)\s+limit(?:[^\n]*?resets\s+([^\n]+))?", result, re.IGNORECASE)
     if limit:
@@ -187,7 +222,9 @@ def parse_claude_usage() -> tuple[str, list[UsageBucket]]:
     for match in pattern.finditer(result):
         reset = match.group(3).strip() if match.group(3) else ""
         buckets.append(UsageBucket(match.group(1), int(match.group(2)), reset))
-    return result, buckets
+    if not buckets and not claude_cost_usage(result):
+        return ClaudeUsage([], "usage read returned unrecognized text")
+    return ClaudeUsage(buckets)
 
 
 def claude_cost_usage(result: str) -> bool:
@@ -303,13 +340,26 @@ def claude_substitute(
     ):
         sonnet_id = models["sonnet"][0]
         return {"kind": "claude", "model": "sonnet", "effort": "high", "fast": False, "argv": ["--model", sonnet_id, "--effort", "high"]}
-    return cursor_sol_substitute()
+    try:
+        return cursor_sol_substitute()
+    except CheckError:
+        # Cursor is an optional fallback. Keep the Claude catalog rejection.
+        return None
 
 
-def report_available(kind: str, model: str, effort: str, *, quota: str | None = None) -> int:
+def report_available(
+    kind: str,
+    model: str,
+    effort: str,
+    *,
+    quota: str | None = None,
+    quota_note: str | None = None,
+) -> int:
     payload = {"available": True, "kind": kind, "model": model, "effort": effort}
     if quota is not None:
         payload["quota"] = quota
+    if quota_note:
+        payload["quota_note"] = quota_note
     print(json.dumps(payload, separators=(",", ":")))
     return 0
 
@@ -381,16 +431,14 @@ def check(kind: str, model: str, effort: str) -> int:
             )
         return report_available(kind, model, effort)
     if kind == "claude":
+        # The initialization catalog is the only hard gate for model and effort.
+        # token_source "none" is the only not-logged-in failure. A usage miss
+        # leaves quota unknown and still seats on that catalog result.
         models, token_source = claude_capabilities()
         if token_source and token_source.lower() == "none":
             fail("availability check failed: Claude is not logged in")
-        usage, buckets = parse_claude_usage()
-        if not buckets and not token_source:
-            # No token source and no quota buckets: nothing shows a login.
-            fail("availability check failed: Claude is not logged in "
-                 "(no token source and no usage buckets)")
-        if not buckets and not claude_cost_usage(usage):
-            fail("availability check failed: Claude returned unrecognized usage text")
+        usage = read_claude_usage()
+        buckets = usage.buckets
         if model.lower() not in models:
             return report_unavailable(
                 kind,
@@ -405,6 +453,8 @@ def check(kind: str, model: str, effort: str) -> int:
                 f"Claude effort {effort} is absent from the Claude initialization catalog",
                 claude_substitute(model, buckets, models),
             )
+        if usage.note:
+            return report_available(kind, model, effort, quota="unknown", quota_note=usage.note)
         exhausted = exhausted_bucket(models[model.lower()][0], buckets)
         if exhausted:
             return report_unavailable(

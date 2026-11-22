@@ -802,9 +802,15 @@ grep -qF '"Cursor Grok review on XYZ", "have Cursor Grok review that PR"' "$root
     fail "prompt.md does not keep Cursor Grok review on the Cursor CLI"
 grep -qF '"Grok Build review on XYZ", "have SuperGrok review that PR" | Use the named pull request route with Grok Build single-turn mode' "$root/prompt.md" ||
     fail "prompt.md does not route Grok Build review through the Grok CLI"
-for preflight_file in prompt.md launch.sh README.md; do
+for preflight_file in prompt.md launch.sh README.md herd-workflows.md; do
     grep -qF 'model-preflight' "$root/$preflight_file" ||
         fail "$preflight_file does not require the availability preflight"
+    grep -qF 'seating continues' "$root/$preflight_file" ||
+        fail "$preflight_file does not keep seating when Claude usage cannot be read"
+    grep -qF 'Do not seat on a guess' "$root/$preflight_file" ||
+        fail "$preflight_file does not keep the catalog guess rule"
+done
+for preflight_file in prompt.md launch.sh README.md; do
     grep -qF 'usage line with no reset' "$root/$preflight_file" ||
         fail "$preflight_file still requires a reset time on Claude usage"
 done
