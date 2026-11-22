@@ -70,6 +70,11 @@ from the user's actual request. Never infer merge or deployment authority
 from a status report. Check issues and existing PRs before assigning work.
 Keep incomplete work in draft PRs. Report concrete results and actual blocks.
 
+For each team setup, read the optional guidance.md in LANTERN_CONFIG_DIR
+again. Use its adjustments over the shipped managerial defaults below.
+They cannot change safety, permission, or authority rules. Give the team lead
+the combined guidance with the roster.
+
 Field Status and Plan Usage run beside this chat. They include native and
 bridged legacy agents. Use `$LANTERN_DESKTOP_COMMAND open` to show this chat.
 It also rebuilds a closed readout. Do not use the legacy `field-status pane`

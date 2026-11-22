@@ -250,18 +250,22 @@ class DesktopTests(unittest.TestCase):
 
     def test_kata_opt_in_adds_only_desktop_monitor_instructions(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state, config = Path(tmp) / "state", Path(tmp) / "config"
-            config.mkdir()
-            with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": str(state),
-                                         "LANTERN_CONFIG_DIR": str(config)}), \
+            home, state = Path(tmp) / "home", Path(tmp) / "state"
+            config = home / ".config/herdr/plugins/config/aigora.lantern"
+            config.mkdir(parents=True)
+            with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": str(state)}), \
+                    patch.object(Path, "home", return_value=home), \
                     patch.object(desktop, "helper_argv", side_effect=lambda conf, prompt: ["helper", prompt]), \
                     patch.object(desktop, "helper_command", return_value=("codex", "helper")), \
                     patch.object(desktop.os, "chdir"), patch.object(desktop.os, "execv") as execute:
                 for project in ("", "example-project"):
+                    os.environ.pop("LANTERN_CONFIG_DIR", None)
                     (config / "helper.conf").write_bytes(
                         f'HELPER_KATA_PROJECT="{project}"\n'.encode() if project else b"")
                     desktop.chat()
                     prompt = execute.call_args.args[1][1]
+                    self.assertIn((desktop.ROOT / "guidance.md").read_text(encoding="utf-8"), prompt)
+                    self.assertEqual(os.environ["LANTERN_CONFIG_DIR"], str(config.resolve()))
                     settings = prompt.split("\nSaved settings: ", 1)[1].split("\n", 1)[0]
                     self.assertNotIn("HELPER_KATA_PROJECT", json.loads(settings))
                     monitor = (desktop.ROOT / "kata-monitor.md").read_text()

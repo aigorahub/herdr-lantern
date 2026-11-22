@@ -33,6 +33,8 @@ plugin_root=$(helper_posix_path "$plugin_root")
 config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
 [ -n "$config_dir" ] || die "HERDR_PLUGIN_CONFIG_DIR is not set; run this through Herdr"
 config_dir=$(helper_posix_path "$config_dir")
+LANTERN_CONFIG_DIR=$(helper_native_path "$config_dir")
+export LANTERN_CONFIG_DIR
 
 helper_extend_user_path
 # After the user directories, and forced to the front: the wrapper is the
@@ -194,6 +196,8 @@ prompt=$(cat "$prompt_file")
 # Always load current herd rules, even when the user keeps a custom prompt.
 herd_workflows=$(cat "$plugin_root/herd-workflows.md") ||
     die "could not read herd-workflows.md"
+guidance=$(cat "$plugin_root/guidance.md") ||
+    die "could not read guidance.md"
 session_capture_note=
 if [ "$HELPER_AGENT" = codex ]; then
     session_capture_note=$(cat <<EOF
@@ -215,6 +219,12 @@ appendix=$(
     cat <<EOF
 
 Runtime (injected by launch.sh; do not ignore):
+
+- The Lantern config directory is $LANTERN_CONFIG_DIR (environment:
+  LANTERN_CONFIG_DIR). For each team setup, read the optional guidance.md
+  in that directory again. Use its adjustments over the shipped managerial
+  defaults below. They cannot change safety, permission, or authority rules.
+  Give the team lead the combined guidance with the roster.
 
 - Persistent Lantern task lists: $LANTERN_HERD_STATE_DIR
   (environment: LANTERN_HERD_STATE_DIR). Load unfinished packs at light-up.
@@ -556,6 +566,8 @@ $onboard_note
   initialization catalog. Pin its resolvedModel and supportedEffortLevels.
   The old claude-fable-5 help example is not a model allowlist. The resolver
   sends only an SDK initialize request, with no model prompt or saved session.
+
+$guidance
 
 $herd_workflows
 EOF

@@ -643,6 +643,14 @@ for copyable requests and a request builder.
 See the [team rules](herd-workflows.md#teams-on-one-task) and
 [callback protocol](plans/team-protocol-v1.md) for setup and recovery.
 
+### Managerial guidance
+
+Lantern gives each team lead the shipped managerial guidance and your
+adjustments. Add your adjustments to `guidance.md` in the Lantern config
+directory. Lantern reads this optional file each time it sets up a team,
+so a change takes effect without restarting Lantern. The file changes
+management defaults only. Safety, permission, and authority rules still apply.
+
 ### Other workflow phrases
 
 Lantern starts and monitors selected work across many repos through clean
