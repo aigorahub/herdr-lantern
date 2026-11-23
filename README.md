@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.1** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.2** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -271,12 +271,18 @@ Herdr 0.7.5 minimum.
 Plan Usage includes plans with an open agent tab anywhere on this Herdr
 server. Idle and Done tabs count. Tabs hidden from Field Status still count.
 The configured Fugu plan also stays visible after a short review command ends.
+Local `usage-preferences.json` in the server's shared usage directory can hide services
+with `excluded_providers` and keep Claude, Google, and Grok visible without an
+agent with `pinned_providers`. For example, use
+`{"excluded_providers":["fugu"],"pinned_providers":["claude","agy","grok"]}`.
+Excluded services are not probed. Pinned rows use the local saved logins and
+the same quota readers as open agents. They do not start agents.
 The table shows one row per service: Claude, OpenAI, Grok, Google, Fugu,
 and other open services. Its columns are Service, Session left, Week left,
 and Week resets. Allowances use percentages. Weekly resets use local time,
 such as Sun 05:00 EDT, for the limit that sets the displayed weekly percentage.
-Claude uses its total weekly reset when total and model limits have the same
-percentage. Other tied limits with different reset times show Varies. Missing or expired reset
+Claude shows its all-models limits in the table and lists separate
+model-specific weekly quotas below. Other tied limits with different reset times show Varies. Missing or expired reset
 times show --. Panes under 39 columns retain the percentages and ask for more
 width to show resets. It omits IDs, model names, plan codes, credit balances,
 source details, and tab counts.
@@ -305,10 +311,13 @@ out of date; before the first verified scan, the pane shows the error.
 Values become stale after 120 seconds. Missing values show --.
 
 Antigravity reads `agy -p /usage --output-format json`. It extracts the
-remaining fractions from the structured quota groups and requires zero
-model turns. The reader uses the open tab's HOME and local login file.
-It checks the login file before and after the read. It does not invent a
-billing account ID from the installation ID.
+remaining fractions from the Gemini quota group and requires zero
+model turns. Disabled buckets and the separate Claude/GPT quota group do
+not affect the Google row. The reader uses the open tab's HOME and checks
+the local login file before and after the read. On macOS, it also checks
+the current OS user's Keychain login when HOME matches that user's home.
+It stores only a credential digest, never the credential. It does not
+invent a billing account ID from the installation ID.
 Grok reads the saved OAuth subscription with cookies off. An inherited API
 key or base URL does not block that plan reading. Those values never enter
 the quota probe. A custom OAuth token remains unsupported.

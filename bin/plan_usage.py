@@ -216,7 +216,15 @@ class Collector:
         associations = {}
         confirmation_failed = confirmation_timed_out = False
         sub_agent_notices = []
+        preferences = field.read_json(self.shared / "usage-preferences.json", {})
+        def providers(key: str) -> set[str]:
+            values = preferences.get(key, []) if isinstance(preferences, dict) else []
+            return {v for v in values if isinstance(v, str)} if isinstance(values, list) else set()
+        excluded = providers("excluded_providers")
+        pinned = providers("pinned_providers") - excluded
         for provider, rows in eligible(tabs, agents).items():
+            if provider in excluded:
+                continue
             # This branch must precede every process and dependency inspection.
             if provider not in sources.SUPPORTED:
                 state = "Account unknown" if provider == "agy" else "Limits unavailable"
@@ -251,6 +259,8 @@ class Collector:
                 open_tabs = {tab.get("tab_id") for tab in tabs if tab.get("tab_id")}
                 notices = {}
                 for notice, old_tabs in self.notices.items():
+                    if notice[0] in excluded:
+                        continue
                     remaining = old_tabs & open_tabs
                     if remaining or not old_tabs:
                         notices[notice] = remaining
@@ -291,13 +301,16 @@ class Collector:
                 record = dict(record, timeouts=1)
             elif isinstance(result, Exception):
                 notice_provider = result.provider if isinstance(result, (sources.SourceError, field.HerdrTimeout)) else None
-                state = result.state if isinstance(result, sources.SourceError) else "Account unknown"
-                notices.setdefault((notice_provider or provider, state), set()).add(tab)
+                if (notice_provider or provider) not in excluded:
+                    state = result.state if isinstance(result, sources.SourceError) else "Account unknown"
+                    notices.setdefault((notice_provider or provider, state), set()).add(tab)
                 continue
             else:
                 scope = dict(result)
                 identity = scope.pop("process_identity", None)
                 record = {"key": scope["key"], "identity": identity, "route": route, "timeouts": 0}
+            if scope["provider"] in excluded:
+                continue
             associations[association] = record
             entry = bindings.setdefault(scope["key"], {"scope": scope, "tabs": set()})
             entry["tabs"].add(tab)
@@ -306,6 +319,9 @@ class Collector:
         if confirmation_failed:
             for key, entry in previous.items():
                 if key in bindings:
+                    continue
+                if entry["scope"]["provider"] in excluded:
+                    self.cache.pop(key, None)
                     continue
                 if not entry["tabs"] or (key in self.configured_keys and stamp_matches(entry["scope"])):
                     bindings[key] = {"scope": entry["scope"], "tabs": set()}
@@ -318,20 +334,37 @@ class Collector:
             return
 
         configured_keys = set()
-        try:
-            configured = sources.configured_fugu_scope(os.environ)
-            if configured:
-                bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
-                configured_keys.add(configured["key"])
-        except sources.SourceError as exc:
-            notices.setdefault(("fugu", exc.state), set())
-        try:
-            configured = sources.configured_teamclaude_scope(os.environ)
-            if configured:
-                bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
-                configured_keys.add(configured["key"])
-        except sources.SourceError as exc:
-            notices.setdefault(("teamclaude", exc.state), set())
+        if "fugu" not in excluded:
+            try:
+                configured = sources.configured_fugu_scope(os.environ)
+                if configured:
+                    bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
+                    configured_keys.add(configured["key"])
+            except sources.SourceError as exc:
+                notices.setdefault(("fugu", exc.state), set())
+        if "teamclaude" not in excluded:
+            try:
+                configured = sources.configured_teamclaude_scope(os.environ)
+                if configured:
+                    bindings.setdefault(configured["key"], {"scope": configured, "tabs": set()})
+                    configured_keys.add(configured["key"])
+            except sources.SourceError as exc:
+                notices.setdefault(("teamclaude", exc.state), set())
+        for provider in sorted(pinned & {"claude", "grok", "agy"}):
+            if os.name == "nt" and provider in ("claude", "grok"):
+                notices.setdefault((provider, sources.CODEXBAR_WINDOWS), set())
+                continue
+            try:
+                executable = shutil.which(provider)
+                if not executable:
+                    raise sources.SourceError(f"{NAMES[provider]} CLI not found")
+                scope = sources.scope_for(provider, {"argv": [executable], "executable": executable}, dict(os.environ))
+                bindings.setdefault(scope["key"], {"scope": scope, "tabs": set()})
+                configured_keys.add(scope["key"])
+            except sources.SourceError as exc:
+                notices.setdefault((provider, exc.state), set())
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+                notices.setdefault((provider, "Account unknown"), set())
         self.configured_keys = configured_keys
         self.replace_bindings(bindings)
         self.notices = notices
@@ -617,13 +650,9 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
             row_stale = age >= 120 or snapshot.get("scan_failed") or row.get("state") != "Measured"
             for label in ("session", "week"):
                 candidates = [value for value in row["windows"] if period(value) == label]
-                if row["provider"] == "claude" and label == "week" and candidates:
-                    # Select this account's total reset when model windows tie it.
-                    # The ID fallback also handles snapshots from older readers.
-                    lowest = min(value["remaining"] for value in candidates)
-                    total = [value for value in candidates if value["remaining"] == lowest
-                             and (value.get("scope") == "service" or value.get("id") == "secondary")]
-                    candidates = total or candidates
+                if row["provider"] == "claude":
+                    candidates = [value for value in candidates
+                                  if value.get("scope") == "service" or value.get("id") in ("primary", "secondary")]
                 for value in candidates:
                     reset = value.get("reset_at")
                     outdated = row_stale or bool(reset and reset <= now)
@@ -642,6 +671,28 @@ def render(snapshot: dict, now: float | None = None, width: int | None = None,
         if show_resets:
             values.append(reset_time(selected.get("week", (None, False, set()))[2]))
             codes.append("" if values[-1] not in ("--", "Varies") else "2")
+        if name == "Claude":
+            model_windows = {}
+            for row in accounts:
+                for value in row.get("windows", []):
+                    if value.get("scope") == "service" or (value.get("scope") != "model" and value.get("id") in ("primary", "secondary")):
+                        continue
+                    if period(value) != "week":
+                        continue
+                    label = str(value.get("label", "Model")).removesuffix(" only")
+                    old = model_windows.get(label)
+                    reset = value.get("reset_at")
+                    outdated = (now - row.get("observed_at", 0) >= 120 or row.get("state") != "Measured"
+                                or snapshot.get("scan_failed") or bool(reset and reset <= now))
+                    if old is None or value["remaining"] < old[0]["remaining"]:
+                        model_windows[label] = (value, outdated, {reset})
+                    elif value["remaining"] == old[0]["remaining"]:
+                        model_windows[label] = (old[0], old[1] or outdated, old[2] | {reset})
+            for label, (value, outdated, resets) in sorted(model_windows.items()):
+                stale = stale or outdated
+                left, _ = allowance(value, outdated)
+                reset = reset_time(resets)
+                infos.append(f"Claude {label}: {left} week left; resets {reset}.")
         saved = saved_by_service[name]
         stale = stale or bool(saved and saved["stale"])
         if reset_columns:

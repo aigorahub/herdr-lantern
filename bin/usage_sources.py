@@ -1,6 +1,7 @@
 """Read plan limits from the login profile of an open agent. No model turns."""
 from __future__ import annotations
 
+import base64
 import errno
 import hashlib
 import http.client
@@ -72,6 +73,11 @@ def stamp(path: Path) -> list:
 
 def current_stamp(scope: dict) -> str:
     values = []
+    if scope.get("agy_keychain"):
+        try:
+            values.append(agy_keychain_stamp(scope["env"]["HOME"]))
+        except SourceError:
+            values.append(None)
     for value in scope["files"]:
         path = Path(value)
         if scope["provider"] == "claude" and path.name == ".claude.json":
@@ -92,6 +98,36 @@ def current_stamp(scope: dict) -> str:
         else:
             values.append(stamp(path))
     return runtime.digest(values)
+
+
+def agy_uses_os_home(home: str) -> bool:
+    if platform.system() != "Darwin":
+        return False
+    import pwd
+    try:
+        return Path(home).resolve() == Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve()
+    except (OSError, KeyError):
+        return False
+
+
+def agy_keychain_stamp(home: str) -> str:
+    # macOS Keychain belongs to the OS user, not an arbitrary HOME selector.
+    if not agy_uses_os_home(home):
+        raise SourceError("Sign in required")
+    try:
+        result = subprocess.run(
+            ["/usr/bin/security", "find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
+            capture_output=True, timeout=3, check=False,
+        )
+        raw = result.stdout.strip()
+        if result.returncode or not raw.startswith(b"go-keyring-base64:"):
+            raise ValueError("No supported login")
+        data = json.loads(base64.b64decode(raw.split(b":", 1)[1], validate=True))
+        if not isinstance(data, dict) or not data.get("token") or not data.get("id_token_email"):
+            raise ValueError("No login identity")
+        return hashlib.sha256(raw).hexdigest()
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        raise SourceError("Sign in required") from None
 
 
 def route_hint(provider: str, argv: object) -> str:
@@ -401,8 +437,9 @@ def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
     elif provider == "agy":
         root = root / ".gemini" / "antigravity-cli"
         files = [root / "antigravity-oauth-token", root / "settings.json", Path(home) / ".gemini" / "settings.json"]
+        keychain = agy_uses_os_home(home)
         if not files[0].is_file() or not files[0].stat().st_size:
-            raise SourceError("Sign in required")
+            agy_keychain_stamp(home)
     else:
         root = Path(native.get("GROK_HOME", str(root / ".grok")))
         if any(str(value).startswith(("--home", "--profile")) for value in argv):
@@ -411,6 +448,8 @@ def _scope_for(provider: str, process: dict, env: dict[str, str]) -> dict:
         native["GROK_HOME"] = str(root)
     scope = {"provider": provider, "env": native, "executable": str(Path(executable).absolute()),
              "files": [str(path) for path in files]}
+    if provider == "agy" and keychain:
+        scope["agy_keychain"] = True
     scope["stamp"] = current_stamp(scope)
     # Grok OAuth reads scoped credentials. It never invokes the agent binary.
     # A running old binary can remain valid after its updater removes the file.
@@ -794,9 +833,13 @@ def parse_agy(payload: object, scope: dict, observed: float) -> dict:
     for group in groups:
         if not isinstance(group, dict) or not isinstance(group.get("buckets"), list):
             raise SourceError("Limits unavailable")
+        if group.get("name") and group["name"] != "Gemini Models":
+            continue
         for bucket in group["buckets"]:
             if not isinstance(bucket, dict):
                 raise SourceError("Limits unavailable")
+            if bucket.get("disabled"):
+                continue
             remaining = number(bucket.get("remaining_fraction"))
             minutes = {"weekly": 10080, "5h": 300}.get(bucket.get("window"))
             if remaining is None or not 0 <= remaining <= 1 or minutes is None:
@@ -973,6 +1016,50 @@ def parse_codexbar(payload: object, provider: str, observed: float, auth: dict |
     return {"account": runtime.digest([provider, email.lower(), organization]), "provider": provider,
             "plan": field.clean(plan), "windows": windows, "credits": credits,
             "observed_at": epoch(usage.get("updatedAt")) or observed, "source": row["source"]}
+
+
+def parse_claude(payload: object, observed: float, auth: dict) -> dict:
+    if (not isinstance(payload, dict) or payload.get("is_error") is not False
+            or type(payload.get("num_turns")) is not int or payload["num_turns"] != 0
+            or payload.get("subtype") != "success" or not isinstance(payload.get("result"), str)):
+        raise SourceError("Last update failed")
+    if not auth.get("loggedIn") or not isinstance(auth.get("email"), str) or not auth["email"].strip():
+        raise SourceError("Account unknown")
+    pattern = re.compile(r"^(Current session|Current week \(([^)]+)\)):\s*(\d+(?:\.\d+)?)% used"
+                         r"(?:\s*[·•-]\s*resets\s+(.+))?$", re.I | re.M)
+    windows = []
+    for match in pattern.finditer(payload["result"]):
+        used = float(match[3])
+        if not 0 <= used <= 100:
+            raise SourceError("Limits unavailable")
+        session = match[1].lower() == "current session"
+        model = None if session or match[2].lower() == "all models" else match[2]
+        reset_text = (match[4] or "").strip()
+        reset_at = None
+        dated = re.fullmatch(r"([A-Za-z]{3}) (\d{1,2}) at (\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)", reset_text)
+        if dated and 1 <= int(dated[3]) <= 12:
+            try:
+                from zoneinfo import ZoneInfo
+                zone = ZoneInfo(dated[6])
+                current = datetime.fromtimestamp(observed, zone)
+                hour = int(dated[3]) % 12 + (12 if dated[5] == "pm" else 0)
+                reset = datetime.strptime(f"{current.year} {dated[1]} {dated[2]}", "%Y %b %d").replace(
+                    hour=hour, minute=int(dated[4] or 0), tzinfo=zone)
+                if (current - reset).days > 180:
+                    reset = reset.replace(year=current.year + 1)
+                reset_at = reset.timestamp()
+            except (ValueError, KeyError):
+                pass
+        key = "primary" if session else "secondary" if model is None else "claude-weekly-scoped-" + model.lower()
+        windows.append({"id": key, "label": "Session" if session else model + " only" if model else "Weekly",
+                        "minutes": 300 if session else 10080, "remaining": round(100 - used, 6),
+                        "reset_at": reset_at, "reset_text": reset_text,
+                        "scope": "model" if model else "service"})
+    if not windows:
+        raise SourceError("Limits unavailable")
+    return {"account": runtime.digest(["claude", auth["email"].lower(), auth.get("orgId") or ""]),
+            "provider": "claude", "plan": field.clean(auth.get("subscriptionType") or "Plan unknown"),
+            "windows": windows, "credits": [], "observed_at": observed, "source": "claude"}
 
 
 def codex_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
@@ -1257,6 +1344,16 @@ def fetch(scope: dict, state: Path, cancel: threading.Event) -> dict:
             result = fugu_read(scope, deadline, cancel)
         elif provider == "teamclaude":
             result = teamclaude_read(scope, deadline, cancel)
+        elif provider == "claude":
+            before = auth_status(scope, deadline, cancel)
+            code, output = runtime.capture([scope["executable"], "/usage", "-p", "--output-format", "json"],
+                                           scope["env"], deadline, cancel, cwd=scope["env"]["HOME"])
+            after = auth_status(scope, deadline, cancel)
+            if before != after:
+                raise SourceError("Account unknown")
+            if code:
+                raise SourceError("Last update failed")
+            result = parse_claude(json.loads(output), time.time(), before)
         elif provider == "agy":
             code, output = runtime.capture([scope["executable"], "-p", "/usage", "--output-format", "json"],
                                            scope["env"], min(deadline, time.monotonic() + 20), cancel,
