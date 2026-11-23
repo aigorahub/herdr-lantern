@@ -4,6 +4,26 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-11-22
+
+### Added
+
+- Cross-provider fallbacks. A team seat can list ordered `fallbacks` (exact
+  harness, model and effort). When the seat's provider has less than
+  `switch_below` percent (default 10) of its weekly or 5-hour window left,
+  or the seat stops at a usage limit, the manager moves the work at a clean
+  boundary to the first fallback in a different usage pool with known usage
+  above the threshold. Unknown usage never triggers a switch. The fallback
+  gets the roster and a compact handoff. It never reviews its own change and
+  never raises permissions. A lead switch is announced to the user first.
+  Seats without `fallbacks` keep the old rule: report and wait.
+- Saved yolo. A team seat can set `"permissions": "yolo"`. Lantern maps it
+  to the harness flag (Codex `--dangerously-bypass-approvals-and-sandbox`,
+  Agy and Claude `--dangerously-skip-permissions`, Grok `--always-approve`)
+  and does not ask again. A fallback inherits the setting of the seat it
+  replaces. Authority for merge, deployment, publication and financial
+  actions still comes from the current request.
+
 ## [0.19.2] - 2026-11-22
 
 ### Added
