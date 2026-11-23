@@ -484,6 +484,7 @@ class UsageTests(unittest.TestCase):
                 with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
                     sources.fetch(scope, home / "state", threading.Event())
 
+    @unittest.skipIf(os.name == "nt", "macOS Keychain login; Windows has no pwd module")
     def test_agy_keychain_login_without_legacy_file_and_rotation(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
@@ -860,6 +861,7 @@ class UsageTests(unittest.TestCase):
                 row["windows"].reverse()
                 self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
 
+    @unittest.skipIf(os.name == "nt", "Windows reads Claude through CodexBar, not claude /usage")
     def test_claude_absent_session_does_not_copy_weekly_limit(self):
         now = 1794869400
         auth = {"loggedIn": True, "email": "test@example.invalid", "orgId": "org", "subscriptionType": "max"}
