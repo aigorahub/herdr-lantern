@@ -55,8 +55,9 @@ triggers one. Select the first saved fallback with verified remaining
 usage above the threshold in a different pool. Check each applicable
 weekly and 5-hour window. Skip a candidate if an applicable reading is
 unknown or at or below the threshold. Use the reading for the intended
-login. Codex uses OpenAI, Claude uses Anthropic, Agy uses Google, and
-Grok uses xAI. Skip other models in the same pool. A model name alone
+login. Codex uses OpenAI, except a Codex seat on the Fugu profile, which
+uses the Fugu pool. Claude uses Anthropic, Agy uses Google, and Grok uses
+xAI. Skip other models in the same pool. A model name alone
 does not identify its pool.
 Use model-route and model-preflight where supported. Otherwise use the
 installed CLI catalog and help. Verify the exact route and permission
