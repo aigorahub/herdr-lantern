@@ -1,6 +1,7 @@
 """Plan Usage protocol, identity, collection, locks, and startup tests."""
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import http.server
@@ -306,6 +307,55 @@ class OldPythonTests(unittest.TestCase):
 
 
 class UsageTests(unittest.TestCase):
+    def test_excluded_fugu_is_not_probed_and_pinned_services_need_no_agent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            server = {"key": "server", "lifetime": "one"}
+            collector = usage.Collector(root / "state", root / "shared", "herdr", server)
+            field.write_json(root / "shared/usage-preferences.json", {
+                "excluded_providers": ["fugu", "teamclaude"], "pinned_providers": ["grok", "claude", "agy"]})
+            def scope_for(provider, process, env):
+                return {"key": provider + "-login", "provider": provider, "stamp": "one"}
+            try:
+                with patch.object(runtime, "server_identity", return_value=server), \
+                        patch.object(field, "snapshot", return_value=([], [], [])), \
+                        patch.dict(os.environ, {"HOME": str(root)}, clear=True), \
+                        patch.object(usage.shutil, "which", side_effect=lambda provider: "/usr/bin/" + provider), \
+                        patch.object(sources, "scope_for", side_effect=scope_for), \
+                        patch.object(sources, "configured_fugu_scope") as fugu, \
+                        patch.object(sources, "configured_teamclaude_scope") as teamclaude:
+                    collector.scan()
+                fugu.assert_not_called()
+                teamclaude.assert_not_called()
+                expected = {"agy-login"} if os.name == "nt" else {"grok-login", "claude-login", "agy-login"}
+                self.assertEqual(set(collector.bindings), expected)
+                self.assertEqual(collector.configured_keys, expected)
+                for binding in collector.bindings.values():
+                    self.assertEqual(binding["tabs"], set())
+                collector.cache["agy-login"] = {"result": {"provider": "agy", "account": "one",
+                    "observed_at": 1800000000, "windows": [{"id": "weekly", "remaining": 0,
+                    "minutes": 10080, "reset_at": 1800003600}]}, "state": "Measured"}
+                output = usage.render(collector.write(), now=1800000001, width=80, zone=timezone.utc)
+                self.assertIn("Grok", output)
+                self.assertIn("Claude", output)
+                self.assertIn("Google", output)
+                self.assertIn("0%", output)
+                self.assertIn("09:00", output)
+                self.assertNotIn("Fugu", output)
+                if os.name == "nt":
+                    self.assertEqual(collector.notices, {
+                        (provider, sources.CODEXBAR_WINDOWS): set() for provider in ("claude", "grok")})
+                for invalid in ({"excluded_providers": None, "pinned_providers": [{}]},):
+                    field.write_json(root / "shared/usage-preferences.json", invalid)
+                    with patch.object(runtime, "server_identity", return_value=server), \
+                            patch.object(field, "snapshot", return_value=([], [], [])), \
+                            patch.object(sources, "configured_fugu_scope", return_value=None), \
+                            patch.object(sources, "configured_teamclaude_scope", return_value=None):
+                        collector.scan()
+                    self.assertEqual(collector.bindings, {})
+            finally:
+                collector.close()
+
     def setUp(self):
         # Collector fixtures do not use the machine's installed Fugu account.
         configured = patch.object(sources, "configured_fugu_scope", return_value=None)
@@ -372,12 +422,14 @@ class UsageTests(unittest.TestCase):
         payload = {"status": "SUCCESS", "num_turns": 0, "command": {"name": "usage", "data": {"groups": [
             {"name": "Gemini Models", "buckets": [
                 {"id": "gemini-weekly", "window": "weekly", "remaining_fraction": .9064},
-                {"id": "gemini-5h", "window": "5h", "remaining_fraction": .5847}]},
+                {"id": "gemini-5h", "window": "5h", "remaining_fraction": .5847},
+                {"id": "disabled", "window": "5h", "remaining_fraction": 0, "disabled": True}]},
             {"name": "Claude and GPT models", "buckets": [
-                {"id": "other-weekly", "window": "weekly", "remaining_fraction": 1}]}]}}}
+                {"id": "other-weekly", "window": "weekly", "remaining_fraction": 0},
+                {"id": "other-5h", "window": "5h", "remaining_fraction": 1, "disabled": True}]}]}}}
         scope = {"env": {"HOME": "/profile"}}
         row = sources.parse_agy(payload, scope, 1800000000)
-        self.assertEqual([v["remaining"] for v in row["windows"]], [90.6, 58.5, 100])
+        self.assertEqual([v["remaining"] for v in row["windows"]], [90.6, 58.5])
         output = usage.render({"rows": [dict(row, state="Measured")]}, now=1800000030, width=61)
         self.assertIn("Google", output)
         self.assertIn("58.5%", output)
@@ -431,6 +483,39 @@ class UsageTests(unittest.TestCase):
             with patch.object(runtime, "capture", side_effect=change_login):
                 with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
                     sources.fetch(scope, home / "state", threading.Event())
+
+    def test_agy_keychain_login_without_legacy_file_and_rotation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "agy"
+            exe.touch(); exe.chmod(0o700)
+            def credential(token):
+                data = json.dumps({"token": token, "id_token_email": "test@example.invalid"}).encode()
+                return subprocess.CompletedProcess([], 0, b"go-keyring-base64:" + base64.b64encode(data), b"")
+            with patch.object(sources.platform, "system", return_value="Darwin"), \
+                    patch("pwd.getpwuid", return_value=type("User", (), {"pw_dir": str(home)})()), \
+                    patch.object(sources.subprocess, "run", return_value=credential("private-first")) as keychain:
+                scope = sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)}, {"HOME": str(home)})
+                self.assertTrue(scope["agy_keychain"])
+                self.assertNotIn("private-first", json.dumps(scope))
+                self.assertNotIn("test@example.invalid", json.dumps(scope))
+                keychain.return_value = credential("private-second")
+                with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.fetch(scope, home / "state", threading.Event())
+                legacy = home / ".gemini/antigravity-cli/antigravity-oauth-token"
+                legacy.parent.mkdir(parents=True)
+                legacy.write_text("legacy-login")
+                dual = sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)}, {"HOME": str(home)})
+                keychain.return_value = credential("private-third")
+                with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.fetch(dual, home / "state", threading.Event())
+                other = home / "other-profile"
+                other.mkdir()
+                with self.assertRaisesRegex(sources.SourceError, "Sign in required"):
+                    sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)}, {"HOME": str(other)})
+                with patch.dict(os.environ, {"HOME": str(other)}):
+                    with self.assertRaisesRegex(sources.SourceError, "Sign in required"):
+                        sources.scope_for("agy", {"argv": ["agy"], "executable": str(exe)}, {"HOME": str(other)})
 
     def test_probe_cleanup_timeout_is_a_failed_read(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -775,43 +860,69 @@ class UsageTests(unittest.TestCase):
                 row["windows"].reverse()
                 self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
 
-    def test_claude_total_reset_wins_tied_model_windows(self):
-        now = 1704067200
-        auth = {"loggedIn": True, "email": "test@example.invalid", "orgId": "org"}
-        payload = {"provider": "claude", "source": "claude", "rateWindowLabels": {
-            "primary": "Session", "secondary": "Weekly", "tertiary": "Model only"}, "usage": {
-            "identity": {"accountEmail": auth["email"]},
-            "primary": {"usedPercent": 0, "windowMinutes": 300, "resetsAt": now + 18000},
-            "secondary": {"usedPercent": 0, "windowMinutes": 10080, "resetsAt": "2024-01-07T11:15:00Z"},
-            "tertiary": {"usedPercent": 0, "windowMinutes": 10080, "resetsAt": now + 86400},
-            "extraRateWindows": [{"id": "claude-weekly-scoped-fable", "title": "Fable only", "window": {
-                "usedPercent": 0, "windowMinutes": 10080, "resetsAt": now + 172800}}]}}
-        row = dict(sources.parse_codexbar(payload, "claude", now, auth), state="Measured")
-        self.assertEqual([w["scope"] for w in row["windows"]], ["service", "service", "model", "model"])
+    def test_claude_absent_session_does_not_copy_weekly_limit(self):
+        now = 1794869400
+        auth = {"loggedIn": True, "email": "test@example.invalid", "orgId": "org", "subscriptionType": "max"}
+        payload = {"is_error": False, "num_turns": 0, "subtype": "success", "result":
+                   "Current week (all models): 61% used · resets Nov 22 at 4am (America/New_York)\n"
+                   "Current week (Fable): 100% used · resets Nov 22 at 4am (America/New_York)\n"}
+        row = dict(sources.parse_claude(payload, now, auth), state="Measured")
+        self.assertEqual(len(row["windows"]), 2)
+        self.assertFalse(any(w["id"] == "primary" for w in row["windows"]))
+        self.assertEqual(row["windows"][0]["reset_at"], 1795338000)
         output = usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc)
-        self.assertIn("Sun 11:15 UTC", output)
-        self.assertNotIn("Varies", output)
-        self.assertEqual(output.count("100%"), 2)
+        line = next(line for line in output.splitlines() if line.startswith("Claude ") and "week left" not in line)
+        self.assertIn("--", line)
+        self.assertIn("39%", line)
+        self.assertNotIn("0%", line)
+        self.assertIn("Claude Fable: 0% week left", output)
         row["windows"].reverse()
         self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
-        for window in row["windows"]:
-            window.pop("scope")  # Upgrade an older shared snapshot without a fresh probe.
-        self.assertEqual(usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc), output)
-        row["windows"][0]["remaining"] = 20
-        output = usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc)
-        self.assertIn("20%", output)
-        self.assertIn("Wed 00:00 UTC", output)
-        self.assertNotIn("Sun 11:15 UTC", output)
-        row["windows"][0]["remaining"] = 100
-        other = dict(row, windows=[dict(w, reset_at=now + 86400) for w in row["windows"]])
-        self.assertIn("Varies", usage.render({"rows": [row, other]}, now=now, width=61, zone=timezone.utc))
-        # A model limit from a different login must keep its own reset in the tie.
-        row["windows"] = [dict(row["windows"][0], remaining=80)]
-        other["windows"] = [dict(w, remaining=80 if w["id"] == "secondary" else 90)
-                            for w in other["windows"]]
-        output = usage.render({"rows": [row, other]}, now=now, width=61, zone=timezone.utc)
-        self.assertIn("80%", output)
-        self.assertIn("Varies", output)
+        payload["result"] = "Current session: 12% used\n" + payload["result"]
+        row = dict(sources.parse_claude(payload, now, auth), state="Measured")
+        self.assertEqual(next(w for w in row["windows"] if w["id"] == "primary")["remaining"], 88)
+        self.assertIn("88%", usage.render({"rows": [row]}, now=now, width=61, zone=timezone.utc))
+        legacy = dict(payload, result="Current week (all models): 82% used - resets Aug 23 at 4:59am")
+        self.assertEqual(sources.parse_claude(legacy, now, auth)["windows"][0]["remaining"], 18)
+        for mutation in ({"is_error": True}, {"num_turns": 1}, {"num_turns": False}, {"subtype": "error"},
+                         {"result": "Current week (all models): 101% used"}, {"result": "Total cost: $0.00"}):
+            with self.subTest(mutation=mutation), self.assertRaises(sources.SourceError):
+                sources.parse_claude(dict(payload, **mutation), now, auth)
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            exe = home / "claude"
+            exe.touch(); exe.chmod(0o700)
+            scope = sources.scope_for("claude", {"argv": ["claude"], "executable": str(exe)}, {"HOME": str(home)})
+            with patch.object(sources, "resolve_codexbar", side_effect=AssertionError("direct claude read")), \
+                    patch.object(sources, "auth_status", return_value=auth), \
+                    patch.object(runtime, "capture", return_value=(0, json.dumps(payload).encode())) as probe:
+                fetched = sources.fetch(scope, home / "state", threading.Event())
+            self.assertEqual(probe.call_args.args[0], [str(exe), "/usage", "-p", "--output-format", "json"])
+            self.assertEqual(probe.call_args.kwargs["cwd"], str(home))
+            self.assertEqual(fetched["source"], "claude")
+            other = dict(auth, email="other@example.invalid")
+            with patch.object(sources, "auth_status", side_effect=[auth, other]), \
+                    patch.object(runtime, "capture", return_value=(0, json.dumps(payload).encode())):
+                with self.assertRaisesRegex(sources.SourceError, "Account unknown"):
+                    sources.fetch(scope, home / "state", threading.Event())
+            with patch.object(sources, "auth_status", return_value=auth), \
+                    patch.object(runtime, "capture", return_value=(1, b"")):
+                with self.assertRaisesRegex(sources.SourceError, "Last update failed"):
+                    sources.fetch(scope, home / "state", threading.Event())
+
+    def test_claude_model_tied_accounts_and_expired_reset(self):
+        now = 1794869400
+        first = dict(measured(), provider="claude", state="Measured", observed_at=now,
+                     windows=[{"id": "fable", "label": "Fable only", "scope": "model", "minutes": 10080,
+                               "remaining": 0, "reset_at": now + 86400}])
+        second = dict(first, windows=[dict(first["windows"][0], reset_at=now + 172800)])
+        output = usage.render({"rows": [first, second]}, now=now, width=61)
+        self.assertIn("Claude Fable: 0% week left; resets Varies.", output)
+        self.assertEqual(output, usage.render({"rows": [second, first]}, now=now, width=61))
+        first["windows"][0]["reset_at"] = now - 1
+        expired = usage.render({"rows": [first]}, now=now, width=61)
+        self.assertIn("Claude Fable: 0%* week left; resets --.", expired)
+        self.assertIn("Waiting for fresh limits: Claude.", expired)
 
     def test_codex_reset_credits_give_the_count_and_the_oldest_expiry(self):
         def credit(expires, status="available"):
@@ -2847,6 +2958,27 @@ class DesktopScanTests(unittest.TestCase):
                 self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
         self.assertEqual(collector.bindings, {})
         self.assertNotIn("old", collector.cache)
+
+    def test_excluded_provider_drops_and_pinned_provider_survives_confirmation_failure(self):
+        collector = self.collector()
+        world = desktop_world(argv=["codex", "-p", "fugu"])
+        fugu_scope = {"key": "fugu-key", "provider": "fugu", "files": [], "stamp": "s"}
+        agy_scope = {"key": "agy-pin", "provider": "agy", "files": [], "stamp": "s"}
+        field.write_json(collector.shared / "usage-preferences.json", {"pinned_providers": ["agy"]})
+        with logins(), patch.object(sources, "current_stamp", return_value="s"), \
+                patch.object(usage.shutil, "which", return_value="/usr/bin/agy"), \
+                patch.object(sources, "scope_for", side_effect=lambda p, *_: agy_scope if p == "agy" else fugu_scope):
+            self.scan_desktop_pair(collector, world, world)
+            self.assertEqual(set(collector.bindings), {"fugu-key", "agy-pin"})
+            collector.cache["fugu-key"] = {"state": "Measured", "result": measured()}
+            collector.cache["agy-pin"] = {"state": "Measured", "result": measured("agy")}
+            field.write_json(collector.shared / "usage-preferences.json", {
+                "excluded_providers": ["fugu"], "pinned_providers": ["agy"]})
+            self.scan_desktop_pair(collector, world, subprocess.TimeoutExpired("desktop read", 2))
+        self.assertEqual(set(collector.bindings), {"agy-pin"})
+        self.assertNotIn("fugu-key", collector.cache)
+        self.assertIn("agy-pin", collector.cache)
+        self.assertEqual(collector.notices, {})
 
 
     def scan_outside_tab_worlds(self, collector, first, second):
