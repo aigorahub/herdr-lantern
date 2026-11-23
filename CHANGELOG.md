@@ -4,6 +4,21 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-11-22
+
+### Added
+
+- Plan Usage reads the Google (Antigravity) quota from the current macOS
+  login Keychain when the legacy token file is absent. It stores only a
+  digest of the login and drops the row when that login changes. It counts
+  only the Gemini Models group and skips disabled buckets.
+- `usage-preferences.json` in the shared Lantern state can hide services
+  (`excluded_providers`) and keep Claude, Google, or Grok visible with no
+  open agent (`pinned_providers`).
+- Plan Usage reads Claude limits directly with `claude /usage` and no model
+  turn. The table keeps the all-models session and weekly limits. Model-only
+  weekly quotas show as separate lines.
+
 ## [0.19.1] - 2026-11-22
 
 ### Changed
