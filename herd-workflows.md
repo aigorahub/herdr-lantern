@@ -102,7 +102,10 @@ use `omp` help and its live catalog. Never infer OMP flags from another CLI.
 Keep explicit phase choices. If the user names one model, use that model
 for all requested phases. A different effort or guide/execution model needs
 a recorded route choice. Do not silently replace Fable with Opus or Astra
-with Sol. A substitute is a proposal, never a phase binding.
+with Sol. A preflight suggestion is only a proposal. Use the shipped
+usage fallback rule for a managed seat with saved alternatives. A provider
+switch is a new session. Preserve the rules for phases bound to an exact
+session.
 
 Use these actual Herdr routes with `HERDR_HELPER_OK=1` for mutations:
 
@@ -216,7 +219,10 @@ respect explicit user models, counts, scope, and stop points. State the
 lead, helper assignments, expected result, and capacity at kickoff. A model comparison
 without a count starts with one lead and two proposers. Helpers may request
 help but cannot add seats, acquire write access, or enlarge their assignment.
-The lead must fit any added helper within the recorded limit.
+The lead must fit any added helper within the recorded limit. Monitor the
+Plan Usage data for managed seats and apply the shipped usage fallback
+rule. Preserve lane ownership, review independence, and the run ledger
+when handing work to a new seat.
 
 For brainstorming, give each proposer the same brief, constraints, sources,
 and evaluation criteria. Keep the first proposals separate until all arrive
@@ -744,8 +750,9 @@ Use the supervised seat when headless transport is unqualified. Preserve
 required Elves isolation; a terminal seat does not authorize its removal.
 Agy needs access
 to its local state and localhost transport. Plan mode does not remove an
-outer host sandbox. Do not add `--dangerously-skip-permissions` unless the
-user names yolo. Agy is an optional reviewer, not an Elves main driver.
+outer host sandbox. Use `--dangerously-skip-permissions` only under the
+shipped saved permission rule or a confirmed direct yolo request. Agy is
+an optional reviewer. It cannot be an Elves main driver.
 
 Grok Build is its own CLI and catalog. A direct Herdr review seat uses its
 verified single turn route. An Elves Grok provider shortcut uses the active

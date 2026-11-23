@@ -266,6 +266,10 @@ class DesktopTests(unittest.TestCase):
                     prompt = execute.call_args.args[1][1]
                     self.assertIn((desktop.ROOT / "guidance.md").read_text(encoding="utf-8"), prompt)
                     self.assertIn((desktop.ROOT / "manager-duty.md").read_text(encoding="utf-8"), prompt)
+                    for team_contract in ('fallbacks', 'switch_below', '"permissions": "yolo"',
+                                          'different pool', '--dangerously-skip-permissions',
+                                          '--always-approve'):
+                        self.assertIn(team_contract, prompt)
                     self.assertEqual(os.environ["LANTERN_CONFIG_DIR"], str(config.resolve()))
                     settings = prompt.split("\nSaved settings: ", 1)[1].split("\n", 1)[0]
                     self.assertNotIn("HELPER_KATA_PROJECT", json.loads(settings))

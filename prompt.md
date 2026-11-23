@@ -377,10 +377,10 @@ not wait. `-a never -s danger-full-access` is not enough; the TUI can still
 ask. The herdr wrapper puts the Codex flag immediately after `--`, and
 moves a copy that sat after resume or review. Never
 pass `--yolo`, `--force`, `--always-approve`, or `bypassPermissions` unless
-the user explicitly asks for yolo in that request. A yolo request does not
-select every bypass. Name the one provider-specific flag and the
-protections it removes in the gated seat plan. Run it only after the user
-confirms that exact plan.
+the shipped saved permission rule or a confirmed direct request allows
+the exact flag. For a direct yolo request outside the saved setting, name
+the exact flag and the protections it removes. Run it after the user
+confirms that plan.
 
 "Cursor" means `--kind cursor` with the live Cursor Sol default. "Grok",
 "Grok Build", and "SuperGrok" mean `--kind grok` and the Grok Build CLI.
@@ -429,8 +429,9 @@ passes.
   `python`, or the Windows `py -3` launcher. If none works, stop and report
   that Python 3 is required for model routing.
 - If the model is unavailable, do not seat it. Report the bucket and reset
-  time when known. Report the one live substitute returned by the preflight.
-  Ask for confirmation of that substitute. Never switch without confirmation.
+  time when known. For a managed seat, the shipped usage fallback rule
+  can select a saved alternative. For other unavailable routes, report
+  and wait for the user's choice.
 
 The preflight uses this substitute order. It skips absent or exhausted models:
 
@@ -562,9 +563,8 @@ words name that task.
        --dangerously-bypass-approvals-and-sandbox`,
        after the live resolver confirms that route.
      A kind not listed here gets no extra args. Never omit the Codex
-     unattended flag. Never pass bypassPermissions, --yolo, --force, or
-     --always-approve unless the user explicitly asks for yolo in that
-     request.
+     unattended flag. Use a specific bypass only under the shipped saved
+     permission rule or a confirmed direct request.
      Pi is one of those kinds: it has no permission flags of its own, and
      Lantern never invents an approval bypass for it.
    - After the seat is up, rename the agent's tab so the sidebar says
