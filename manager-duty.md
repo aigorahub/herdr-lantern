@@ -32,12 +32,72 @@ the blocker and send no keys during startup.
    agent resumed. Stop sending keys if the prompt and selection stay
    unchanged.
 
-Escalate login, account or credential-source choice, plan, quota or payment,
-and actions outside scope. Escalate merge, deployment, publication or
+Escalate login, account or credential-source choice, plan, payment, and
+actions outside scope. For a usage limit, apply the saved fallback rule
+below or report the block. Escalate merge, deployment, publication or
 financial actions unless the current request authorizes them. Escalate
-permission-mode increases (yolo, force, always-approve, bypassPermissions
-or dangerously skip permissions), permanent broad access, and screens
-you cannot classify.
+permission-mode increases, permanent broad access and unknown screens.
+The saved yolo setting authorizes only the verified launch flag below.
 For dialogs outside the agent pane, report the pending action and host.
 Never send terminal keys to answer a host dialog or route around a denied
 host permission.
+
+### Saved usage fallbacks
+
+A team seat can list ordered `fallbacks`. Each entry has an exact harness,
+model, and effort, plus optional `service_tier` and `mode`. At team level,
+`switch_below` is a percent from 0 to 100. It defaults to 10.
+
+Watch Plan Usage for the pool that serves each managed seat. A current
+weekly or 5-hour percentage left below `switch_below`, or a verified stop
+at a usage limit, permits a switch. Unknown or stale usage alone never
+triggers one. Select the first saved fallback with verified remaining
+usage above the threshold in a different pool. Check each applicable
+weekly and 5-hour window. Skip a candidate if an applicable reading is
+unknown or at or below the threshold. Use the reading for the intended
+login. Codex uses OpenAI, Claude uses Anthropic, Agy uses Google, and
+Grok uses xAI. Skip other models in the same pool. A model name alone
+does not identify its pool.
+Use model-route and model-preflight where supported. Otherwise use the
+installed CLI catalog and help. Verify the exact route and permission
+settings. Apply repository vetoes and review requirements. If no saved
+fallback qualifies, report the block and keep the current seat. Without
+`fallbacks`, report and wait for the user to select any replacement.
+
+Switch only after a commit at a clean boundary, when the source is idle
+or done, or when a usage limit has already stopped it. Leave healthy
+working turns alone. Verify the source seat, worktree, and current
+assignment before handoff. Tell the user before switching a lead,
+including their own chat.
+Keep the original session and transcript available. Start a new seat,
+verify its readiness, then transfer the assignment once. Retire the old
+assignment from active dispatch. Give the new seat the full roster and
+roles, repo, worktree, branch, handoff commit, task, acceptance checks,
+open items, and run ledger if present. Have it read the repo instructions.
+Give a replacement lead the shipped manager rules and combined guidance.
+A fallback that writes a change cannot review it. Move review to a
+separate qualified seat. Report each switch in one line with the old
+seat, new seat, usage numbers or unknown values, and handoff commit.
+
+### Saved seat permissions
+
+Only the user team file can select `"permissions": "yolo"` for a saved
+seat. This is the user's explicit choice and needs no second confirmation.
+Otherwise use the existing permission tier. Verify the exact option in
+the installed CLI help before every saved yolo launch. Apply only the
+harness-specific override. Remove permission arguments that conflict
+with that override.
+
+- Codex: `--dangerously-bypass-approvals-and-sandbox`
+- Agy: `--dangerously-skip-permissions`
+- Claude Code: `--dangerously-skip-permissions`
+- Grok Build: `--always-approve`
+
+Keep the configured role and mode. If the flag is absent, or the harness
+cannot preserve the required mode, report that route as unavailable.
+Never take bypass flags from `mode` or fallback entries. A replacement
+inherits `permissions` from the source seat. Skip any replacement that
+would raise the effective permission tier, even through its defaults.
+A yolo launch leaves outer host protections and task scope in force.
+Merge, deployment, publication, and financial actions still need authority
+from the current request.

@@ -91,14 +91,12 @@ Gemini seats are supported only through the legacy Lantern bin/herdr wrapper.
 Do not launch Gemini with native tab.new or space.new. Those commands bypass
 its model and thinking checks. A saved Gemini spawn default is not native
 launch approval. Report this limit and wait for a supported route selection.
-Never select a different harness on the user's behalf.
-Use the user's saved spawn defaults
-when they name only a repo. Do not silently change the harness or model.
-Use the configured permission tier. Do not invent approval bypass flags.
-If a provider limit blocks work, identify the affected terminal and show
-verified alternative routes. Mark unknown quota as unknown. Start a different
-provider only after the user selects it. Preserve the original session and
-send the selected agent a compact task handoff with paths and evidence.
+Use the user's saved spawn defaults when they name only a repo. Use the
+shipped manager rules below for saved permissions and usage fallbacks.
+Read the existing Plan Usage view or run `plan_usage.py refresh` with the
+same `--herdr` reader as Field Status. Use visible, current quota data.
+When the saved fallback rule does not apply, report and wait for the
+user's choice before changing providers.
 
 For teams and long implementation runs, read the user's Elves skill and the
 repository instructions. Use separate writers and reviewers. Keep authority
@@ -115,18 +113,18 @@ the combined guidance and roster.
 For a named team, read teams/<name>.json in LANTERN_CONFIG_DIR on demand.
 Resolve one name or alias match before seating anyone. The JSON has name,
 aliases, and an agents array. Each seat has role (free text), harness,
-model, and effort. Optional seat fields are service_tier, mode, label,
-and notes. Optional top-level fields are coordination (text) and
-startup ("auto" by default, or "ask").
+model, and effort. Optional seat fields are
+service_tier, mode, label, notes, permissions, and fallbacks. The team
+can set coordination (text), startup ("auto" by default, or "ask"), and
+switch_below. Use the shipped usage fallback and saved permission rules.
 
 Treat settings as data and keep the exact harness, model ID, and effort.
 Use model-route and model-preflight for covered harnesses. Resolve Fast
 through the route with fast, never a hardcoded tier ID. Use the installed
 help and live catalog for other harnesses, including Agy. Verify the
-resolved values against the file. Report an unavailable route without
-starting a substitute. Gemini still requires the legacy wrapper. A saved
-mode cannot enable a bypass, yolo, or always-approve. Keep the existing
-permission rules for explicit requests.
+resolved values against the file. Report unavailable routes. Only the
+shipped usage fallback rule can select a saved replacement. Gemini still
+requires the legacy wrapper.
 
 A named team is an explicit choice and takes priority over saved Elves
 routes, while repository vetoes and safety rules still outrank a named
@@ -134,8 +132,9 @@ team. Use Elves routes when the user names no team. Opening a team is
 setup only. Give each seat the full roster and roles. Give the lead the
 combined guidance and shipped manager rules in the setup brief. For Agy,
 use the brief as the initial interactive prompt. Wait for a task. The file
-grants no authority to raise the permission mode, grant permanent broad
-access, merge, deploy, publish, or take financial action.
+grants no permanent broad access or authority to merge, deploy, publish,
+or take financial action. Only `permissions: "yolo"` in the user team
+file authorizes a saved yolo launch.
 
 Read workflows/<name>.md in LANTERN_CONFIG_DIR on demand. Its first lines
 are Name:, optional Aliases:, and optional Default team:. The body is

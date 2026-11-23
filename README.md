@@ -417,8 +417,9 @@ Code and Grok get `--permission-mode auto`, Cursor `agent` gets
 for command or sandbox confirms. The herdr wrapper puts that Codex flag
 immediately after `--`, including when the seat omitted it or placed it
 after resume or review. Kinds without a listed tier get no extra flags.
-bypassPermissions, `--yolo`, `--force`, and `--always-approve` stay off
-unless the user asks for yolo and confirms the exact flag and the protections it removes.
+A saved team seat can select yolo with `permissions`. For a direct yolo
+request, Lantern waits until the user
+confirms the exact flag and the protections it removes.
 Pi has no permission modes: `HELPER_PERMISSION` is accepted and ignored for
 Pi, and Lantern never passes any approval-bypass flag to it.
 
@@ -679,16 +680,27 @@ Save a team in `teams/<name>.json` in the Lantern config directory. Say
 “save this as my review team” to save it from chat. Open it by its name
 or an alias. Lantern reads the file on demand and checks each exact model
 and effort before it seats the team. An unavailable route stops the
-affected launch. Lantern reports it without substituting another model.
+affected launch unless it meets the saved usage fallback rule.
 
 ```json
 {
-  "name": "review",
-  "aliases": ["review pair"],
+  "name": "implementation",
+  "aliases": ["build team"],
   "startup": "ask",
+  "switch_below": 10,
   "agents": [
-    {"role": "lead", "harness": "codex", "model": "gpt-6-astra", "effort": "high"},
-    {"role": "reviewer", "harness": "codex", "model": "gpt-5.6-sol", "effort": "high"}
+    {"role": "lead", "harness": "claude", "model": "claude-opus-5-5", "effort": "high"},
+    {
+      "role": "worker",
+      "harness": "codex",
+      "model": "gpt-6.2-sol",
+      "effort": "high",
+      "permissions": "yolo",
+      "fallbacks": [
+        {"harness": "grok", "model": "grok-4.7-build-fast", "effort": "medium"}
+      ]
+    },
+    {"role": "reviewer", "harness": "agy", "model": "gemini-3.8-flash-high", "effort": "high", "mode": "plan", "permissions": "yolo"}
   ]
 }
 ```
@@ -699,10 +711,23 @@ hyphens. Start it with a letter or digit. A seat can also specify
 `notes`. Put shared notes in the top-level `coordination` field. Set
 `startup` to `ask` to report a visible startup blocker without sending keys.
 The default is `auto`. The team receives its roster and the lead receives
-the guidance and manager rules. The team waits for a task. A saved team
-cannot raise permission modes, grant permanent broad access, or authorize
-merge, deployment, publication, or financial actions. Managers grant
-routine permissions within the assigned task and role.
+the guidance and manager rules. The team waits for a task.
+
+`switch_below` is the percent of weekly or 5-hour usage left, default 10.
+A manager can switch a seat when its usage is below that threshold or a
+verified usage limit stops it. The manager chooses the first listed
+fallback with more than the threshold left in a different provider pool.
+A fallback gives an exact harness, model, and effort. It can also set
+`service_tier` and `mode`. Unknown usage alone never triggers a switch. With
+no qualifying saved fallback, the manager reports and keeps the seat. A
+switch starts a new seat at a safe boundary and preserves the old session.
+
+A seat with `"permissions": "yolo"` authorizes its verified CLI bypass flag.
+Without that field, normal permission tiers apply. A fallback inherits the
+seat's permission setting and cannot raise it. A saved team grants no
+permanent broad access or authority to merge, deploy, publish, or take
+financial action. Managers grant routine permissions within the assigned
+task and role. [Shipped manager rules](manager-duty.md)
 
 ### Saved workflows
 

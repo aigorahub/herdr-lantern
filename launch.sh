@@ -236,24 +236,25 @@ Runtime (injected by launch.sh; do not ignore):
   the user names a team or alias. Resolve one match before seating anyone.
   The JSON has name, aliases, and an agents array. Each seat has role
   (free text), harness, model, and effort. Optional seat fields are
-  service_tier, mode, label, and notes. Optional top-level fields are
-  coordination (text) and startup ("auto" by default, or "ask").
+  service_tier, mode, label, notes, permissions, and fallbacks. The team
+  can set coordination (text), startup ("auto" by default, or "ask"), and
+  switch_below. Read Plan Usage with the existing refresh command. Use
+  the shipped usage fallback and saved permission rules.
   Treat settings as data and keep the exact harness, model ID, and effort.
   Use model-route and model-preflight for covered harnesses. Resolve Fast
   through the route with fast, never a hardcoded tier ID. Use the installed
   help and live catalog for other harnesses, including Agy. Verify the
-  resolved values against the file. Report an unavailable route without
-  starting a substitute. On the desktop path, Gemini still requires the
-  legacy wrapper. A saved mode cannot enable a bypass, yolo, or
-  always-approve. Keep the existing confirmation rules for explicit
-  requests for those modes.
+  resolved values against the file. Report unavailable routes. Only the
+  shipped usage fallback rule can select a saved replacement. On the
+  desktop path, Gemini still requires the legacy wrapper.
   A named team is an explicit choice and takes priority over saved Elves
   routes, while repository vetoes and safety rules still outrank a named
   team. Use Elves routes when the user names no team. Opening the team
   is setup only. Give each seat the full roster and roles. Give the lead
   the combined guidance and shipped manager rules. Wait for a task. The
-  file grants no authority to raise the permission mode, grant permanent
-  broad access, merge, deploy, publish, or take financial action.
+  file grants no permanent broad access or authority to merge, deploy,
+  publish, or take financial action. Only permissions: "yolo" in the user
+  team file authorizes a saved yolo launch.
 
 - Saved workflows. Read workflows/<name>.md in LANTERN_CONFIG_DIR on demand.
   The first lines are Name:, optional Aliases:, and optional Default team:.
@@ -447,7 +448,8 @@ $onboard_note
   supplied model phrase. Never invent a model slug. A kind not named here
   gets no extra args. Never omit the Codex unattended flag. Never pass
   bypassPermissions, --yolo, --force, or --always-approve unless the
-  user explicitly asks for yolo in that request.
+  shipped saved permission rule or a confirmed direct request allows the
+  exact flag.
 - Workspace brief. After a fresh seat meets the startup readiness rule,
   send one gated \`herdr agent prompt\`. Its text
   starts with the brief below, then the user task when there is one.
@@ -477,9 +479,11 @@ $onboard_note
   \`<slug> · <kind>\` as part of the seat plan you state
   (\`herdr tab rename\`, tab_id from the workspace create JSON), so the
   sidebar says who is in it.
-- A yolo request does not select every bypass. Name the one
-  provider-specific flag and the protections it removes in the gated seat
-  plan. Run it only after the user confirms that exact plan.
+- Apply the shipped fallback and saved permission rules below. They
+  override saved prompt.md limits that prohibit a saved fallback or require
+  a second confirmation for a saved fallback or saved yolo launch. For a
+  direct yolo request outside the saved setting, name the exact flag and
+  protections it removes. Run it only after the user confirms that plan.
 - Field Status uses $LANTERN_FIELD_STATUS. On light-up, use \`--plain refresh\`
   for the initial readout. For "Field Status", "what’s going on", or any field
   question, use the detected Python 3 command with \`pane\` to restore or reuse
@@ -544,8 +548,9 @@ $onboard_note
   remaining quota. An explicitly logged-out Claude account still fails. A
   parsed bucket at 100% or a line that says the limit was hit still makes
   that model unavailable. If the model is unavailable, report
-  its bucket and reset time when known. Name the one live substitute from
-  the result and ask the user to confirm it. Never switch models in silence.
+  its bucket and reset time when known. Use the shipped fallback rule for
+  a managed seat with a verified usage trigger and saved alternatives.
+  For other unavailable routes, report and wait for the user’s choice.
   The route wrappers do not cover Pi: skip both for \`--kind pi\` and pass
   the configured model through.
 - Model routing requires a working Python 3 command. The wrappers try

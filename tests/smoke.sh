@@ -448,7 +448,7 @@ grep -qF '"walk me there"' "$root/prompt.md" ||
 # the prompt and the pane appendix. Codex is unattended
 # (--dangerously-bypass-approvals-and-sandbox). Claude, Grok, and Cursor
 # stay smart-auto. bypassPermissions, --yolo, and --always-approve stay
-# named as never passed unless the user asks. (--force is forbidden there
+# named as gated by an explicit request or saved choice. (--force is gated
 # too, but launch.sh passes it legitimately for the helper CLI's own
 # dangerous tier, so a grep for it proves nothing.)
 for seat_file in prompt.md launch.sh; do
@@ -2212,9 +2212,14 @@ for rendered_file in AGENTS.md CLAUDE.md .cursor/rules/lantern.mdc .windsurf/rul
     grep -qF 'permission grants to selected runs, delay them until readiness' "$argv_dir/state/workdir/$rendered_file" ||
         fail "$rendered_file does not override the saved permission limits"
     while IFS= read -r duty_line; do
-        [ -z "$duty_line" ] || grep -qFx "$duty_line" "$argv_dir/state/workdir/$rendered_file" ||
+        [ -z "$duty_line" ] || grep -qFx -e "$duty_line" "$argv_dir/state/workdir/$rendered_file" ||
             fail "$rendered_file did not include the shipped manager rules"
     done <"$root/manager-duty.md"
+    for team_contract in 'fallbacks' 'switch_below' '"permissions": "yolo"' \
+        'different pool' '--dangerously-skip-permissions' '--always-approve'; do
+        grep -qF -- "$team_contract" "$argv_dir/state/workdir/$rendered_file" ||
+            fail "$rendered_file lacks saved team contract $team_contract"
+    done
 done
 
 # Launch refresh must preserve unfinished monitoring records.
