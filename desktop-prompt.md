@@ -181,8 +181,9 @@ temporary file you created. Remove only your own lock when the operation
 ends, even on error. Use this procedure for all preference writes.
 
 Field Status and Plan Usage run beside this chat. They include native and
-bridged legacy agents. Memory & Disk shows local memory pressure, the top
-memory consumers, and available disk space. Use `$LANTERN_DESKTOP_COMMAND open` to show this chat.
+bridged legacy agents. Memory & Disk shows local RAM pressure, swap use,
+memory consumers and their growth, and available disk space.
+Use `$LANTERN_DESKTOP_COMMAND open` to show this chat.
 It also rebuilds a closed readout. Do not use the legacy `field-status pane`
 or `plan-usage pane` commands in the desktop app.
 Use the existing field_status.py note command with LANTERN_HERD_STATE_DIR

@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.5** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.6** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -62,14 +62,19 @@ This opens a native Lantern chat in the first space. The right column has
 three equal panes in this order:
 
 1. **Field Status** shows agent state and puts requests for your attention first.
-2. **Memory & Disk** shows local memory pressure, the five largest memory
-   consumers, and free space on the system disk and on Aigora Work when mounted.
+2. **Memory & Disk** shows RAM pressure, swap use, memory consumers and their
+   growth, and free space on the system disk and on Aigora Work when mounted.
 3. **Plan Usage** shows the usage limits for your plans.
 
-The memory list ranks processes by resident memory (RSS). It groups local
-native agent terminals and their child processes. Shared memory can count
-in more than one process. On Linux, the pressure figure is the percentage
-of time that at least one task stalled for memory over the last 10 seconds.
+The list shows the five largest consumers by resident memory (RSS). Agent
+rows include the workspace and tab. For runtimes such as Node and Python,
+Lantern uses the package or script name and working directory when it can
+read them. Each row shows how much its RAM use changed and how long the
+comparison covers, up to an hour while the pane runs. If the fastest grower
+is outside the top five and grows by at least 32 MiB, it gets its own row.
+Shared memory can count in more than one process.
+On Linux, the pressure figure is the percentage of time that at least one
+task stalled for memory over the last 10 seconds.
 Run `lantern-app open` to add the pane to an existing Lantern tab. If that
 tab has extra panes, move them to another tab first. Use the arrow keys to
 scroll a readout.

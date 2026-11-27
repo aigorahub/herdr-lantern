@@ -493,22 +493,70 @@ class DesktopTests(unittest.TestCase):
             self.assertIn(("pane.focus", {"pane": "p1"}), home.actions)
 
     def test_memory_ranks_nested_agent_groups_and_standalone_processes_once(self):
-        processes = system_resources.parse_processes("""
-1 0 100 launchd
-20 1 10 /bin/zsh
-21 20 501 /usr/bin/codex
-22 21 200 /usr/bin/worker
-30 21 50 /bin/zsh
-31 30 600 subprocess
-32 31 100 subprocess
-40 1 748 /Applications/Example App
-41 1 120 browser
-42 1 90 editor
+        start = "Sat Nov 28 00:00:00 2026"
+        processes = system_resources.parse_processes(f"""
+1 0 100 {start} launchd
+20 1 10 {start} /bin/zsh
+21 20 501 {start} /usr/bin/codex
+22 21 200 {start} /usr/bin/worker
+30 21 50 {start} /bin/zsh
+31 30 600 {start} subprocess
+32 31 100 {start} subprocess
+40 1 748 {start} /Applications/Example App
+41 1 120 {start} browser
+42 1 90 {start} editor
 bad process information
 """)
-        self.assertEqual(system_resources.largest_consumers(processes, {20: "codex (t1)", 30: "review (t2)"}),
+        ranked = system_resources.ranked_consumers(processes, {20: "codex (t1)", 30: "review (t2)"})
+        self.assertEqual([(row.kib, system_resources.consumer_label(row, {})) for row in ranked[:5]],
                          [(750, "review (t2)"), (748, "Example App (40)"), (711, "codex (t1)"),
                           (120, "browser (41)"), (100, "launchd (1)")])
+
+    def test_node_worker_shows_the_package_and_project_without_exposing_arguments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "bookstore"
+            script = project / "node_modules" / "jest-worker" / "build" / "processChild.js"
+            script.parent.mkdir(parents=True)
+            script.touch()
+            row = system_resources.Consumer(55, "start", 80000, "node", False)
+            for arguments, expected in (
+                (["--require", "loader.js", str(script), "--token=private"], "jest-worker · bookstore (55)"),
+                (["--eval=private", str(script)], "node · bookstore (55)"),
+            ):
+                with patch.object(desktop, "process_argv", return_value=["node", *arguments]):
+                    self.assertEqual(system_resources.consumer_label(row, {55: project}), expected)
+
+    def test_memory_history_ages_out_old_samples_and_ignores_reused_pids(self):
+        history = system_resources.MemoryHistory()
+        before = [system_resources.Consumer(40, "start-a", 102400, "node", False),
+                  system_resources.Consumer(50, "start-b", 80000, "python", False)]
+        later = [system_resources.Consumer(40, "start-a", 153600, "node", False),
+                 system_resources.Consumer(50, "start-c", 200000, "python", False)]
+        self.assertEqual(history.changes(0, before), {})
+        self.assertEqual(history.changes(300, later), {later[0].key: system_resources.Change(51200, 300)})
+        self.assertEqual(history.changes(3601, later),
+                         {row.key: system_resources.Change(0, 3301) for row in later})
+
+    def test_memory_history_tracks_growth_of_a_process_started_after_the_first_sample(self):
+        history = system_resources.MemoryHistory()
+        other = system_resources.Consumer(20, "start-a", 80000, "python", False)
+        created = system_resources.Consumer(50, "start-b", 65536, "node", False)
+        grown = system_resources.Consumer(50, "start-b", 262144, "node", False)
+        history.changes(0, [other])
+        history.changes(120, [other, created])
+        changes = history.changes(240, [other, grown])
+        self.assertEqual(changes[grown.key], system_resources.Change(196608, 120))
+
+    def test_memory_growth_rate_distinguishes_sixty_from_a_hundred_nineteen_seconds(self):
+        history = system_resources.MemoryHistory()
+        slow = system_resources.Consumer(7, "start-a", 65536, "node", False)
+        fast = system_resources.Consumer(8, "start-b", 65536, "python", False)
+        history.changes(1, [slow])
+        history.changes(60, [slow, fast])
+        changes = history.changes(120, [slow._replace(kib=101376), fast._replace(kib=100352)])
+        slow_kib, slow_elapsed = changes[slow.key]
+        fast_kib, fast_elapsed = changes[fast.key]
+        self.assertLess(slow_kib / slow_elapsed, fast_kib / fast_elapsed)
 
     def test_disk_readout_omits_an_unmounted_aigora_work_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
