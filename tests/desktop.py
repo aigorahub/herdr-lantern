@@ -270,6 +270,9 @@ class DesktopTests(unittest.TestCase):
                                           'different pool', '--dangerously-skip-permissions',
                                           '--always-approve'):
                         self.assertIn(team_contract, prompt)
+                    for peer_command in ('hc ls', 'hc get <terminal-id>', 'hc read <terminal-id>',
+                                         'hc send <terminal-id>'):
+                        self.assertIn(f'`{peer_command}`', prompt)
                     self.assertEqual(os.environ["LANTERN_CONFIG_DIR"], str(config.resolve()))
                     settings = prompt.split("\nSaved settings: ", 1)[1].split("\n", 1)[0]
                     self.assertNotIn("HELPER_KATA_PROJECT", json.loads(settings))
