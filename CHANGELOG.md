@@ -4,6 +4,13 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-11-26
+
+### Changed
+
+- Lantern includes native `hc` peer communication instructions in each
+  new desktop agent's launch task or setup brief.
+
 ## [0.19.3] - 2026-11-22
 
 ### Added

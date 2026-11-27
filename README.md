@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.3** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.4** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -63,6 +63,11 @@ Usage sit to its right. It reads your existing `helper.conf` and spawn
 defaults. It keeps the old Lantern chat and all existing agents. New work
 uses the app's own spaces and terminals. Existing direct connections to old
 Herdr retain their legacy action targets and appear in the readouts.
+
+Each new native agent gets instructions in its launch task or setup brief
+to communicate with peers in the workspace. Agents use `hc ls` to find
+terminals, `hc get` to check status, `hc read` to read output, and `hc send`
+with a terminal ID and message to contact a peer.
 
 `sh bin/lantern-app snapshot` reports native and bridged agent IDs. The
 read model adapter is read only. The readouts read the app and `hc` in their

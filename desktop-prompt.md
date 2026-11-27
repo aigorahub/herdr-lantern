@@ -27,6 +27,17 @@ Check hc get/read after launch. A created terminal is not proof of readiness.
 Never send a task to an agent that is already working. If submission fails,
 read first. Do not resend blindly. Keep the original transcript on handoff.
 
+Include these peer communication instructions in the launch task or setup
+brief for every native agent you open, including team seats and replacements:
+
+- Use native `hc` to communicate with other agents in this workspace.
+- Run `hc ls` to find terminals. Use `herdr-app ls` to check which terminal
+  IDs belong to this workspace.
+- Use `hc get <terminal-id>` to check a peer's status and
+  `hc read <terminal-id>` to read its output.
+- Use `hc send <terminal-id>` followed by a quoted message to send the peer
+  a question, update, or result. Always address the peer by terminal ID.
+
 Startup rule. This rule applies only to a seat you opened, until it is ready.
 A native seat is ready when the hc terminal is live, the expected harness
 is in the foreground, status is idle or done, and a fresh read of that
