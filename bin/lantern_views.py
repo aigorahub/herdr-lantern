@@ -15,6 +15,8 @@ import usage_sources as sources
 from usage_runtime import FileLock, private_dir, server_identity
 
 VIEWS = {"field": ("Field Status", "field_status.py"), "usage": ("Plan Usage", "plan_usage.py")}
+DESKTOP_VIEWS = {"field": VIEWS["field"], "system": ("Memory & Disk", "system_resources.py"),
+                 "usage": VIEWS["usage"]}
 RIGHT_SPLIT_RATIO = "0.6666666667"
 LAYOUT = "field-above-usage"
 
@@ -66,7 +68,7 @@ def matches_watcher(proc: dict, root: Path, state: Path, view: str) -> bool:
     if not isinstance(argv, list) or "watch" not in argv or "--state-dir" not in argv:
         return False
     try:
-        script = root / "bin" / VIEWS[view][1]
+        script = root / "bin" / DESKTOP_VIEWS[view][1]
         scope = argv[argv.index("--state-dir") + 1]
         return (any(os.path.normcase(str(Path(str(arg)).resolve())) == os.path.normcase(str(script.resolve()))
                     for arg in argv[1:])

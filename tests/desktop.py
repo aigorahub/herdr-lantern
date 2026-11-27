@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 import desktop
 import lantern_views
+import system_resources
 
 
 def terminal_missing():
@@ -23,7 +24,7 @@ def terminal_missing():
 
 
 class ReadoutHome:
-    def __init__(self, state):
+    def __init__(self, state, roles):
         self.state = state
         self.record = {"terminal": "t1", "instance": "instance", "layout_ready": True}
         self.panes = {"p1": "t1"}
@@ -32,23 +33,26 @@ class ReadoutHome:
         self.live_argv = {}
         self.get_replies = {}
         self.actions = []
+        self.next_pane = count(5)
         self.kill_state = "finished"
         self.kill_error = None
         self.exit_process = True
         self.code = lantern_views.code_stamp(desktop.ROOT)
-        for index, (role, (_, script)) in enumerate(lantern_views.VIEWS.items(), 2):
+        for index, role in enumerate(roles, 2):
             pane, address = f"p{index}", f"t{index}"
             root, pid = 100 + index, 200 + index
             created = int(time.time() * 1000) - 60000
+            script = {"field": "field_status.py", "usage": "plan_usage.py", "system": "system_resources.py"}[role]
+            watcher = [sys.executable, str(desktop.ROOT / "bin" / script), "--state-dir", str(state)]
+            if role != "system":
+                watcher.extend(["--herdr", str(desktop.READER)])
             argv = ["/bin/sh", "-ic", '"$@"; exec "$0" -i', "/bin/sh", "sh",
                     str(desktop.ROOT / "bin" / "lantern-app"), role, str(state)]
             self.panes[pane] = address
             self.record[role] = {"pane": pane, "terminal": address}
             self.terminals[address] = {"address": address, "state": "live", "pid": root,
                                        "created_ms": created, "argv": argv, "cwd": str(state),
-                                       "foreground": {"pid": pid, "argv": [sys.executable,
-                                           str(desktop.ROOT / "bin" / script), "--state-dir", str(state),
-                                           "--herdr", str(desktop.READER), "watch"]}}
+                                       "foreground": {"pid": pid, "argv": [*watcher, "watch"]}}
             self.live_argv[root] = argv
             self.starts[pid] = str(pid)
             receipt = state / f"{role}-start.json"
@@ -98,6 +102,7 @@ class ReadoutHome:
                 {"type": "block", "content": {"terminal": address}} for address in self.panes.values()]}
             return [{"value": {"spaces": [{"tabs": [{"id": "tab1", "root": root}]}]}, "version": 1}]
         if method == "doc.set":
+            self.actions.append((method, params))
             return [{}]
         raise AssertionError(method)
 
@@ -106,7 +111,8 @@ class ReadoutHome:
         if command == "pane.close":
             del self.panes[params["pane"]]
         elif command == "pane.split":
-            created = {"pane": "p4", "terminal": "t4"}
+            index = next(self.next_pane)
+            created = {"pane": f"p{index}", "terminal": f"t{index}"}
             self.panes[created["pane"]] = created["terminal"]
             return created
         elif command not in {"space.move", "pane.focus"}:
@@ -120,9 +126,9 @@ class ReadoutHome:
 
 class DesktopTests(unittest.TestCase):
     @contextmanager
-    def readout_home(self):
+    def readout_home(self, roles=("field", "usage", "system")):
         with tempfile.TemporaryDirectory() as tmp:
-            home = ReadoutHome(Path(tmp).resolve())
+            home = ReadoutHome(Path(tmp).resolve(), roles)
             with patch.object(desktop, "core_calls", side_effect=home.core), \
                     patch.object(desktop, "run", side_effect=home.run), \
                     patch.object(desktop, "app", side_effect=home.app), \
@@ -435,7 +441,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(fg["argv"][0], "/bin/zsh")
 
     def test_stale_stock_readout_is_replaced_after_stop_confirmation(self):
-        for role, case in (("field", "old stamp"), ("usage", "old stamp"), ("field", "missing stamp"),
+        for role, case in (("field", "old stamp"), ("usage", "old stamp"), ("system", "old stamp"), ("field", "missing stamp"),
                            ("field", "corrupt stamp"), ("field", "kill not found"), ("field", "kill timeout")):
             with self.subTest(role=role, case=case), self.readout_home() as home:
                 address = home.stale(role)["address"]
@@ -456,9 +462,59 @@ class DesktopTests(unittest.TestCase):
                     ("pane.split", {"pane": anchor, "direction": direction,
                                     "argv": ["sh", str(desktop.ROOT / "bin" / "lantern-app"), role, str(home.state)]}),
                 ])
-                self.assertEqual(home.record[role], {"pane": "p4", "terminal": "t4"})
-                self.assertIn(("label", ["t4", "lantern.desktop=" + role, "lantern.instance=instance"]), home.actions)
+                self.assertEqual(home.record[role], {"pane": "p5", "terminal": "t5"})
+                self.assertIn(("label", ["t5", "lantern.desktop=" + role, "lantern.instance=instance"]), home.actions)
                 self.assertEqual(notices, [])
+
+    def test_new_home_and_two_readout_home_get_three_equal_readouts(self):
+        for existing in ((), ("field", "usage")):
+            with self.subTest(existing=existing), self.readout_home(existing) as home:
+                desktop.ensure_views(home.record, home.state)
+                launches = [args["argv"][2] for method, args in home.mutations() if method == "pane.split"]
+                self.assertEqual(launches, ["system"] if existing else ["field", "system", "usage"])
+                self.assertTrue(all(method == "pane.split" for method, _ in home.mutations()))
+                params, = [args for method, args in home.actions if method == "doc.set"]
+                layout = params["value"]["spaces"][0]["tabs"][0]["root"]
+                self.assertEqual(layout["type"], "row")
+                chat, right = layout["children"]
+                self.assertEqual(chat["content"]["terminal"], "t1")
+                self.assertEqual(right["type"], "column")
+                self.assertEqual([child["content"]["terminal"] for child in right["children"]],
+                                 [home.record[role]["terminal"] for role in ("field", "system", "usage")])
+                self.assertEqual([child["size"] for child in right["children"]], [{"weight": 1}] * 3)
+
+    def test_upgrade_with_an_extra_pane_focuses_home_without_changing_layout(self):
+        with self.readout_home(("field", "usage")) as home:
+            home.panes["p9"] = "t9"
+            notices = desktop.ensure_views(home.record, home.state)
+            self.assertTrue(any("extra panes" in notice for notice in notices))
+            self.assertEqual(home.mutations(), [])
+            self.assertFalse(any(method == "doc.set" for method, _ in home.actions))
+            self.assertIn(("pane.focus", {"pane": "p1"}), home.actions)
+
+    def test_memory_ranks_nested_agent_groups_and_standalone_processes_once(self):
+        processes = system_resources.parse_processes("""
+1 0 100 launchd
+20 1 10 /bin/zsh
+21 20 501 /usr/bin/codex
+22 21 200 /usr/bin/worker
+30 21 50 /bin/zsh
+31 30 600 subprocess
+32 31 100 subprocess
+40 1 748 /Applications/Example App
+41 1 120 browser
+42 1 90 editor
+bad process information
+""")
+        self.assertEqual(system_resources.largest_consumers(processes, {20: "codex (t1)", 30: "review (t2)"}),
+                         [(750, "review (t2)"), (748, "Example App (40)"), (711, "codex (t1)"),
+                          (120, "browser (41)"), (100, "launchd (1)")])
+
+    def test_disk_readout_omits_an_unmounted_aigora_work_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            placeholder = Path(tmp) / "Aigora Work"
+            placeholder.mkdir()
+            self.assertFalse(any("Aigora Work" in line for line in system_resources.disk_lines(placeholder)))
 
     def test_current_starting_and_custom_watchers_keep_their_pane(self):
         custom = {"extra argv", "relative reader", "no receipt", "late relaunch", "early relaunch", "unreadable argv"}
@@ -530,8 +586,8 @@ class DesktopTests(unittest.TestCase):
                         self.assertEqual(home.mutations(), [])
                         continue
                 desktop.ensure_views(self.saved_home(home), home.state)
-                self.assertEqual(home.panes, {"p1": "t1", "p3": "t3", "p4": "t4"})
-                self.assertEqual(self.saved_home(home)["field"], {"pane": "p4", "terminal": "t4"})
+                self.assertEqual(home.panes, {"p1": "t1", "p3": "t3", "p4": "t4", "p5": "t5"})
+                self.assertEqual(self.saved_home(home)["field"], {"pane": "p5", "terminal": "t5"})
 
     def saved_home(self, home):
         return json.loads((home.state / "home.json").read_text())

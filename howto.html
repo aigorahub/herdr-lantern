@@ -182,7 +182,7 @@
 <body>
   <main>
     <header>
-      <p class="kicker">lantern, by elves · aigora.lantern · v0.19.4</p>
+      <p class="kicker">lantern, by elves · aigora.lantern · v0.19.5</p>
       <h1>Lantern, by Elves</h1>
       <p class="lede">From the team that brought you Elves. Herdr manages the herd. The herd is in the field. Lantern illuminates the field. You talk; it runs <code>herdr</code>. Each person picks their own helper CLI and model. Public walkthrough: <a href="https://aigorahub.github.io/herdr-lantern/">aigorahub.github.io/herdr-lantern</a>.</p>
     </header>
@@ -290,7 +290,7 @@ HELPER_KATA_PROJECT=""</pre>
     <p class="note">The lantern checks for a newer published version at light-up and offers the update — it asks first, never upgrades silently. There is no <code>herdr plugin update</code>; a GitHub install refreshes by running the install command again. A linked checkout is only told it is behind; pull it yourself.</p>
 
     <h2>Field Status and Plan Usage</h2>
-      <p>Lantern opens one tab with three panes. Chat is on the left. Field Status uses the top two thirds of the right column. Plan Usage uses the bottom third. Focus stays on the chat. Later opens reuse the readouts and restore missing panes. Verified readouts from old tabs move into this layout. Busy or unrelated panes stay untouched. A readout setup failure does not stop the chat. Readouts stay within the pane. Use Up/Down or Page Up/Page Down to scroll. Press q to close a readout. A later Lantern open restores it.</p>
+      <p>The legacy plugin opens one tab with three panes. Chat is on the left. Field Status uses the top two thirds of the right column. Plan Usage uses the bottom third. Focus stays on the chat. Later opens reuse the readouts and restore missing panes. Verified readouts from old tabs move into this layout. Busy or unrelated panes stay untouched. A readout setup failure does not stop the chat. Readouts stay within the pane. Use Up/Down or Page Up/Page Down to scroll. Press q to close a readout. A later Lantern open restores it.</p>
       <p>Field Status shows ET time, open tabs, agent states, saved notes, and verified outcomes. Ask <code>Field Status</code> or <code>what's going on</code> to restore its pane.</p>
       <p>Plan Usage shows one row per service with an open agent tab anywhere on this Herdr server. Idle and Done tabs count. The configured Fugu plan also stays visible after a short review command ends. The columns are Service, Session left, Week left, and Week resets. Allowances use percentages. Weekly resets use local time for the limit that sets the weekly percentage. Claude uses its total weekly reset when total and model limits have the same percentage. Other tied limits with different reset times show Varies. Missing or expired times show --. Panes under 39 columns retain percentages and ask for more width to show resets. When a service has saved usage resets, Resets and Expires columns show how many and when the oldest expires; Codex reports them, and services that don't report them show --. Narrow panes get one line under the table instead. Lantern never spends a reset. The table hides IDs, model names, plan codes, credits, source details, and tab counts. Each period shows its lowest remaining percentage across that service's limits and login profiles. It never adds percentages. Low allowances use color. Percentage columns align to the right. Missing values show --. Unreadable extra tabs do not add warnings when the service has measured limits. Stale readings, failed updates, and required sign-ins keep their warnings. Stale readings keep a warning.</p>
       <p>The shared collector scans tabs every five seconds and reads usage every 60 seconds. Values become stale after 120 seconds. A past reset time does not prove a new allowance. An unknown account or lost login hides prior usage values. The collector does not send prompts or start model turns.</p>
@@ -343,7 +343,7 @@ HELPER_KATA_PROJECT=""</pre>
         </div>
       </li>
     </ol>
-    <p class="note">This opens a native chat in the first space with Field Status and Plan Usage to its right. The readouts show local spaces only (remote app spaces are omitted) and include the agents whose panes sit in a tab (a sub-agent parked outside any tab isn't shown).</p>
+    <p class="note">This opens a native chat with three equal panes on the right: Field Status, Memory &amp; Disk, and Plan Usage. Memory &amp; Disk shows local pressure, the top five memory consumers, and free disk space. Field Status and Plan Usage show local spaces only (remote app spaces are omitted) and include the agents whose panes sit in a tab (a sub-agent parked outside any tab isn't shown).</p>
     <p class="note"><code>hsh</code>, <code>evening.sh</code>, <code>bin/lantern_session.py</code>, <code>bin/team_observer.py</code> and <code>bin/agent_switch.py start</code> are part of the legacy plugin workflow and aren't supported for native desktop sessions; <code>bin/onboard</code> also runs from the legacy plugin, and the spawn defaults it saves in <code>helper.conf</code> are the ones the desktop app reads by default; legacy Field Status notes, Keep pins and mailbox state aren't migrated.</p>
 
     <h2>Temporary Codex jobs and cleanup</h2>
