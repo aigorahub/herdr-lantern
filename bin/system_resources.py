@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+from collections import Counter, deque
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+import time
 from typing import NamedTuple
 
 import desktop
@@ -16,17 +18,52 @@ from lantern_views import record_watcher
 from terminal_readout import Readout
 
 WORK_DRIVE = Path("/Volumes/Aigora Work")
+HISTORY_SECONDS = 60 * 60
+HISTORY_INTERVAL = 5 * 60
+SCRIPT_SUFFIXES = {".js", ".cjs", ".mjs", ".jsx", ".ts", ".mts", ".cts", ".py", ".pyw"}
 
 
 class Process(NamedTuple):
     parent: int
     kib: int
     name: str
+    started: str
+
+
+class Consumer(NamedTuple):
+    pid: int
+    started: str
+    kib: int
+    label: str
+    grouped: bool
+
+    @property
+    def key(self) -> tuple[int, str, bool]:
+        return self.pid, self.started, self.grouped
+
+
+class MemoryHistory:
+    def __init__(self):
+        self.samples = deque()
+
+    def changes(self, now: float, consumers: list[Consumer]) -> tuple[int, dict]:
+        if not consumers:
+            return 0, {}
+        if self.samples and now < self.samples[-1][0]:
+            self.samples.clear()
+        while self.samples and now - self.samples[0][0] > HISTORY_SECONDS:
+            self.samples.popleft()
+        if not self.samples or now - self.samples[-1][0] >= HISTORY_INTERVAL:
+            self.samples.append((now, {row.key: row.kib for row in consumers}))
+        start, baseline = self.samples[0]
+        minutes = int((now - start) // 60)
+        return minutes, {row.key: row.kib - baseline[row.key]
+                         for row in consumers if minutes and row.key in baseline}
 
 
 def output(*args: str) -> str:
     return subprocess.run(args, check=True, capture_output=True, encoding="utf-8",
-                          errors="replace", timeout=3).stdout
+                          errors="replace", timeout=3, env=dict(os.environ, LC_ALL="C", TZ="UTC")).stdout
 
 
 def memory_pressure() -> str:
@@ -44,18 +81,35 @@ def memory_pressure() -> str:
     return "unavailable"
 
 
+def swap_used() -> str:
+    try:
+        if sys.platform == "darwin":
+            value = output("/usr/sbin/sysctl", "-n", "vm.swapusage")
+            match = re.search(r"\bused\s*=\s*(\d+(?:\.\d+)?)([KMG])\b", value)
+            if match:
+                return human_size(int(float(match[1]) * 1024 ** ("KMG".index(match[2]) + 1)))
+        if sys.platform.startswith("linux"):
+            info = Path("/proc/meminfo").read_text(encoding="ascii")
+            swap = dict(re.findall(r"^(SwapTotal|SwapFree):\s+(\d+) kB$", info, re.MULTILINE))
+            used_kib = max(0, int(swap["SwapTotal"]) - int(swap["SwapFree"]))
+            return human_size(used_kib * 1024)
+    except (KeyError, OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return "unavailable"
+
+
 def parse_processes(data: str) -> dict[int, Process]:
     processes = {}
     for line in data.splitlines():
-        fields = line.split(maxsplit=3)
-        if len(fields) != 4:
+        fields = line.split(maxsplit=8)
+        if len(fields) != 9:
             continue
         try:
             pid, parent, kib = map(int, fields[:3])
         except ValueError:
             continue
         if pid > 0 and parent >= 0 and kib >= 0:
-            processes[pid] = Process(parent, kib, clean(Path(fields[3]).name))
+            processes[pid] = Process(parent, kib, clean(Path(fields[8]).name), " ".join(fields[3:8]))
     return processes
 
 
@@ -68,11 +122,13 @@ def agent_roots() -> dict[int, str]:
         if (terminal.get("state") == "live" and not terminal.get("machine") and app
                 and type(pid) is int and pid > 0 and not desktop.bridge(terminal)):
             name = terminal.get("name") or desktop.APP_AGENT_NAMES.get(app, app)
-            roots[pid] = f"{clean(name, 32)} ({clean(terminal['address'], 24)})"
+            label = f"{clean(name, 24)} ({clean(terminal['address'], 24)})"
+            where = clean((terminal.get("labels") or {}).get("where"), 60)
+            roots[pid] = f"{label} · {where}" if where else label
     return roots
 
 
-def largest_consumers(processes: dict[int, Process], roots: dict[int, str]) -> list[tuple[int, str]]:
+def ranked_consumers(processes: dict[int, Process], roots: dict[int, str]) -> list[Consumer]:
     totals = Counter()
     singles = []
     for pid, process in processes.items():
@@ -86,9 +142,92 @@ def largest_consumers(processes: dict[int, Process], roots: dict[int, str]) -> l
         if owner in processes and owner in roots:
             totals[owner] += process.kib
         else:
-            singles.append((process.kib, f"{process.name} ({pid})"))
-    groups = [(kib, roots[pid]) for pid, kib in totals.items()]
-    return sorted([*groups, *singles], key=lambda row: (-row[0], row[1]))[:5]
+            singles.append(Consumer(pid, process.started, process.kib, process.name, False))
+    groups = [Consumer(pid, processes[pid].started, kib, roots[pid], True) for pid, kib in totals.items()]
+    return sorted([*groups, *singles], key=lambda row: (-row.kib, row.label, row.pid))
+
+
+def is_runtime(name: str) -> bool:
+    return name in {"node", "nodejs", "bun", "deno"} or bool(re.fullmatch(r"python(?:\d+(?:\.\d+)?)?", name))
+
+
+def process_folders(pids: list[int]) -> dict[int, Path]:
+    if not pids:
+        return {}
+    folders = {}
+    if sys.platform == "darwin":
+        command = ["/usr/sbin/lsof", "-nP", "-a", "-p", ",".join(map(str, pids)), "-d", "cwd", "-Fpn"]
+        try:
+            result = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace", timeout=2)
+        except (OSError, subprocess.SubprocessError):
+            return folders
+        pid = None
+        for line in result.stdout.splitlines():
+            if line.startswith("p") and line[1:].isascii() and line[1:].isdigit():
+                pid = int(line[1:])
+            elif pid in pids and line.startswith("n/"):
+                folders[pid] = Path(line[1:])
+    elif sys.platform.startswith("linux"):
+        for pid in pids:
+            try:
+                folders[pid] = Path("/proc", str(pid), "cwd").readlink()
+            except OSError:
+                continue
+    return folders
+
+
+def entry_point(name: str, argv: list[str], folder: Path | None) -> str:
+    args = iter(argv[1:])
+    for arg in args:
+        if arg.split("=", 1)[0] in {"-c", "-e", "--eval", "-p", "--print"}:
+            return ""
+        if arg in {"-m", "--module"} and name.startswith("python"):
+            module = next(args, "")
+            return module if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_.]*", module) else ""
+        if arg in {"--require", "-r", "--import", "--loader"}:
+            next(args, None)
+            continue
+        if arg in {"--", "-u", "-B", "-O", "-OO"} or arg.startswith("--") and "=" in arg:
+            continue
+        if arg.startswith("-"):
+            return ""
+        path = Path(arg)
+        if not path.is_absolute():
+            if folder is None:
+                return ""
+            path = folder / path
+        try:
+            path = path.resolve(strict=True)
+            if not path.is_file():
+                return ""
+        except (OSError, RuntimeError, ValueError):
+            return ""
+        for index in range(len(path.parts) - 2, -1, -1):
+            if path.parts[index] == "node_modules":
+                package = path.parts[index + 1]
+                if package.startswith("@") and index + 2 < len(path.parts) - 1:
+                    return f"{package}/{path.parts[index + 2]}"
+                if package == ".bin" and index + 3 == len(path.parts):
+                    return path.name
+                if not package.startswith(".") and index + 1 < len(path.parts) - 1:
+                    return package
+                break
+        return path.name if path.suffix in SCRIPT_SUFFIXES else ""
+    return ""
+
+
+def consumer_label(row: Consumer, folders: dict[int, Path]) -> str:
+    if row.grouped:
+        return row.label
+    name = row.label
+    folder = folders.get(row.pid)
+    if is_runtime(name):
+        argv = desktop.process_argv(row.pid) or []
+        name = clean(entry_point(name, argv, folder), 36) or name
+    project = clean(folder.name, 32) if folder and folder != Path.home() else ""
+    if project:
+        name = f"{name} · {project}"
+    return f"{name} ({row.pid})"
 
 
 def human_size(size: int) -> str:
@@ -96,6 +235,13 @@ def human_size(size: int) -> str:
         if size >= 1 << shift:
             return f"{size / (1 << shift):.1f} {unit}"
     return f"{size // 1024} KiB"
+
+
+def change_label(kib: int | None) -> str:
+    if kib is None:
+        return "—"
+    prefix = "+" if kib > 0 else "−" if kib < 0 else ""
+    return f"{prefix}{human_size(abs(kib) * 1024)}"
 
 
 def free_space(path: Path) -> str:
@@ -114,20 +260,36 @@ def disk_lines(work_drive: Path = WORK_DRIVE) -> list[str]:
     return lines
 
 
-def snapshot() -> str:
-    lines = [f"Memory pressure  {memory_pressure()}", *disk_lines(), "Top memory (RSS)"]
+def snapshot(history: MemoryHistory | None = None) -> str:
+    lines = [f"RAM pressure  {memory_pressure()}  ·  Swap  {swap_used()} used", *disk_lines()]
     try:
         roots = agent_roots()
     except (RuntimeError, ValueError, KeyError, AttributeError, TypeError, OSError, subprocess.SubprocessError):
         roots = {}
     try:
-        processes = parse_processes(output("ps", "-axo", "pid=,ppid=,rss=,comm="))
+        processes = parse_processes(output("ps", "-axo", "pid=,ppid=,rss=,lstart=,comm="))
     except (OSError, subprocess.SubprocessError):
         processes = {}
-    consumers = largest_consumers(processes, roots)
-    lines.extend(f"{human_size(kib * 1024):>9}  {name}" for kib, name in consumers)
+    consumers = ranked_consumers(processes, roots)
     if not consumers:
         lines.append("Process memory unavailable")
+        return "\n".join(lines) + "\n"
+    minutes, changes = history.changes(time.time(), consumers) if history else (0, {})
+    header = "Top RAM (RSS)"
+    if history:
+        header += f"  ·  Change over {minutes}m" if minutes else "  ·  Measuring change"
+    lines.append(header)
+    top = consumers[:5]
+    fastest = max(consumers, key=lambda row: changes.get(row.key, 0))
+    rising = fastest if fastest not in top and changes.get(fastest.key, 0) >= 32 * 1024 else None
+    shown = [*top, rising] if rising else top
+    folders = process_folders([row.pid for row in shown if not row.grouped and is_runtime(row.label)])
+    for row in top:
+        size = human_size(row.kib * 1024)
+        delta = f" {change_label(changes.get(row.key)):>11}" if history else ""
+        lines.append(f"{size:>9}{delta}  {consumer_label(row, folders)}")
+    if rising:
+        lines.append(f"Rising  {change_label(changes[rising.key])}  {consumer_label(rising, folders)}")
     return "\n".join(lines) + "\n"
 
 
@@ -142,9 +304,10 @@ def main() -> None:
     if args.state_dir is None:
         parser.error("watch requires --state-dir")
     record_watcher(args.state_dir, "system")
+    history = MemoryHistory()
     with Readout() as screen:
         while not screen.stop.is_set():
-            sample = snapshot()
+            sample = snapshot(history)
             if sample != screen.output:
                 screen.draw(sample)
             screen.wait(10)

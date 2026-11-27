@@ -4,6 +4,12 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Memory & Disk identifies agent tabs and shows package, script, and folder
+  context for runtime processes when available. It reports swap use and
+  shows changes in resident memory over up to an hour.
+
 ## [0.19.5] - 2026-11-27
 
 ### Added
