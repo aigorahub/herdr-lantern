@@ -42,23 +42,40 @@ class Consumer(NamedTuple):
         return self.pid, self.started, self.grouped
 
 
+class Change(NamedTuple):
+    kib: int
+    minutes: int
+
+
 class MemoryHistory:
     def __init__(self):
-        self.samples = deque()
+        self.samples: dict[tuple[int, str, bool], deque[tuple[float, int]]] = {}
+        self.observed_at: float | None = None
 
-    def changes(self, now: float, consumers: list[Consumer]) -> tuple[int, dict]:
+    def changes(self, now: float, consumers: list[Consumer]) -> dict[tuple[int, str, bool], Change]:
         if not consumers:
-            return 0, {}
-        if self.samples and now < self.samples[-1][0]:
+            return {}
+        if self.observed_at is not None and now < self.observed_at:
             self.samples.clear()
-        while self.samples and now - self.samples[0][0] > HISTORY_SECONDS:
-            self.samples.popleft()
-        if not self.samples or now - self.samples[-1][0] >= HISTORY_INTERVAL:
-            self.samples.append((now, {row.key: row.kib for row in consumers}))
-        start, baseline = self.samples[0]
-        minutes = int((now - start) // 60)
-        return minutes, {row.key: row.kib - baseline[row.key]
-                         for row in consumers if minutes and row.key in baseline}
+        self.observed_at = now
+        current = {}
+        changes = {}
+        for row in consumers:
+            key = row.key
+            samples = self.samples.get(key)
+            if samples is None:
+                samples = deque()
+            while samples and now - samples[0][0] > HISTORY_SECONDS:
+                samples.popleft()
+            if not samples or now - samples[-1][0] >= HISTORY_INTERVAL:
+                samples.append((now, row.kib))
+            start, baseline = samples[0]
+            minutes = int((now - start) // 60)
+            if minutes:
+                changes[key] = Change(row.kib - baseline, minutes)
+            current[key] = samples
+        self.samples = current
+        return changes
 
 
 def output(*args: str) -> str:
@@ -237,11 +254,12 @@ def human_size(size: int) -> str:
     return f"{size // 1024} KiB"
 
 
-def change_label(kib: int | None) -> str:
-    if kib is None:
+def change_label(change: Change | None) -> str:
+    if change is None:
         return "—"
-    prefix = "+" if kib > 0 else "−" if kib < 0 else ""
-    return f"{prefix}{human_size(abs(kib) * 1024)}"
+    prefix = "+" if change.kib > 0 else "−" if change.kib < 0 else ""
+    size = human_size(abs(change.kib) * 1024).replace(" ", "")
+    return f"{prefix}{size}/{change.minutes}m"
 
 
 def free_space(path: Path) -> str:
@@ -274,19 +292,20 @@ def snapshot(history: MemoryHistory | None = None) -> str:
     if not consumers:
         lines.append("Process memory unavailable")
         return "\n".join(lines) + "\n"
-    minutes, changes = history.changes(time.time(), consumers) if history else (0, {})
+    changes = history.changes(time.time(), consumers) if history else {}
     header = "Top RAM (RSS)"
     if history:
-        header += f"  ·  Change over {minutes}m" if minutes else "  ·  Measuring change"
+        header += "  ·  Change / time" if changes else "  ·  Measuring change"
     lines.append(header)
     top = consumers[:5]
-    fastest = max(consumers, key=lambda row: changes.get(row.key, 0))
-    rising = fastest if fastest not in top and changes.get(fastest.key, 0) >= 32 * 1024 else None
+    fastest = max((key for key, change in changes.items() if change.kib >= 32 * 1024),
+                  key=lambda key: changes[key].kib / changes[key].minutes, default=None)
+    rising = next((row for row in consumers[5:] if row.key == fastest), None)
     shown = [*top, rising] if rising else top
     folders = process_folders([row.pid for row in shown if not row.grouped and is_runtime(row.label)])
     for row in top:
         size = human_size(row.kib * 1024)
-        delta = f" {change_label(changes.get(row.key)):>11}" if history else ""
+        delta = f" {change_label(changes.get(row.key)):>13}" if history else ""
         lines.append(f"{size:>9}{delta}  {consumer_label(row, folders)}")
     if rising:
         lines.append(f"Rising  {change_label(changes[rising.key])}  {consumer_label(rising, folders)}")

@@ -532,9 +532,20 @@ bad process information
                   system_resources.Consumer(50, "start-b", 80000, "python", False)]
         later = [system_resources.Consumer(40, "start-a", 153600, "node", False),
                  system_resources.Consumer(50, "start-c", 200000, "python", False)]
-        self.assertEqual(history.changes(0, before), (0, {}))
-        self.assertEqual(history.changes(300, later), (5, {later[0].key: 51200}))
-        self.assertEqual(history.changes(3601, later), (55, {later[0].key: 0, later[1].key: 0}))
+        self.assertEqual(history.changes(0, before), {})
+        self.assertEqual(history.changes(300, later), {later[0].key: system_resources.Change(51200, 5)})
+        self.assertEqual(history.changes(3601, later),
+                         {row.key: system_resources.Change(0, 55) for row in later})
+
+    def test_memory_history_tracks_growth_of_a_process_started_after_the_first_sample(self):
+        history = system_resources.MemoryHistory()
+        other = system_resources.Consumer(20, "start-a", 80000, "python", False)
+        created = system_resources.Consumer(50, "start-b", 65536, "node", False)
+        grown = system_resources.Consumer(50, "start-b", 262144, "node", False)
+        history.changes(0, [other])
+        history.changes(120, [other, created])
+        changes = history.changes(240, [other, grown])
+        self.assertEqual(changes[grown.key], system_resources.Change(196608, 2))
 
     def test_disk_readout_omits_an_unmounted_aigora_work_directory(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -69,9 +69,10 @@ three equal panes in this order:
 The list shows the five largest consumers by resident memory (RSS). Agent
 rows include the workspace and tab. For runtimes such as Node and Python,
 Lantern uses the package or script name and working directory when it can
-read them. Each row shows the change over up to an hour while the pane runs.
-If the fastest grower is outside the top five and grows by at least 32 MiB,
-it gets its own row. Shared memory can count in more than one process.
+read them. Each row shows how much its RAM use changed and how long the
+comparison covers, up to an hour while the pane runs. If the fastest grower
+is outside the top five and grows by at least 32 MiB, it gets its own row.
+Shared memory can count in more than one process.
 On Linux, the pressure figure is the percentage of time that at least one
 task stalled for memory over the last 10 seconds.
 Run `lantern-app open` to add the pane to an existing Lantern tab. If that
