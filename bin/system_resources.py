@@ -44,7 +44,7 @@ class Consumer(NamedTuple):
 
 class Change(NamedTuple):
     kib: int
-    minutes: int
+    seconds: float
 
 
 class MemoryHistory:
@@ -70,9 +70,9 @@ class MemoryHistory:
             if not samples or now - samples[-1][0] >= HISTORY_INTERVAL:
                 samples.append((now, row.kib))
             start, baseline = samples[0]
-            minutes = int((now - start) // 60)
-            if minutes:
-                changes[key] = Change(row.kib - baseline, minutes)
+            seconds = now - start
+            if seconds >= 60:
+                changes[key] = Change(row.kib - baseline, seconds)
             current[key] = samples
         self.samples = current
         return changes
@@ -259,7 +259,7 @@ def change_label(change: Change | None) -> str:
         return "—"
     prefix = "+" if change.kib > 0 else "−" if change.kib < 0 else ""
     size = human_size(abs(change.kib) * 1024).replace(" ", "")
-    return f"{prefix}{size}/{change.minutes}m"
+    return f"{prefix}{size}/{int(change.seconds // 60)}m"
 
 
 def free_space(path: Path) -> str:
@@ -299,7 +299,7 @@ def snapshot(history: MemoryHistory | None = None) -> str:
     lines.append(header)
     top = consumers[:5]
     fastest = max((key for key, change in changes.items() if change.kib >= 32 * 1024),
-                  key=lambda key: changes[key].kib / changes[key].minutes, default=None)
+                  key=lambda key: changes[key].kib / changes[key].seconds, default=None)
     rising = next((row for row in consumers[5:] if row.key == fastest), None)
     shown = [*top, rising] if rising else top
     folders = process_folders([row.pid for row in shown if not row.grouped and is_runtime(row.label)])

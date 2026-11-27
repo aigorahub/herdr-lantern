@@ -533,9 +533,9 @@ bad process information
         later = [system_resources.Consumer(40, "start-a", 153600, "node", False),
                  system_resources.Consumer(50, "start-c", 200000, "python", False)]
         self.assertEqual(history.changes(0, before), {})
-        self.assertEqual(history.changes(300, later), {later[0].key: system_resources.Change(51200, 5)})
+        self.assertEqual(history.changes(300, later), {later[0].key: system_resources.Change(51200, 300)})
         self.assertEqual(history.changes(3601, later),
-                         {row.key: system_resources.Change(0, 55) for row in later})
+                         {row.key: system_resources.Change(0, 3301) for row in later})
 
     def test_memory_history_tracks_growth_of_a_process_started_after_the_first_sample(self):
         history = system_resources.MemoryHistory()
@@ -545,7 +545,18 @@ bad process information
         history.changes(0, [other])
         history.changes(120, [other, created])
         changes = history.changes(240, [other, grown])
-        self.assertEqual(changes[grown.key], system_resources.Change(196608, 2))
+        self.assertEqual(changes[grown.key], system_resources.Change(196608, 120))
+
+    def test_memory_growth_rate_distinguishes_sixty_from_a_hundred_nineteen_seconds(self):
+        history = system_resources.MemoryHistory()
+        slow = system_resources.Consumer(7, "start-a", 65536, "node", False)
+        fast = system_resources.Consumer(8, "start-b", 65536, "python", False)
+        history.changes(1, [slow])
+        history.changes(60, [slow, fast])
+        changes = history.changes(120, [slow._replace(kib=101376), fast._replace(kib=100352)])
+        slow_kib, slow_elapsed = changes[slow.key]
+        fast_kib, fast_elapsed = changes[fast.key]
+        self.assertLess(slow_kib / slow_elapsed, fast_kib / fast_elapsed)
 
     def test_disk_readout_omits_an_unmounted_aigora_work_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
