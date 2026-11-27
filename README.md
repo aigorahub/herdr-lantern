@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.4** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.5** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -58,8 +58,22 @@ On macOS or Linux, `sh bin/lantern-app install` adds `lantern-app` to
 `~/.local/bin`. With that folder on your `PATH`, run `lantern-app open` from
 any folder.
 
-This opens a native Lantern chat in the first space. Field Status and Plan
-Usage sit to its right. It reads your existing `helper.conf` and spawn
+This opens a native Lantern chat in the first space. The right column has
+three equal panes in this order:
+
+1. **Field Status** shows agent state and puts requests for your attention first.
+2. **Memory & Disk** shows local memory pressure, the five largest memory
+   consumers, and free space on the system disk and on Aigora Work when mounted.
+3. **Plan Usage** shows the usage limits for your plans.
+
+The memory list ranks processes by resident memory (RSS). It groups local
+native agent terminals and their child processes. Shared memory can count
+in more than one process. On Linux, the pressure figure is the percentage
+of time that at least one task stalled for memory over the last 10 seconds.
+Run `lantern-app open` to add the pane to an existing Lantern tab. Use the
+arrow keys to scroll a readout.
+
+Lantern reads your existing `helper.conf` and spawn
 defaults. It keeps the old Lantern chat and all existing agents. New work
 uses the app's own spaces and terminals. Existing direct connections to old
 Herdr retain their legacy action targets and appear in the readouts.
@@ -213,7 +227,7 @@ Code gets `CLAUDE.md`.
 On light-up it snapshots the field (`bin/goals-floor`): pane titles, Claude
 `/goal` / recap lines, and who is waiting on you. Ask “what are they
 working toward?” for that readout. Ask “Field Status” or “what’s going on”
-to restore the Field Status pane. Lantern opens three panes in one tab. Chat fills the left side. Field Status
+to restore the Field Status pane. The legacy plugin opens three panes in one tab. Chat fills the left side. Field Status
 fills the top two thirds of the right column. Plan Usage fills the bottom third. Focus stays on chat. The repo-backed
 `bin/field_status.py` reads Herdr tabs, agents, and workspaces and shows ET
 date/time, separate red Important and purple Needs You sections, and every

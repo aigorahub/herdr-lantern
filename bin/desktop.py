@@ -13,6 +13,7 @@ import time
 from typing import Callable, NamedTuple
 
 import field_status as field
+from lantern_views import DESKTOP_VIEWS, current_watcher, matches_watcher
 import usage_runtime as runtime
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -593,10 +594,13 @@ def launched(terminal: dict, fg: dict, state: Path, role: str) -> str:
 
 def stock_readout(terminal: dict, fg: dict, state: Path, role: str, script: str) -> str:
     argv = fg.get("argv")
-    if not (isinstance(argv, list) and len(argv) == 7 and argv[2] == "--state-dir"
-            and argv[4] == "--herdr" and argv[6] == "watch"
-            and same_path(argv[1], ROOT / "bin" / script) and same_path(argv[3], state)
-            and same_path(argv[5], READER)):
+    if not (isinstance(argv, list) and len(argv) in {5, 7} and argv[2] == "--state-dir"
+            and argv[-1] == "watch" and same_path(argv[1], ROOT / "bin" / script)
+            and same_path(argv[3], state)):
+        return ""
+    if role == "system" and len(argv) != 5:
+        return ""
+    if role != "system" and not (len(argv) == 7 and argv[4] == "--herdr" and same_path(argv[5], READER)):
         return ""
     return launched(terminal, fg, state, role)
 
@@ -700,7 +704,7 @@ def ensure_views(record: dict, state: Path) -> list[str]:
     field.write_json(state / "views.json", {"home_pane_id": pane["pane"]})
     changed = not record.get("layout_ready")
     notices = []
-    for role in ("field", "usage"):
+    for role, (label, script) in DESKTOP_VIEWS.items():
         saved = record.get(role) or {}
         target = terminals.get(saved.get("terminal"))
         if not target:
@@ -726,7 +730,6 @@ def ensure_views(record: dict, state: Path) -> list[str]:
                 changed = True
             if current[1]["id"] != tab["id"]:
                 raise RuntimeError("A saved Lantern readout moved; leave its current location unchanged")
-            from lantern_views import VIEWS, current_watcher, matches_watcher
             fg = native_process(target)
             if matches_watcher(fg, ROOT, state, role):
                 stamp = read_state(state / f"{role}-watcher.json")
@@ -735,7 +738,6 @@ def ensure_views(record: dict, state: Path) -> list[str]:
                 keep = (tolerant(lambda: current_watcher({"foreground_processes": [fg]}, ROOT, state, role))
                         or (not recorded and time.time() * 1000 - target.get("created_ms", 0) < 30000
                             and tolerant(lambda: starting(target, state, role))))
-                label, script = VIEWS[role]
                 if not keep and not stock_readout(target, fg, state, role, script):
                     notices.append(f"{label} in {target['address']} runs older Lantern code with its own "
                                    "command, so Lantern left it running; restart it to update")
@@ -778,8 +780,8 @@ def ensure_views(record: dict, state: Path) -> list[str]:
                 if ended.get("state") != "finished":
                     raise RuntimeError("Readout state changed during repair; retry open")
                 app("pane.close", pane=mounted[2]["pane"])
-        anchor = record.get("field", {}).get("pane") if role == "usage" else pane["pane"]
-        saved = app("pane.split", pane=anchor, direction="down" if role == "usage" else "right",
+        anchor = pane["pane"] if role == "field" else record["field"]["pane"]
+        saved = app("pane.split", pane=anchor, direction="right" if role == "field" else "down",
                     argv=["sh", str(ROOT / "bin/lantern-app"), role, str(state)])
         record[role] = saved
         record["layout_ready"] = False
@@ -795,17 +797,17 @@ def ensure_views(record: dict, state: Path) -> list[str]:
                 def leaves(node):
                     return [node] if node["type"] == "block" else [leaf for child in node.get("children", []) for leaf in leaves(child)]
                 blocks = leaves(t["root"])
-                allowed = {record["terminal"], record["field"]["terminal"], record["usage"]["terminal"]}
-                if {node.get("content", {}).get("terminal") for node in blocks} != allowed:
+                readout_ids = [record[role]["terminal"] for role in DESKTOP_VIEWS]
+                allowed = {record["terminal"], *readout_ids}
+                if len(blocks) != len(allowed) or {node.get("content", {}).get("terminal") for node in blocks} != allowed:
                     raise RuntimeError("Lantern tab has extra panes; keep their layout unchanged")
                 nodes = {node["content"]["terminal"]: node for node in blocks}
                 chat_node = nodes[record["terminal"]]
-                field_node, usage_node = nodes[record["field"]["terminal"]], nodes[record["usage"]["terminal"]]
                 chat_node["size"] = {"weight": 1}
-                field_node["size"], usage_node["size"] = {"weight": 2}, {"weight": 1}
+                right = [dict(nodes[address], size={"weight": 1}) for address in readout_ids]
                 t["root"] = {"type": "row", "id": t["root"]["id"], "children": [chat_node,
                     {"type": "column", "id": record["tab"] + "-lantern-readouts", "size": {"weight": 1},
-                     "children": [field_node, usage_node]}]}
+                     "children": right}]}
         core("doc.set", name="herdr-app", value=doc["value"], version=doc["version"])
         record["layout_ready"] = True
         field.write_json(state / "home.json", record)
@@ -891,7 +893,7 @@ def main() -> int:
                 os.environ["LANTERN_DESKTOP_STATE_DIR"] = args[0]
                 os.environ["LANTERN_CONFIG_DIR"] = args[1]
             chat()
-        elif command in {"field", "usage"}:
+        elif command in DESKTOP_VIEWS:
             if args:
                 os.environ["LANTERN_DESKTOP_STATE_DIR"] = args[0]
             record_start(state_dir(), command)
@@ -899,9 +901,11 @@ def main() -> int:
             record = field.read_json(state_dir() / "home.json", {})
             if record.get("pane"):
                 os.environ["HERDR_PANE_ID"] = record["pane"]
-            script = "field_status.py" if command == "field" else "plan_usage.py"
-            os.execv(sys.executable, [sys.executable, str(ROOT / "bin" / script),
-                       "--state-dir", str(state_dir()), "--herdr", str(ROOT / "bin/lantern-app-read"), "watch"])
+            script = DESKTOP_VIEWS[command][1]
+            argv = [sys.executable, str(ROOT / "bin" / script), "--state-dir", str(state_dir())]
+            if command != "system":
+                argv.extend(["--herdr", str(READER)])
+            os.execv(sys.executable, [*argv, "watch"])
         else:
             raise RuntimeError("Usage: lantern-app [open|snapshot|field|usage]")
         return 0

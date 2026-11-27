@@ -4,6 +4,15 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.5] - 2026-11-27
+
+### Added
+
+- The desktop app has a Memory & Disk pane. It shows memory pressure,
+  the five largest memory consumers, and free space on the system disk and
+  on Aigora Work when mounted. The right column gives equal space to Field
+  Status, Memory & Disk, and Plan Usage.
+
 ## [0.19.4] - 2026-11-26
 
 ### Changed
