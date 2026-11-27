@@ -483,6 +483,15 @@ class DesktopTests(unittest.TestCase):
                                  [home.record[role]["terminal"] for role in ("field", "system", "usage")])
                 self.assertEqual([child["size"] for child in right["children"]], [{"weight": 1}] * 3)
 
+    def test_upgrade_with_an_extra_pane_focuses_home_without_changing_layout(self):
+        with self.readout_home(("field", "usage")) as home:
+            home.panes["p9"] = "t9"
+            notices = desktop.ensure_views(home.record, home.state)
+            self.assertTrue(any("extra panes" in notice for notice in notices))
+            self.assertEqual(home.mutations(), [])
+            self.assertFalse(any(method == "doc.set" for method, _ in home.actions))
+            self.assertIn(("pane.focus", {"pane": "p1"}), home.actions)
+
     def test_memory_ranks_nested_agent_groups_and_standalone_processes_once(self):
         processes = system_resources.parse_processes("""
 1 0 100 launchd

@@ -70,8 +70,9 @@ The memory list ranks processes by resident memory (RSS). It groups local
 native agent terminals and their child processes. Shared memory can count
 in more than one process. On Linux, the pressure figure is the percentage
 of time that at least one task stalled for memory over the last 10 seconds.
-Run `lantern-app open` to add the pane to an existing Lantern tab. Use the
-arrow keys to scroll a readout.
+Run `lantern-app open` to add the pane to an existing Lantern tab. If that
+tab has extra panes, move them to another tab first. Use the arrow keys to
+scroll a readout.
 
 Lantern reads your existing `helper.conf` and spawn
 defaults. It keeps the old Lantern chat and all existing agents. New work

@@ -692,6 +692,20 @@ def close_readout_pane(address: str, tab_id: str) -> None:
     raise RuntimeError("Readout pane close is still pending; retry open")
 
 
+def view_layout(tab_id: str) -> tuple[dict, dict, list[dict]]:
+    def leaves(node: dict) -> list[dict]:
+        if node["type"] == "block":
+            return [node]
+        return [leaf for child in node.get("children", []) for leaf in leaves(child)]
+
+    doc = core("doc.get", name="herdr-app")
+    for space in doc["value"]["spaces"]:
+        for tab in space["tabs"]:
+            if tab["id"] == tab_id:
+                return doc, tab, leaves(tab["root"])
+    raise RuntimeError("The Lantern tab moved during layout setup; retry open")
+
+
 def ensure_views(record: dict, state: Path) -> list[str]:
     terminals = {t["address"]: t for t in core("terminal.list")["terminals"]}
     inventory = json.loads(run([APP, "ls"]))
@@ -702,15 +716,30 @@ def ensure_views(record: dict, state: Path) -> list[str]:
     record.update(space=space["id"], tab=tab["id"], pane=pane["pane"])
     field.write_json(state / "home.json", record)
     field.write_json(state / "views.json", {"home_pane_id": pane["pane"]})
+
+    def focus_home() -> None:
+        app("space.move", id=record["space"], index=1)
+        app("pane.focus", pane=record["pane"])
+
+    labeled = [(t, t.get("labels") or {}) for t in terminals.values() if t.get("state") == "live"]
+    owned = [(t, labels["lantern.desktop"]) for t, labels in labeled
+             if labels.get("lantern.instance") == record["instance"] and labels.get("herdr.tab") == tab["id"]
+             and labels.get("lantern.desktop") in DESKTOP_VIEWS]
+    known = {record["terminal"], *(t["address"] for t, _ in owned)}
+    known.update(record[role]["terminal"] for role in DESKTOP_VIEWS if record.get(role))
+    _, _, blocks = view_layout(tab["id"])
+    mounted_ids = {node.get("content", {}).get("terminal") for node in blocks}
+    if len(mounted_ids) != len(blocks) or not mounted_ids <= known:
+        focus_home()
+        return ["The Lantern tab has extra panes. Move them before reopening to update the readout layout."]
+
     changed = not record.get("layout_ready")
     notices = []
     for role, (label, script) in DESKTOP_VIEWS.items():
         saved = record.get(role) or {}
         target = terminals.get(saved.get("terminal"))
         if not target:
-            recovered = [t for t in terminals.values() if t.get("labels", {}).get("lantern.instance") == record["instance"]
-                         and t.get("labels", {}).get("lantern.desktop") == role
-                         and t.get("labels", {}).get("herdr.tab") == tab["id"] and t.get("state") == "live"]
+            recovered = [t for t, saved_role in owned if saved_role == role]
             if len(recovered) > 1:
                 raise RuntimeError("Multiple readouts have the same ownership label; preserve them")
             if recovered:
@@ -789,30 +818,21 @@ def ensure_views(record: dict, state: Path) -> list[str]:
         run([HC, "label", saved["terminal"], "lantern.desktop=" + role, "lantern.instance=" + record["instance"]])
         changed = True
     if changed:
-        doc = core("doc.get", name="herdr-app")
-        for s in doc["value"]["spaces"]:
-            for t in s["tabs"]:
-                if t["id"] != tab["id"]:
-                    continue
-                def leaves(node):
-                    return [node] if node["type"] == "block" else [leaf for child in node.get("children", []) for leaf in leaves(child)]
-                blocks = leaves(t["root"])
-                readout_ids = [record[role]["terminal"] for role in DESKTOP_VIEWS]
-                allowed = {record["terminal"], *readout_ids}
-                if len(blocks) != len(allowed) or {node.get("content", {}).get("terminal") for node in blocks} != allowed:
-                    raise RuntimeError("Lantern tab has extra panes; keep their layout unchanged")
-                nodes = {node["content"]["terminal"]: node for node in blocks}
-                chat_node = nodes[record["terminal"]]
-                chat_node["size"] = {"weight": 1}
-                right = [dict(nodes[address], size={"weight": 1}) for address in readout_ids]
-                t["root"] = {"type": "row", "id": t["root"]["id"], "children": [chat_node,
-                    {"type": "column", "id": record["tab"] + "-lantern-readouts", "size": {"weight": 1},
-                     "children": right}]}
+        doc, layout, blocks = view_layout(tab["id"])
+        readout_ids = [record[role]["terminal"] for role in DESKTOP_VIEWS]
+        allowed = {record["terminal"], *readout_ids}
+        nodes = {node.get("content", {}).get("terminal"): node for node in blocks}
+        if len(blocks) != len(allowed) or nodes.keys() != allowed:
+            raise RuntimeError("Lantern tab has extra panes; keep their layout unchanged")
+        chat_node = dict(nodes[record["terminal"]], size={"weight": 1})
+        right = [dict(nodes[address], size={"weight": 1}) for address in readout_ids]
+        layout["root"] = {"type": "row", "id": layout["root"]["id"], "children": [chat_node,
+            {"type": "column", "id": record["tab"] + "-lantern-readouts", "size": {"weight": 1},
+             "children": right}]}
         core("doc.set", name="herdr-app", value=doc["value"], version=doc["version"])
         record["layout_ready"] = True
         field.write_json(state / "home.json", record)
-    app("space.move", id=record["space"], index=1)
-    app("pane.focus", pane=record["pane"])
+    focus_home()
     return notices
 
 
