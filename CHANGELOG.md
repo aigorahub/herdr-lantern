@@ -4,6 +4,8 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.6] - 2026-11-27
+
 ### Changed
 
 - Memory & Disk identifies agent tabs and shows package, script, and folder
