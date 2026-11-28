@@ -46,7 +46,7 @@ host permission.
 
 A team seat can list ordered `fallbacks`. Each entry has an exact harness,
 model, and effort, plus optional `service_tier` and `mode`. At team level,
-`switch_below` is a percent from 0 to 100. It defaults to 10.
+`switch_below` is a percent from 0 to 100. It defaults to 1.
 
 Watch Plan Usage for the pool that serves each managed seat. A current
 weekly or 5-hour percentage left below `switch_below`, or a verified stop
@@ -83,8 +83,8 @@ seat, new seat, usage numbers or unknown values, and handoff commit.
 ### Saved Codex usage resets
 
 Only the registered team lead can use `codex_resets.py consume`. The
-team file must grant `usage_resets.max_per_run`. An absent or zero value
-leaves the saved fallback rule in effect. Use `status --seat <terminal-id>`
+team file sets `usage_resets.max_per_run`. An absent value grants one reset
+per run. A zero value leaves the saved fallback rule in effect. Use `status --seat <terminal-id>`
 to read the balance.
 
 Check reset eligibility when a Codex turn stops at a verified usage limit.

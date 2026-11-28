@@ -143,7 +143,9 @@ for line in sys.stdin:
         self.addCleanup(patcher.stop)
 
     def grant(self, cap):
-        self.settings.write_text(json.dumps({"usage_resets": {"max_per_run": cap}}))
+        # These cases exercise early resets between 1% and 10% left, so they pin
+        # the threshold rather than use the default.
+        self.settings.write_text(json.dumps({"switch_below": 10, "usage_resets": {"max_per_run": cap}}))
 
     def seat(self, name, space, app, pid):
         self.world.view["panes"].append({"terminal_id": name, "workspace_id": space, "pane_id": name, "agent": app})
@@ -210,6 +212,18 @@ for line in sys.stdin:
     def early_attempt(self, seat="seat1"):
         return self.run_cli("consume", "--seat", seat, "--stage", "low", "--worktree", str(self.worktree),
                             "--reason", "Next packet uses 12%")
+
+    def test_team_without_reset_settings_grants_one_reset_below_one_percent(self):
+        self.settings.write_text("{}")
+        grant = resets.team_grant(self.settings)
+        self.assertEqual((grant["cap"], grant["threshold"]), (1, 1))
+        self.grant(0)
+        self.assertEqual(resets.team_grant(self.settings)["cap"], 0)
+        self.grant(1)
+        self.register()
+        self.settings.unlink()
+        self.assertNotEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(self.calls(), [])
 
     def test_live_report_and_premature_or_unverified_attempts_never_send(self):
         self.assertEqual(self.attempt()["outcome"], "refused")
@@ -369,7 +383,7 @@ for line in sys.stdin:
         self.register()
         self.mode.write_text('{"drop":true}')
         self.assertEqual(self.attempt()["outcome"], "pending")
-        self.settings.write_text('{"usage_resets":{"max_per_run":1,"wait_horizon":90}}')
+        self.settings.write_text('{"switch_below":10,"usage_resets":{"max_per_run":1,"wait_horizon":90}}')
         self.assertEqual(self.attempt()["outcome"], "void")
         self.assertEqual(self.attempt()["outcome"], "wait")
         self.assertEqual(len(self.calls()), 1)

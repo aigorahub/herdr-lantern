@@ -130,7 +130,7 @@ can set coordination (text), startup ("auto" by default, or "ask"),
 switch_below, and usage_resets. Use the shipped usage fallback and saved
 permission rules.
 
-For a saved team that grants resets, register the setup after all seats have
+For a saved team that grants resets (the default), register the setup after all seats have
 started. From Lantern home, run the saved Codex reset helper with
 `register --team <file-stem> --space <space-id> --lead <terminal-id>` and
 `--seat <terminal-id>` for each other assigned seat. Use the real Herdr IDs.
