@@ -206,6 +206,7 @@ for line in sys.stdin:
         self.assertEqual(self.attempt()["outcome"], "refused")
         self.turn(spent=True, next_model="other")
         self.assertEqual(self.attempt()["outcome"], "refused")
+        self.turn(spent=False)
         self.clean_pushed_boundary()
         self.write_limits(used=90, ordinary=True)
         self.assertEqual(self.attempt("low", "--reason", "Next packet uses 12%")["outcome"], "window_not_limiting")
