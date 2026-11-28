@@ -1118,8 +1118,20 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(fit("你好abcdef", 6), "你好ab")
         self.assertEqual(fit("你好abcdef", 4, column=1), " 好a")
         self.assertEqual(fit("e\u0301xyz", 2, column=1), "xy")
+        self.assertEqual(fit("❤️❤️❤️❤️ tab", 4), "❤️❤️")
+        self.assertEqual(fit("❤️ tab", 4, column=1), "  ta")
         self.assertEqual(fit("\033[31mabcdef\033[0m", 3), "\033[31mabc\033[0m")
         self.assertEqual(page("abcdef\n", 0, 3, 10), ("abc", 0))
+
+        name = "abcdefghijklmnopqrstu"
+        screen = Readout(horizontal=True)
+        screen.size = os.terminal_size((5, 8))
+        screen.max_column = len(name) - screen.size.columns
+        seen = set()
+        for _ in name:
+            seen.update(fit(name, screen.size.columns, column=screen.column))
+            screen.key("\033[C")
+        self.assertEqual(seen, set(name))
 
     @unittest.skipIf(os.name == "nt", "requires a Unix pseudoterminal")
     def test_readout_live_terminal_scroll_and_close_restore_terminal(self):

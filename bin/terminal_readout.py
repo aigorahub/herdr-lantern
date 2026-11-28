@@ -9,13 +9,16 @@ import sys
 import threading
 import time
 
-TOKENS = re.compile(r"\x1b\[[0-9;]*m|.")
+TOKENS = re.compile(r"\x1b\[[0-9;]*m|.\ufe0f?")
 
 
 def cell_width(token: str) -> int:
-    if token.startswith("\x1b") or unicodedata.category(token) in {"Mn", "Me", "Cf"} or unicodedata.combining(token):
+    if token.startswith("\x1b"):
         return 0
-    return 2 if unicodedata.east_asian_width(token) in ("W", "F") else 1
+    character = token[0]
+    if unicodedata.combining(character) or unicodedata.category(character) == "Cf":
+        return 0
+    return 2 if len(token) == 2 or unicodedata.east_asian_width(character) in ("W", "F") else 1
 
 
 def fit(line: str, width: int, column: int = 0) -> str:
@@ -119,10 +122,11 @@ class Readout:
             self.offset += 1
         elif key in ("k", "\033[A", "\033OA"):
             self.offset = max(0, self.offset - 1)
-        elif key in ("\033[C", "\033OC"):
-            self.column = min(self.max_column, self.column + 8)
-        elif key in ("\033[D", "\033OD"):
-            self.column = max(0, self.column - 8)
+        elif self.horizontal and key in ("\033[C", "\033OC", "\033[D", "\033OD"):
+            width = self.size.columns if self.size else 88
+            step = max(1, min(8, width - 1))
+            change = step if key.endswith("C") else -step
+            self.column = min(self.max_column, max(0, self.column + change))
         elif key in (" ", "\033[6~"):
             self.offset += max(1, height - 2)
         elif key in ("b", "\033[5~"):
