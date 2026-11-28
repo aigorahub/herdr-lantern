@@ -323,6 +323,8 @@ def outcome_token(row: dict, task: dict) -> str:
     # registrations invalidate an outcome even when the provider stays idle.
     identity = {key: row.get(key) for key in ("tab_id", "pane_id", "terminal_id", "agent_session",
                 "agent", "state_change_seq", "completion_seq", "work_epoch", "session_epoch", "raw_status")}
+    if identity["raw_status"] == "idle":
+        identity["raw_status"] = "done"  # Legacy Herdr uses idle after someone views the completed turn.
     identity["task"] = task
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
