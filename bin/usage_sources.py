@@ -24,6 +24,7 @@ import time
 import urllib.error
 import urllib.request
 import urllib.parse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1062,7 +1063,8 @@ def parse_claude(payload: object, observed: float, auth: dict) -> dict:
             "windows": windows, "credits": [], "observed_at": observed, "source": "claude"}
 
 
-def codex_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
+@contextmanager
+def codex_session(scope: dict, deadline: float, cancel: threading.Event):
     proc = runtime.spawn([scope["executable"], "app-server"], scope["env"])
     messages = queue.Queue(maxsize=256)
     failed = threading.Event()
@@ -1089,7 +1091,13 @@ def codex_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
         proc.stdin.write(json.dumps(message).encode() + b"\n")
         proc.stdin.flush()
 
-    def request(identifier: int, method: str, params: dict) -> dict:
+    identifier = 0
+
+    def request(method: str, params: dict) -> dict:
+        nonlocal identifier
+        if failed.is_set() or cancel.is_set() or time.monotonic() >= deadline:
+            raise SourceError("Last update failed")
+        identifier += 1
         send({"id": identifier, "method": method, "params": params})
         while time.monotonic() < deadline and not cancel.is_set():
             if failed.is_set():
@@ -1108,19 +1116,28 @@ def codex_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
         raise SourceError("Last update failed")
 
     try:
-        request(1, "initialize", {"clientInfo": {"name": "lantern_usage", "version": "1.0"},
-                                  "capabilities": {"experimentalApi": True}})
+        request("initialize", {"clientInfo": {"name": "lantern_usage", "version": "1.0"},
+                               "capabilities": {"experimentalApi": True}})
         send({"method": "initialized"})
-        account = request(2, "account/read", {"refreshToken": False}).get("account")
-        if account is None:
-            raise SourceError("Sign in required")
-        limits = request(3, "account/rateLimits/read", {})
-        return parse_codex(account, limits, time.time())
+        yield request
     finally:
         runtime.stop_process(proc)
         reader.join(timeout=2)
         proc.stdin.close()
         proc.stdout.close()
+
+
+def codex_limits(request) -> tuple[dict, dict]:
+    account = request("account/read", {"refreshToken": False}).get("account")
+    if not isinstance(account, dict):
+        raise SourceError("Sign in required")
+    limits = request("account/rateLimits/read", {})
+    return parse_codex(account, limits, time.time()), limits
+
+
+def codex_read(scope: dict, deadline: float, cancel: threading.Event) -> dict:
+    with codex_session(scope, deadline, cancel) as request:
+        return codex_limits(request)[0]
 
 
 def tools_dir(state: Path) -> Path:

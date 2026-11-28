@@ -80,6 +80,37 @@ A fallback that writes a change cannot review it. Move review to a
 separate qualified seat. Report each switch in one line with the old
 seat, new seat, usage numbers or unknown values, and handoff commit.
 
+### Saved Codex usage resets
+
+Only the registered team lead can use `codex_resets.py consume`. The
+team file must grant `usage_resets.max_per_run`. An absent or zero value
+leaves the saved fallback rule in effect. Use `status --seat <terminal-id>`
+to read the balance.
+
+Check reset eligibility when a Codex turn stops at a verified usage limit.
+Run `consume --seat <terminal-id> --stage spent`. An early check is
+permitted only after a healthy turn ends and the work is clean and pushed.
+Have the next packet ready. Use `--stage low --reason "<one line>"` to
+record why the packet will exhaust the active quota before refill. Leave
+healthy working turns alone.
+
+If the helper returns `wait`, wait until its refill time and check again.
+The team can set `usage_resets.wait_horizon` in minutes. It defaults to
+20. For a weekly limit, check for a reset before using a saved fallback.
+For a 5 hour limit alone, the helper returns `fallback_first`. Check saved
+cross provider routes using the rule above. Use
+`--no-qualified-fallback` only after that check finds no qualified route.
+If a reset is unavailable or cannot recover the seat, apply the saved
+fallback rule or report the block.
+
+If the result is `pending`, recheck through the same lead and seat. Let
+the helper settle the saved attempt. Report `unresolved` for operator
+review. Resume the same session only when the helper reports `resume`.
+Keep one active assignment. Record the outcome, confirmed resets used,
+saved resets left and next expiry in the execution log, a board status
+entry, and the final report. Report an unknown value when Codex does not
+provide it. The Lantern ledger records attempts and their outcomes.
+
 ### Saved seat permissions
 
 Only the user team file can select `"permissions": "yolo"` for a saved
