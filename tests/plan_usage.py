@@ -153,7 +153,7 @@ for line in sys.stdin:
                  "rateLimitResetCredits": {"availableCount": 2, "credits": credits}}
         (self.root / "limits.json").write_text(json.dumps(value))
 
-    def turn(self, spent, complete=True):
+    def turn(self, spent, complete=True, next_model=None):
         def row(kind, **data):
             return {"type": "event_msg", "payload": {"type": kind, "turn_id": "turn", **data}}
         rows = [row("task_started"), {"type": "turn_context", "payload": {
@@ -161,6 +161,9 @@ for line in sys.stdin:
         if complete:
             error = {"codex_error_info": "usage_limit_exceeded"} if spent else None
             rows.append(row("task_complete", error=error))
+        if next_model:
+            rows.append(row("thread_settings_applied", thread_settings={
+                "model": next_model, "model_provider_id": "openai", "cwd": str(self.root)}))
         self.log.write_text("".join(json.dumps(entry) + "\n" for entry in rows))
 
     def run_cli(self, *args):
@@ -200,6 +203,8 @@ for line in sys.stdin:
         self.assertEqual(self.attempt()["outcome"], "refused")
         self.world.terminals["seat1"]["status"]["state"] = "done"
         self.turn(spent=False)
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.turn(spent=True, next_model="other")
         self.assertEqual(self.attempt()["outcome"], "refused")
         self.clean_pushed_boundary()
         self.write_limits(used=90, ordinary=True)
@@ -255,6 +260,16 @@ for line in sys.stdin:
         self.assertIsNone(result["ordinary_usage_allowed"])
         self.assertEqual(len(self.calls()), 2)
         self.assertEqual(self.calls()[0], self.calls()[1])
+
+    def test_rolled_window_closes_lost_reply_without_freeing_its_reservation(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.mode.write_text("{}")
+        self.write_limits(refill=self.refill + 10080 * 60)
+        self.assertEqual(self.attempt()["outcome"], "expired")
+        self.assertEqual(self.attempt()["outcome"], "cap_reached")
+        self.assertEqual(len(self.calls()), 1)
 
     def test_early_nothing_to_reset_counts_and_spent_needs_a_free_slot(self):
         self.register()

@@ -236,6 +236,7 @@ def turn_evidence(path: Path) -> dict:
         raise Refusal("Codex is still writing its turn log")
     lines = data.splitlines()[bool(offset):]
     turn = {}
+    active = {}
     for line in lines:
         event = json.loads(line)
         body = event.get("payload")
@@ -245,6 +246,8 @@ def turn_evidence(path: Path) -> dict:
         if event.get("type") == "event_msg":
             if kind == "task_started":
                 turn = {"id": body.get("turn_id"), "ended": False}
+            elif kind == "thread_settings_applied" and isinstance(body.get("thread_settings"), dict):
+                active = body["thread_settings"]
             elif turn.get("id") and body.get("turn_id") == turn["id"]:
                 if kind == "task_complete":
                     error = body.get("error")
@@ -255,7 +258,9 @@ def turn_evidence(path: Path) -> dict:
                     turn.update(ended=True, error=True, spent=False)
         elif event.get("type") == "turn_context" and turn.get("id") and body.get("turn_id") == turn["id"]:
             turn.update(model=body.get("model"), cwd=body.get("cwd"))
-    return turn
+            active = {"model": turn["model"], "model_provider_id": (active.get("model_provider_id") or "openai"),
+                      "cwd": turn["cwd"]}
+    return dict(turn, active=active)
 
 
 def pushed_head(cwd: str) -> str:
@@ -279,18 +284,20 @@ def evidence(checked: dict, term: dict, stage: str, boundary: dict) -> dict:
     root = Path(checked["scope"]["env"]["CODEX_HOME"])
     path = rollout_path(pid, root)
     turn = turn_evidence(path)
-    if not turn.get("ended") or not turn.get("model"):
+    active = turn["active"]
+    model = active.get("model")
+    if not turn.get("ended") or not model or active.get("model_provider_id") != "openai":
         raise Refusal("The latest Codex turn and model are not verified")
-    if stage == "spent" and not turn.get("spent"):
+    if stage == "spent" and (not turn.get("spent") or turn.get("model") != model):
         raise Refusal("The latest Codex turn has no verified usage limit error")
     if stage == "low":
-        if turn.get("error") or not boundary.get("reason") or not turn.get("cwd"):
+        if turn.get("error") or not boundary.get("reason") or not active.get("cwd"):
             raise Refusal("A finished healthy turn and the next packet reason are required")
-        commit = pushed_head(turn["cwd"])
+        commit = pushed_head(active["cwd"])
         if boundary.get("commit", commit) != commit:
             raise Refusal("The pushed handoff commit changed")
         boundary["commit"] = commit
-    return {"session": path.stem, "turn": turn["id"], "model": turn["model"]}
+    return {"session": path.stem, "turn": turn["id"], "model": model}
 
 
 def active_pool(limits: dict, model: str) -> tuple[str, dict]:
@@ -305,9 +312,9 @@ def active_pool(limits: dict, model: str) -> tuple[str, dict]:
                if isinstance(pool, dict) and pool.get("normalModelSlug") == model]
     if len(matches) == 1:
         return matches[0]
-    default = pools.get("codex")
-    if not matches and isinstance(default, dict) and not default.get("normalModelSlug"):
-        return "codex", default
+    if (not matches and isinstance(top, dict) and top.get("limitId") in (None, "codex")
+            and not top.get("normalModelSlug")):
+        return "codex", top
     raise Refusal("The active Codex model pool is unknown")
 
 
@@ -373,8 +380,10 @@ def preflight(seat: str, stage: str, boundary: dict, world: desktop.World, check
 
 
 def send_reset(request, path: Path, ledger: dict, intent: dict, reading: dict, limits: dict,
-               pool: dict, recheck) -> dict:
+               pool: dict, scope: dict, recheck) -> dict:
     try:
+        if not plan_usage.stamp_matches(scope):
+            raise sources.SourceError("Codex login changed")
         outcome = request(CONSUME, {"idempotencyKey": intent["key"]}).get("outcome")
         if outcome not in OUTCOMES:
             raise sources.SourceError("Unknown reset response")
@@ -465,7 +474,7 @@ def reconcile(request, world: desktop.World, root: Path, run_path_now: Path, tar
                     else:
                         intent["retries"] += 1
                         save_record(path, ledger)
-                        return send_reset(request, path, ledger, intent, reading, limits, pool,
+                        return send_reset(request, path, ledger, intent, reading, limits, pool, checked["scope"],
                                           lambda: scope_current(latest, target, checked))
     intent["result_at"] = time.time()
     save_record(path, ledger)
@@ -538,7 +547,7 @@ def consume(request, world: desktop.World, checked: dict, args, root: Path, run_
                   "boundary": boundary, "status": "pending", "retries": 0, "created_at": time.time()}
         ledger["intents"].append(intent)
         save_record(path, ledger)
-        return send_reset(request, path, ledger, intent, reading, limits, pool,
+        return send_reset(request, path, ledger, intent, reading, limits, pool, checked["scope"],
                           lambda: scope_current(latest, args.seat, checked))
 
 
