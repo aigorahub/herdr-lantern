@@ -322,6 +322,11 @@ def windows(pool: dict) -> list[dict]:
     return [window for slot in WINDOWS if (window := sources.window(pool.get(slot), slot, slot))]
 
 
+def saved_window(intent: dict, pool: dict) -> dict | None:
+    slot = intent["window"]
+    return sources.window(pool.get(slot), slot, slot)
+
+
 def trigger(limits: dict, pool: dict, stage: str) -> str:
     reached = pool.get("rateLimitReachedType")
     ordinary = limits.get("ordinaryUsageAllowed")
@@ -353,10 +358,17 @@ def summary(reading: dict, limits: dict) -> dict:
 def recovered(intent: dict, limits: dict, pool: dict) -> bool:
     if limits.get("ordinaryUsageAllowed") is not True:
         return False
-    if intent["stage"] == "spent" or intent["status"] == "nothingToReset":
+    if intent["stage"] == "spent":
+        return trigger(limits, pool, "spent") == "cleared"
+    if intent["status"] == "nothingToReset":
         return True
-    window = next((item for item in windows(pool) if item["id"] == intent["window"]), None)
+    window = saved_window(intent, pool)
     return window is not None and window["remaining"] > intent["remaining"]
+
+
+def record_recovery(intent: dict, pool: dict) -> None:
+    window = saved_window(intent, pool)
+    intent.update(recovery_confirmed=True, remaining_after=window["remaining"] if window else None)
 
 
 def response(intent: dict, reading: dict, limits: dict, pool: dict) -> dict:
@@ -405,7 +417,8 @@ def send_reset(request, path: Path, ledger: dict, intent: dict, reading: dict, l
     except (sources.SourceError, Refusal, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return dict(response(intent, {}, {}, {}), resume=False)
     intent["balance_after"] = reading_after.get("resets")
-    intent["recovery_confirmed"] = outcome in CONFIRMED and recovered(intent, limits_after, pool_after)
+    if outcome in CONFIRMED and recovered(intent, limits_after, pool_after):
+        record_recovery(intent, pool_after)
     save_record(path, ledger)
     return response(intent, reading_after, limits_after, pool_after)
 
@@ -414,14 +427,17 @@ def reserved_slots(ledger: dict, run: str) -> int:
     return sum(entry["run"] == run and entry["status"] != "noCredit" for entry in ledger["intents"])
 
 
-def attempted_this_episode(ledger: dict, pool: str, window: dict, stage: str, expected: dict) -> bool:
+def attempted_this_episode(ledger: dict, pool: str, window: dict, stage: str, expected: dict,
+                           threshold: float) -> bool:
     for entry in reversed(ledger["intents"]):
         if (entry["pool"] != pool or entry["window"] != window["id"]
                 or entry["resets_at"] != window["reset_at"] or entry["status"] in ("void", "expired")):
             continue
         if entry.get("recovery_confirmed") and entry["status"] in CONFIRMED | {"restored"}:
-            # Recovery can leave the pool below the early threshold. The
-            # same turn cannot prove a new episode at that level.
+            if stage == "low":
+                # A new turn can still be in the same low quota episode.
+                remaining_after = sources.number(entry.get("remaining_after"))
+                return not (remaining_after is not None and window["remaining"] < threshold <= remaining_after)
             return entry["stage"] == stage and entry["evidence"] == expected
         if entry["stage"] == stage:
             return True
@@ -433,13 +449,17 @@ def settle_pending(world: desktop.World, original: Path, path: Path, ledger: dic
     def close(outcome: str, pool: dict) -> dict:
         intent["status"] = outcome
         intent["result_at"] = time.time()
-        intent["recovery_confirmed"] = outcome == "restored"
+        if outcome == "restored":
+            record_recovery(intent, pool)
         save_record(path, ledger)
         return dict(response(intent, reading, limits, pool), resume=outcome == "restored")
 
+    run = read_record(original, {})
+    if run and run["server"]["key"] != world.server["key"]:
+        # This core cannot verify an assignment on another server.
+        return dict(summary(reading, limits), outcome="pending", resume=False)
     if time.time() >= intent["resets_at"]:
         return close("expired", {})
-    run = read_record(original, {})
     if not run:
         return close("void", {})
     try:
@@ -448,9 +468,6 @@ def settle_pending(world: desktop.World, original: Path, path: Path, ledger: dic
         return close("void", {})
     if not grant["cap"] or reserved_slots(ledger, original.name) > grant["cap"]:
         return close("void", {})
-    if run["server"]["key"] != world.server["key"]:
-        # This core cannot verify an assignment on another server.
-        return close("unresolved", {})
     seat, stage, boundary, expected = (intent[key] for key in ("seat", "stage", "boundary", "evidence"))
     account = reading["account"]
     try:
@@ -469,7 +486,7 @@ def settle_pending(world: desktop.World, original: Path, path: Path, ledger: dic
                 pool_id, pool = active_pool(limits, expected["model"])
             except Refusal:
                 return close("unresolved", {})
-            item = next((item for item in windows(pool) if item["id"] == intent["window"]), None)
+            item = saved_window(intent, pool)
             if pool_id != intent["pool"] or not item or item["reset_at"] is None:
                 return close("unresolved", {})
             if recovered(intent, limits, pool):
@@ -518,7 +535,7 @@ def reconcile(world: desktop.World, root: Path, run_file: Path, target: str, cap
         return dict(summary(reading, limits), outcome="disabled", resume=False)
     with lock(original.with_suffix(".lock")):
         result = settle_pending(world, original, path, ledger, intent, reading, limits)
-    if original != run_file or intent["seat"] != target:
+    if result["outcome"] != "pending" and (original != run_file or intent["seat"] != target):
         result.update(resume=False, settled_seat=intent["seat"])
     return result
 
@@ -558,7 +575,7 @@ def consume(request, world: desktop.World, checked: dict, args, root: Path, run_
         last = prior[-1] if prior else None
         resume = last is None or recovered(last, limits, pool)
         if last and last["status"] in CONFIRMED and resume and not last.get("recovery_confirmed"):
-            last["recovery_confirmed"] = True
+            record_recovery(last, pool)
             last["balance_after"] = reading.get("resets")
             save_record(path, ledger)
         reserved = reserved_slots(ledger, run_file.name)
@@ -576,7 +593,7 @@ def consume(request, world: desktop.World, checked: dict, args, root: Path, run_
             return dict(base, outcome="wait")
         if item["minutes"] == 300 and not boundary.get("no_fallback"):
             return dict(base, outcome="fallback_first")
-        if attempted_this_episode(ledger, pool_id, item, args.stage, expected):
+        if attempted_this_episode(ledger, pool_id, item, args.stage, expected, grant["threshold"]):
             return dict(base, outcome="already_attempted", resume=last is not None and resume)
         if reserved >= grant["cap"]:
             return dict(base, outcome="cap_reached")

@@ -207,8 +207,9 @@ for line in sys.stdin:
         subprocess.run(git + ["config", f"branch.{branch}.remote", "origin"], check=True)
         subprocess.run(git + ["config", f"branch.{branch}.merge", "refs/heads/fixture"], check=True)
 
-    def early_attempt(self):
-        return self.attempt("low", "--worktree", str(self.worktree), "--reason", "Next packet uses 12%")
+    def early_attempt(self, seat="seat1"):
+        return self.run_cli("consume", "--seat", seat, "--stage", "low", "--worktree", str(self.worktree),
+                            "--reason", "Next packet uses 12%")
 
     def test_live_report_and_premature_or_unverified_attempts_never_send(self):
         self.assertEqual(self.attempt()["outcome"], "refused")
@@ -323,6 +324,23 @@ for line in sys.stdin:
         self.assertEqual(self.calls()[0], self.calls()[1])
         self.assertEqual((self.root / "scopes.log").read_text().splitlines(), ["seat1", "seat1"])
 
+    def test_peer_server_leaves_the_original_key_pending(self):
+        self.register("1")
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        original = self.world.server.copy()
+        self.world.server.update(key="peer", lifetime="peer-instance")
+        self.register("2")
+        result = self.run_cli("consume", "--seat", "seat2", "--stage", "spent")
+        self.assertEqual(result["outcome"], "pending")
+        self.assertNotIn("settled_seat", result)
+        self.assertEqual(len(self.calls()), 1)
+        self.world.server.update(original)
+        self.mode.write_text('{"outcome":"alreadyRedeemed","after_reset":30}')
+        self.assertEqual(self.attempt()["outcome"], "alreadyRedeemed")
+        self.assertEqual(len(self.calls()), 2)
+        self.assertEqual(*self.calls())
+
     def test_lower_cap_closes_pending_without_blocking_a_later_attempt(self):
         self.register()
         self.mode.write_text('{"drop":true}')
@@ -379,6 +397,42 @@ for line in sys.stdin:
         self.assertTrue(result["resume"])
         self.assertEqual(self.early_attempt()["outcome"], "already_attempted")
         self.assertEqual(len(self.calls()), 1)
+
+    def test_low_recovery_below_threshold_blocks_another_seat(self):
+        self.register("1")
+        self.register("2")
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":94}')
+        self.assertTrue(self.early_attempt()["resume"])
+        self.turn(spent=False, turn_id="peer-turn")
+        self.assertEqual(self.early_attempt("seat2")["outcome"], "already_attempted")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_low_recovery_above_threshold_allows_another_low_episode(self):
+        self.grant(2)
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":85}')
+        self.assertTrue(self.early_attempt()["resume"])
+        self.write_limits(used=95, ordinary=True)
+        result = self.early_attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["resume"])
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(*self.calls())
+
+    def test_spent_reset_cannot_resume_while_backend_still_reports_limit(self):
+        self.register()
+        self.write_limits(reached="rate_limit_reached")
+        self.mode.write_text('{"after_reset":85}')
+        result = self.attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["ordinary_usage_allowed"])
+        self.assertFalse(result["resume"])
 
     def test_spent_uses_per_pool_codex_reading_over_top_level_mirror(self):
         self.register()
