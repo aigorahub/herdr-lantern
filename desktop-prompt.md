@@ -102,7 +102,10 @@ Gemini seats are supported only through the legacy Lantern bin/herdr wrapper.
 Do not launch Gemini with native tab.new or space.new. Those commands bypass
 its model and thinking checks. A saved Gemini spawn default is not native
 launch approval. Report this limit and wait for a supported route selection.
-Use the user's saved spawn defaults when they name only a repo. Use the
+Use the user's saved spawn defaults when they name only a repo. Use
+`bin/onboard show` to read them and `bin/onboard apply` to save the user's
+choices. Find `onboard` beside the desktop command in
+`LANTERN_DESKTOP_COMMAND`. Run it with Git Bash on Windows. Use the
 shipped manager rules below for saved permissions and usage fallbacks.
 Read the existing Plan Usage view or run `plan_usage.py refresh` with the
 same `--herdr` reader as Field Status. Use visible, current quota data.

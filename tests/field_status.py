@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 import threading
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
@@ -505,6 +505,11 @@ class FieldStatusTests(unittest.TestCase):
             accepted = run(*args)
             self.assertEqual(accepted.returncode, 0, accepted.stderr)
             self.assertIn("DONE\n• Plugin Update\n  Review\n  Fixed output", run("refresh").stdout)
+            live["agents"][-1]["agent_status"] = "idle"
+            source.write_text(json.dumps(live), encoding="utf-8")
+            self.assertIn("Fixed output", run("refresh").stdout)
+            rows = json.loads((root / "state/field-status-rows.json").read_text())["rows"]
+            self.assertEqual(next(row for row in rows if row["pane_id"] == "w3:p1")["raw_status"], "idle")
             live["agents"][-1]["completion_seq"] = 2
             source.write_text(json.dumps(live), encoding="utf-8")
             rejected = run(*args)
@@ -788,7 +793,15 @@ class ReapTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, result, stdout.getvalue(), stderr.getvalue())
 
             with patch.object(desktop, "reads", return_value=True), patch.object(desktop, "read_world", snapshot), \
-                    patch.object(desktop, "run", external):
+                    patch.object(desktop, "run", external), ExitStack() as processes:
+                if scenario == "wrapper":
+                    parent = terminals["t1"]["foreground"]["pid"]
+                    processes.enter_context(patch.object(
+                        desktop.runtime, "child_pids", side_effect=lambda pid: {200} if pid == parent else set()))
+                    processes.enter_context(patch.object(
+                        desktop.runtime, "process_start", side_effect=lambda pid: "live-child" if pid == 200 else ""))
+                    processes.enter_context(patch.object(
+                        desktop, "process_argv", side_effect=lambda pid: ["codex", "--no-daemon"] if pid == 200 else None))
                 for pane in panes:
                     self.reviewed(run, state, pane, "complete")
                 if scenario == "pending":

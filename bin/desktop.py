@@ -5,6 +5,7 @@ import ctypes
 import json
 import os
 from pathlib import Path
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -15,15 +16,25 @@ from typing import Callable, NamedTuple
 import field_status as field
 from lantern_views import DESKTOP_VIEWS, current_watcher, matches_watcher
 import usage_runtime as runtime
+from win_cmd import cmd_argv, cmd_command_line
 
 ROOT = Path(__file__).resolve().parents[1]
-READER = ROOT / "bin" / "lantern-app-read"
+
+
+def launcher(name: str) -> Path:
+    return ROOT / "bin" / (name + ".cmd" if os.name == "nt" else name)
+
+
+READER = launcher("lantern-app-read")
 READ_SECONDS = 5
 APP_AGENT_NAMES = {
     "claude-code": "claude",
     "grok-build": "grok",
     "antigravity-cli": "agy",
     "antigravity": "agy",
+    "agent": "cursor",
+    "cursor-agent": "cursor",
+    "oh-my-pi": "omp",
 }
 
 
@@ -65,8 +76,27 @@ def instance_id(state: Path) -> str:
     return runtime.digest([str(state.resolve()), str(config_dir().resolve())])
 
 
+def desktop_launch(*args: str) -> list[str]:
+    if os.name == "nt":
+        return [sys.executable, str(ROOT / "bin" / "desktop.py"), *args]
+    return ["sh", str(launcher("lantern-app")), *args]
+
+
+def batch_command(path: str) -> bool:
+    return os.name == "nt" and Path(path).suffix.lower() in {".cmd", ".bat"}
+
+
+def native_command(argv: list[str]) -> list[str] | str:
+    if batch_command(argv[0]):
+        *prefix, command = cmd_argv(argv, os.environ.get("COMSPEC", "cmd.exe"))
+        # cmd parses the text after /c itself. CRT argument escaping would
+        # turn the command's quotes into literal backslashes.
+        return subprocess.list2cmdline(prefix) + ' "' + command + '"'
+    return argv
+
+
 def run(argv: list[str], timeout: float = 15) -> str:
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+    result = subprocess.run(native_command(argv), capture_output=True, text=True, timeout=timeout, check=False)
     if result.returncode:
         raise RuntimeError(field.clean(result.stderr or result.stdout or f"{argv[0]} failed", 400))
     return result.stdout
@@ -76,7 +106,7 @@ def core_calls(calls: list[tuple[str, dict]], timeout: float = 10) -> list[dict]
     """Send several requests over one core connection and return their results in order."""
     requests = [{"jsonrpc": "2.0", "id": index, "method": method, "params": params}
                 for index, (method, params) in enumerate(calls, 1)]
-    proc = subprocess.run([HC, "connect"], input="".join(json.dumps(r) + "\n" for r in requests),
+    proc = subprocess.run(native_command([HC, "connect"]), input="".join(json.dumps(r) + "\n" for r in requests),
                           capture_output=True, text=True, timeout=timeout, check=False)
     if proc.returncode:
         raise RuntimeError(field.clean(proc.stderr, 300))
@@ -283,15 +313,37 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
     return result
 
 
+def wrapped_argv(argv: object) -> list[str] | None:
+    if (isinstance(argv, list) and len(argv) >= 5 and all(isinstance(arg, str) for arg in argv)
+            and argv[0] == argv[3] and Path(argv[0]).name in {"sh", "bash", "zsh"}
+            and argv[1:3] in (["-ic", '"$@"; exec "$0" -i'], ["-lic", '"$@"; exec "$0" -li'])):
+        return argv[4:]
+    return None
+
+
+def wrapped_child(parent: object, argv: list[str]) -> int | None:
+    if type(parent) is not int or parent <= 0:
+        return None
+    try:
+        matches = []
+        for pid in runtime.child_pids(parent):
+            start = runtime.process_start(pid)
+            if start and process_argv(pid) == argv and runtime.process_start(pid) == start:
+                matches.append(pid)
+        if len(matches) == 1:
+            return matches[0]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def native_process(terminal: dict) -> dict:
     fg = dict(terminal.get("foreground") or {})
     if not fg:
         return fg
-    argv = fg.get("argv") or []
-    # Accept the app's fixed exec wrapper without parsing arbitrary shell code.
-    if (len(argv) >= 5 and argv[1:3] == ["-ic", '\"$@\"; exec "$0" -i']
-            and argv[0] == argv[3] and Path(argv[0]).name in {"sh", "bash", "zsh"}):
-        fg["argv"] = argv[4:]
+    argv = wrapped_argv(fg.get("argv"))
+    if argv and (pid := wrapped_child(fg.get("pid"), argv)) is not None:
+        fg.update(pid=pid, argv=argv, name=Path(argv[0]).name)
     cwd = fg.get("cwd") or terminal.get("cwd")
     if not isinstance(cwd, str) or not Path(cwd).is_absolute():
         raise RuntimeError("Native process working directory unavailable")
@@ -393,16 +445,18 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
     if kind == "claude":
         args += ["--append-system-prompt", prompt, "Read the native Lantern instructions and report which work needs attention. Do not change any project."]
     else:
-        args += [prompt + "\nRead these instructions and report the field. Do not change any project."]
+        separator = " " if batch_command(binary) else "\n"
+        args += [prompt + separator + "Read these instructions and report the field. Do not change any project."]
     return args
 
 
 def install_claude_hooks(work: Path) -> None:
     folder = runtime.private_dir(work / ".claude")
     path = folder / "settings.local.json"
-    settings = json.loads(path.read_text()) if path.exists() else {}
+    settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     hooks = settings.setdefault("hooks", {})
-    command = shlex.join([sys.executable, str(ROOT / "bin/agent_status.py")])
+    argv = [sys.executable, str(ROOT / "bin/agent_status.py")]
+    command = cmd_command_line(argv) if os.name == "nt" else shlex.join(argv)
     events = {"SessionStart": "idle", "UserPromptSubmit": "working",
               "PreToolUse": "working", "Notification": "blocked", "Stop": "done"}
     for event, state in events.items():
@@ -414,13 +468,13 @@ def install_claude_hooks(work: Path) -> None:
     field.write_json(path, settings)
 
 
-def chat() -> None:
+def chat() -> int | None:
     record_start(state_dir(), "chat")
     preferences = config_dir().resolve()
     config = read_config(preferences / "helper.conf")
     state = state_dir()
     work = runtime.private_dir(state / "workdir")
-    prompt = (ROOT / "desktop-prompt.md").read_text()
+    prompt = (ROOT / "desktop-prompt.md").read_text(encoding="utf-8")
     prompt += "\nSaved settings: " + json.dumps({k: v for k, v in config.items() if k not in {"HELPER_EXTRA_ARGS", "HELPER_KATA_PROJECT"}})
     prompt += f"\nModel routing: {ROOT / 'bin/model-route'}\nPreflight: {ROOT / 'bin/model-preflight'}\n"
     prompt += f"\nLantern config directory (LANTERN_CONFIG_DIR): {preferences}\n"
@@ -428,23 +482,30 @@ def chat() -> None:
     prompt += "\n" + (ROOT / "guidance.md").read_text(encoding="utf-8") + "\n"
     prompt += "\n" + (ROOT / "manager-duty.md").read_text(encoding="utf-8") + "\n"
     if config.get("HELPER_KATA_PROJECT"):
-        prompt += "\n" + (ROOT / "kata-monitor.md").read_text()
+        prompt += "\n" + (ROOT / "kata-monitor.md").read_text(encoding="utf-8")
         prompt += "\nKata project and wake target: " + json.dumps({"project": config["HELPER_KATA_PROJECT"],
                                                                    "target": "lantern-" + instance_id(state)[:16]}) + "\n"
     for filename in ("CLAUDE.md", "AGENTS.md", "GEMINI.md"):
-        (work / filename).write_text(prompt)
-    args = helper_argv(config, prompt)
-    if helper_command(config)[0] == "claude":
+        (work / filename).write_text(prompt, encoding="utf-8")
+    kind, binary = helper_command(config)
+    # The full instructions live in the workdir files. A batch command
+    # line cannot carry the multiline prompt through cmd.exe.
+    initial_prompt = "Read the full Lantern instructions in this folder." if batch_command(binary) else prompt
+    args = helper_argv(config, initial_prompt)
+    if kind == "claude":
         install_claude_hooks(work)
     for name in list(os.environ):
         if name.startswith("HERDR_") and name != "HERDR_APP_HOME":
             os.environ.pop(name, None)
     os.environ.update(LANTERN_CONFIG_DIR=str(preferences),
-                      LANTERN_DESKTOP_COMMAND=str(ROOT / "bin/lantern-app"),
+                      LANTERN_DESKTOP_COMMAND=str(launcher("lantern-app")),
                       LANTERN_HERD_STATE_DIR=str(state), LANTERN_TEAM_STATE_DIR=str(state),
                       LANTERN_TEAM_MAILBOX=str(ROOT / "bin/team_mailbox.py"))
     os.chdir(work)
+    if os.name == "nt":
+        return subprocess.run(native_command(args), check=False).returncode
     os.execv(args[0], args)
+    return None
 
 
 def locate(inventory: dict, address: str) -> tuple[dict, dict, dict] | None:
@@ -471,6 +532,9 @@ def active_helper(terminal: dict, config: dict, binary: str | None = None) -> bo
     fg = terminal.get("foreground") or {}
     expected = os.path.normcase(Path(binary or helper_command(config)[1]).name).removesuffix(".exe")
     actual = os.path.normcase(Path(fg.get("name", "")).name).removesuffix(".exe")
+    if os.name == "nt":
+        expected = expected.removesuffix(".cmd").removesuffix(".bat")
+        actual = actual.removesuffix(".cmd").removesuffix(".bat")
     if actual == expected:
         return True
     argv = fg.get("argv") or []
@@ -550,13 +614,37 @@ def process_argv(pid) -> list[str] | None:
 def original_launch(terminal: dict, state: Path, role: str) -> bool:
     """The wrapper execs an interactive shell once its launched command returns."""
     launch = terminal.get("argv")
-    if not (isinstance(launch, list) and len(launch) == 8 and all(isinstance(arg, str) for arg in launch)
-            and launch[1:3] == ["-ic", '"$@"; exec "$0" -i'] and launch[0] == launch[3]
-            and Path(launch[0]).name in {"sh", "bash", "zsh"} and Path(launch[4]).name == "sh"
-            and same_path(launch[5], ROOT / "bin" / "lantern-app") and launch[6] == role
-            and same_path(launch[7], state)):
+    if os.name == "nt" and windows_readout_launch(launch, state, role):
+        current = (terminal.get("foreground") or {}).get("argv")
+        return windows_readout_launch(current, state, role) and same_path(current[0], Path(launch[0]))
+    argv = wrapped_argv(launch)
+    if not (argv and len(argv) == 4 and Path(argv[0]).name == "sh"
+            and same_path(argv[1], ROOT / "bin" / "lantern-app") and argv[2] == role
+            and same_path(argv[3], state)):
         return False
     return process_argv(terminal.get("pid")) == launch
+
+
+def windows_readout_launch(argv: object, state: Path, role: str) -> bool:
+    return (isinstance(argv, list) and len(argv) == 4
+            and isinstance(argv[0], str) and Path(argv[0]).is_absolute()
+            and same_path(argv[1], ROOT / "bin" / "desktop.py")
+            and argv[2] == role and same_path(argv[3], state))
+
+
+def watcher_args(role: str, state: Path, executable: str) -> list[str]:
+    script = ROOT / "bin" / DESKTOP_VIEWS[role][1]
+    argv = [executable, str(script), "--state-dir", str(state)]
+    if role != "system":
+        argv.extend(["--herdr", str(READER)])
+    return [*argv, "watch"]
+
+
+def readout_process(terminal: dict, state: Path, role: str) -> dict:
+    fg = native_process(terminal)
+    if os.name == "nt" and windows_readout_launch(fg.get("argv"), state, role) and original_launch(terminal, state, role):
+        fg["argv"] = watcher_args(role, state, fg["argv"][0])
+    return fg
 
 
 def read_state(path: Path) -> dict:
@@ -623,7 +711,7 @@ def stop_readout(record: dict, state: Path, role: str, address: str, old_pid: in
             return None
 
     fresh = call("terminal.get")
-    fg = native_process(fresh) if fresh and fresh.get("state") == "live" else {}
+    fg = readout_process(fresh, state, role) if fresh and fresh.get("state") == "live" else {}
     start = stock_readout(fresh, fg, state, role, script) if fresh and fg.get("pid") == old_pid else ""
     if not start:
         raise RuntimeError("Readout state changed during repair; retry open")
@@ -760,7 +848,7 @@ def ensure_views(record: dict, state: Path) -> list[str]:
                 changed = True
             if current[1]["id"] != tab["id"]:
                 raise RuntimeError("A saved Lantern readout moved; leave its current location unchanged")
-            fg = native_process(target)
+            fg = readout_process(target, state, role)
             if matches_watcher(fg, ROOT, state, role):
                 stamp = read_state(state / f"{role}-watcher.json")
                 pid = fg.get("pid")
@@ -812,7 +900,7 @@ def ensure_views(record: dict, state: Path) -> list[str]:
                 app("pane.close", pane=mounted[2]["pane"])
         anchor = pane["pane"] if role == "field" else record["field"]["pane"]
         saved = app("pane.split", pane=anchor, direction="right" if role == "field" else "down",
-                    argv=["sh", str(ROOT / "bin/lantern-app"), role, str(state)])
+                    argv=desktop_launch(role, str(state)))
         record[role] = saved
         record["layout_ready"] = False
         field.write_json(state / "home.json", record)
@@ -874,7 +962,7 @@ def open_home() -> dict:
             if "herdr-kata.agent" in home.get("labels", {}):
                 labels.append("herdr-kata.agent=")
             run(labels)
-        argv = ["sh", str(ROOT / "bin/lantern-app"), "chat", str(state), str(config_dir())]
+        argv = desktop_launch("chat", str(state), str(config_dir()))
         space = next((s for s in inventory["spaces"] if s["name"].lower() in {"lantern", "🔥 lantern"}
                       and not s.get("machine")), None)
         if space:
@@ -891,20 +979,45 @@ def open_home() -> dict:
         lock.close()
 
 
+def install_launchers() -> None:
+    target = Path.home() / ".local/bin/lantern-app"
+    marker = "# Lantern desktop launcher"
+    files = {target: ("#!/bin/sh\n" + marker + "\nexec sh " +
+                      shlex.quote(str(ROOT / "bin/lantern-app")) + ' "$@"\n').encode("utf-8")}
+    if os.name == "nt":
+        source = str(launcher("lantern-app")).replace("%", "%%")
+        files[target.with_suffix(".cmd")] = (
+            f'@echo off\r\nrem {marker}\r\n"{source}" %*\r\n').encode("utf-8")
+    for path in files:
+        if path.is_symlink() or path.exists() and marker.encode() not in path.read_bytes():
+            raise RuntimeError(f"Refusing to replace an unrelated command: {path}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    for path, data in files.items():
+        path.write_bytes(data)
+        path.chmod(0o700)
+        print(path)
+
+
+def watch_readout(argv: list[str]) -> None:
+    if os.name == "nt":
+        # Keep the process that wrote the start receipt as the watcher.
+        original = sys.argv
+        try:
+            sys.argv = argv[1:]
+            runpy.run_path(argv[1], run_name="__main__")
+        finally:
+            sys.argv = original
+    else:
+        os.execv(sys.executable, argv)
+
+
 def main() -> int:
     try:
         command, *args = sys.argv[1:] or ["open"]
         if command == "read-model":
             read_model(args)
         elif command == "install":
-            target = Path.home() / ".local/bin/lantern-app"
-            marker = "# Lantern desktop launcher"
-            if target.is_symlink() or target.exists() and marker not in target.read_text():
-                raise RuntimeError(f"Refusing to replace an unrelated command: {target}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("#!/bin/sh\n" + marker + "\nexec sh " + shlex.quote(str(ROOT / "bin/lantern-app")) + ' "$@"\n')
-            target.chmod(0o700)
-            print(target)
+            install_launchers()
         elif command == "snapshot":
             print(json.dumps(read_world().view))
         elif command == "open":
@@ -913,7 +1026,7 @@ def main() -> int:
             if args:
                 os.environ["LANTERN_DESKTOP_STATE_DIR"] = args[0]
                 os.environ["LANTERN_CONFIG_DIR"] = args[1]
-            chat()
+            return chat() or 0
         elif command in DESKTOP_VIEWS:
             if args:
                 os.environ["LANTERN_DESKTOP_STATE_DIR"] = args[0]
@@ -922,13 +1035,9 @@ def main() -> int:
             record = field.read_json(state_dir() / "home.json", {})
             if record.get("pane"):
                 os.environ["HERDR_PANE_ID"] = record["pane"]
-            script = DESKTOP_VIEWS[command][1]
-            argv = [sys.executable, str(ROOT / "bin" / script), "--state-dir", str(state_dir())]
-            if command != "system":
-                argv.extend(["--herdr", str(READER)])
-            os.execv(sys.executable, [*argv, "watch"])
+            watch_readout(watcher_args(command, state_dir(), sys.executable))
         else:
-            raise RuntimeError("Usage: lantern-app [open|snapshot|field|usage]")
+            raise RuntimeError("Usage: lantern-app [open|install|snapshot|chat|field|system|usage|read-model]")
         return 0
     except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         print("lantern-app: " + field.clean(exc, 400), file=sys.stderr)

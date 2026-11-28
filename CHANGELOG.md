@@ -4,6 +4,32 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-28
+
+### Added
+
+- Windows desktop support (experimental): `bin\lantern-app.cmd` and
+  `bin\lantern-app-read.cmd`, a `.cmd` launcher from `install`, Python
+  launches instead of `sh`, a chat and readouts that wait on their child
+  process, and Windows quoting for Claude hook commands.
+- `bin/onboard` works in a desktop session. It uses the desktop config and
+  state paths and checks for `hc` and `herdr-app`.
+
+### Fixed
+
+- An agent behind Herdr's shell wrapper, including the login form `-lic`,
+  reports its own PID, so Plan Usage can bind its account. Without one
+  verified child, Lantern keeps the shell and still reports Account unknown.
+  An old readout launched through a login shell is now replaced on upgrade.
+- A Complete outcome stays Complete when a legacy or bridged pane turns from
+  done to idle after you view it.
+- Desktop panes for Cursor (`agent`, `cursor-agent`) and omp (`oh-my-pi`)
+  are recognized, and Field Status reap matches omp panes.
+- Chat reads and writes its instruction files as UTF-8.
+- The desktop docs agree on platform support, describe desktop `onboard`
+  and count parked sub-agents in Plan Usage. `lantern-app` usage names
+  every command.
+
 ## [0.19.8] - 2026-11-27
 
 ### Changed

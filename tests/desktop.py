@@ -1,11 +1,16 @@
 """Desktop protocol and configuration boundaries. No live user processes."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
+import io
 import json
 import os
+import runpy
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -23,8 +28,35 @@ def terminal_missing():
     return desktop.CoreError({"data": {"kind": "not_found"}})
 
 
+def desktop_platform(name):
+    return patch.object(desktop, "os", SimpleNamespace(**{**vars(os), "name": name}))
+
+
+@contextmanager
+def wrapped_child(flags, interactive):
+    shell, sleep = shutil.which("bash"), shutil.which("sleep")
+    command = [shell, flags, '"$@"; exec "$0" ' + interactive, shell, sleep, "30"]
+    with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, start_new_session=True) as parent:
+        try:
+            children = []
+            deadline = time.monotonic() + 3
+            while not children and time.monotonic() < deadline:
+                children = [pid for pid in desktop.runtime.child_pids(parent.pid)
+                            if desktop.process_argv(pid) == command[4:]]
+                if not children:
+                    time.sleep(0.02)
+            child, = children
+            yield command, parent.pid, child
+        finally:
+            try:
+                os.killpg(parent.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 class ReadoutHome:
-    def __init__(self, state, roles):
+    def __init__(self, state, roles, platform):
         self.state = state
         self.record = {"terminal": "t1", "instance": "instance", "layout_ready": True}
         self.panes = {"p1": "t1"}
@@ -48,11 +80,16 @@ class ReadoutHome:
                 watcher.extend(["--herdr", str(desktop.READER)])
             argv = ["/bin/sh", "-ic", '"$@"; exec "$0" -i', "/bin/sh", "sh",
                     str(desktop.ROOT / "bin" / "lantern-app"), role, str(state)]
+            if platform == "nt":
+                argv = [sys.executable, str(desktop.ROOT / "bin/desktop.py"), role, str(state)]
+                foreground = argv
+            else:
+                foreground = [*watcher, "watch"]
             self.panes[pane] = address
             self.record[role] = {"pane": pane, "terminal": address}
             self.terminals[address] = {"address": address, "state": "live", "pid": root,
                                        "created_ms": created, "argv": argv, "cwd": str(state),
-                                       "foreground": {"pid": pid, "argv": [*watcher, "watch"]}}
+                                       "foreground": {"pid": pid, "argv": foreground}}
             self.live_argv[root] = argv
             self.starts[pid] = str(pid)
             receipt = state / f"{role}-start.json"
@@ -126,9 +163,9 @@ class ReadoutHome:
 
 class DesktopTests(unittest.TestCase):
     @contextmanager
-    def readout_home(self, roles=("field", "usage", "system")):
-        with tempfile.TemporaryDirectory() as tmp:
-            home = ReadoutHome(Path(tmp).resolve(), roles)
+    def readout_home(self, roles=("field", "usage", "system"), platform="posix"):
+        with tempfile.TemporaryDirectory() as tmp, desktop_platform(platform):
+            home = ReadoutHome(Path(tmp).resolve(), roles, platform)
             with patch.object(desktop, "core_calls", side_effect=home.core), \
                     patch.object(desktop, "run", side_effect=home.run), \
                     patch.object(desktop, "app", side_effect=home.app), \
@@ -259,7 +296,7 @@ class DesktopTests(unittest.TestCase):
             home, state = Path(tmp) / "home", Path(tmp) / "state"
             config = home / ".config/herdr/plugins/config/aigora.lantern"
             config.mkdir(parents=True)
-            with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": str(state)}), \
+            with desktop_platform("posix"), patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": str(state)}), \
                     patch.object(Path, "home", return_value=home), \
                     patch.object(desktop, "helper_argv", side_effect=lambda conf, prompt: ["helper", prompt]), \
                     patch.object(desktop, "helper_command", return_value=("codex", "helper")), \
@@ -377,6 +414,123 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(hooks["Stop"][0], original["hooks"]["Stop"][0])
             self.assertTrue(hooks["Stop"][1]["hooks"][0]["command"].endswith(" done"))
 
+    def test_windows_install_adds_the_batch_launcher(self):
+        with tempfile.TemporaryDirectory() as tmp, desktop_platform("nt"), \
+                patch.object(Path, "home", return_value=Path(tmp)), \
+                patch.object(sys, "argv", ["lantern-app", "install"]), redirect_stdout(io.StringIO()):
+            self.assertEqual(desktop.main(), 0)
+            launcher = Path(tmp) / ".local/bin/lantern-app.cmd"
+            self.assertTrue(launcher.is_file())
+            self.assertIn(b'lantern-app.cmd" %*\r\n', launcher.read_bytes())
+
+    def test_windows_claude_hooks_quote_the_executable_for_cmd(self):
+        executable = r"C:\Program Files\Python\python.exe"
+        with tempfile.TemporaryDirectory() as tmp, desktop_platform("nt"), \
+                patch.object(sys, "executable", executable):
+            work = Path(tmp)
+            desktop.install_claude_hooks(work)
+            hooks = json.loads((work / ".claude/settings.local.json").read_text())["hooks"]
+            command = hooks["Stop"][0]["hooks"][0]["command"]
+            self.assertTrue(command.startswith('"' + executable + '" '), command)
+
+    def test_windows_chat_waits_for_a_one_line_batch_helper_command(self):
+        with tempfile.TemporaryDirectory() as tmp, desktop_platform("nt"):
+            state = Path(tmp)
+            root = state / "fixture"
+            root.mkdir()
+            for name in ("desktop-prompt.md", "manager-duty.md"):
+                shutil.copyfile(desktop.ROOT / name, root / name)
+            guidance = "Équipe 林"
+            (root / "guidance.md").write_text(guidance, encoding="utf-8")
+            config = state / "équipe config"
+            binary = str(state / "Codex Shell.cmd")
+            write_text = Path.write_text
+
+            def write_with_ansi_default(path, data, encoding=None):
+                return write_text(path, data, encoding=encoding or "cp1252")
+
+            with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": tmp, "LANTERN_CONFIG_DIR": str(config),
+                                         "COMSPEC": "fixture-cmd.exe"}), \
+                    patch.object(desktop, "ROOT", root), patch.object(Path, "write_text", write_with_ansi_default), \
+                    patch.object(desktop, "helper_command", return_value=("codex", binary)), \
+                    patch.object(desktop.os, "chdir"), patch.object(desktop.os, "execv") as replace, \
+                    patch.object(desktop.subprocess, "run",
+                                 return_value=subprocess.CompletedProcess([], 7)) as run:
+                self.assertEqual(desktop.chat(), 7)
+                replace.assert_not_called()
+                command, = run.call_args.args
+                self.assertTrue(command.startswith('fixture-cmd.exe /d /s /c ""' + binary + '" '))
+                self.assertNotIn("\n", command)
+                self.assertTrue(os.environ["LANTERN_DESKTOP_COMMAND"].endswith("lantern-app.cmd"))
+                for name in ("CLAUDE.md", "AGENTS.md", "GEMINI.md"):
+                    instructions = (state / "workdir" / name).read_text(encoding="utf-8")
+                    self.assertIn("manager", instructions.lower())
+                    self.assertIn(guidance, instructions)
+                    self.assertIn(str(config.resolve()), instructions)
+
+    def test_windows_reopen_reuses_batch_helper_names(self):
+        for suffix in (".cmd", ".bat"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as tmp, desktop_platform("nt"):
+                state = Path(tmp)
+                binary = str(state / ("codex" + suffix))
+                (state / "home.json").write_text(json.dumps({"terminal": "t1", "helper_binary": binary}))
+                term = {"address": "t1", "state": "live", "foreground": {"name": "codex.exe"}}
+                with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": tmp, "LANTERN_CONFIG_DIR": tmp}), \
+                        patch.object(desktop, "run", return_value='{"spaces": []}'), \
+                        patch.object(desktop, "core", return_value={"terminals": [term]}), \
+                        patch.object(desktop, "ensure_views", return_value=[]), \
+                        patch.object(desktop, "helper_argv", return_value=[binary]), \
+                        patch.object(desktop, "app", return_value={"terminal": "t2"}) as new_home:
+                    self.assertTrue(desktop.open_home().get("reused"))
+                    new_home.assert_not_called()
+
+    def test_windows_readout_runs_in_the_process_named_in_its_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp, desktop_platform("nt"), patch.dict(os.environ), \
+                patch.object(sys, "argv", ["lantern-app", "usage", tmp]), \
+                patch.object(desktop, "READER", desktop.ROOT / "bin/lantern-app-read.cmd"), \
+                patch.object(desktop.os, "execv") as replace:
+            entered = []
+
+            def watch(path, *, run_name):
+                receipt = desktop.read_state(Path(tmp) / "usage-start.json")
+                entered.append((path, run_name, receipt["pid"], sys.argv[-3:]))
+
+            with patch.object(runpy, "run_path", side_effect=watch):
+                self.assertEqual(desktop.main(), 0)
+            self.assertEqual(entered, [(str(desktop.ROOT / "bin/plan_usage.py"), "__main__", os.getpid(),
+                                        ["--herdr", str(desktop.READER), "watch"])])
+            replace.assert_not_called()
+
+    def test_windows_reopen_replaces_a_stale_stock_readout(self):
+        with self.readout_home(platform="nt") as home:
+            stale = home.stale("system")
+            self.assertEqual(desktop.ensure_views(home.record, home.state), [])
+            self.assertIn(("terminal.kill", {"terminal": stale["address"]}), home.mutations())
+            argv, = [args["argv"] for method, args in home.mutations() if method == "pane.split"]
+            self.assertEqual(argv, [sys.executable, str(desktop.ROOT / "bin/desktop.py"), "system", str(home.state)])
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows batch launch")
+    def test_windows_cmd_launchers_execute(self):
+        with tempfile.TemporaryDirectory(prefix="lantern smoke ") as tmp:
+            state = Path(tmp)
+            hc = state / "hc.cmd"
+            reply = json.dumps({"id": 1, "result": {"pid": os.getpid(), "core": {"id": "windows-smoke"}}})
+            hc.write_bytes(("@echo off\r\necho " + reply + "\r\n").encode("ascii"))
+            env = dict(os.environ, USERPROFILE=str(state), LANTERN_HC_BIN=str(hc))
+            comspec = env.get("COMSPEC", "cmd.exe")
+
+            def execute(launcher, *args):
+                script = desktop.ROOT / "bin" / launcher
+                command = f'"{comspec}" /d /s /c ""{script}" {" ".join(args)}"'
+                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout
+
+            execute("lantern-app.cmd", "install")
+            self.assertTrue((state / ".local/bin/lantern-app.cmd").is_file())
+            result = json.loads(execute("lantern-app-read.cmd", "status", "--json"))
+            self.assertEqual(result["server"]["id"], "windows-smoke")
+
     @unittest.skipIf(os.name == "nt", "POSIX terminal protocol")
     def test_hook_writes_status_to_agent_tty_when_all_hook_streams_are_pipes(self):
         import pty
@@ -434,11 +588,96 @@ class DesktopTests(unittest.TestCase):
 
     def test_native_process_retains_actual_arguments_and_fills_its_working_directory(self):
         cwd = str(Path.cwd())
-        fg = {"pid": 3, "argv": ["/bin/zsh", "-ic", '\"$@\"; exec "$0" -i', "/bin/zsh", "grok", "--model", "grok-4.7"]}
+        fg = {"pid": 3, "argv": ["grok", "--model", "grok-4.7"]}
         result = desktop.native_process({"foreground": fg, "cwd": cwd})
         self.assertEqual(result["argv"], ["grok", "--model", "grok-4.7"])
         self.assertEqual(result["cwd"], cwd)
-        self.assertEqual(fg["argv"][0], "/bin/zsh")
+        self.assertNotIn("cwd", fg)
+
+    @unittest.skipUnless(sys.platform in {"darwin", "linux"}, "POSIX process arguments")
+    def test_native_wrapper_uses_the_real_direct_child(self):
+        for flags, interactive in (("-ic", "-i"), ("-lic", "-li")):
+            with self.subTest(flags=flags), wrapped_child(flags, interactive) as (command, parent, child):
+                fg = {"pid": parent, "argv": command}
+                result = desktop.native_process({"foreground": fg, "cwd": str(Path.cwd())})
+                self.assertEqual((result["pid"], result["argv"]), (child, command[4:]))
+                self.assertEqual(fg["argv"], command)
+
+    def test_desktop_app_aliases_and_omp_reap_match_the_agent(self):
+        cwd = str(Path.cwd())
+        for app, alias in (("agent", "cursor"), ("cursor-agent", "cursor"), ("oh-my-pi", "omp"), ("omp", "omp")):
+            with self.subTest(app=app):
+                terminals = self.terminals()
+                terminals["t1"].update(pid=100, cwd=cwd, status={"app": app, "state": "done"},
+                                       foreground={"pid": 101, "argv": [app]})
+                view = desktop.snapshot(self.inventory(), terminals, {})
+                self.assertEqual(view["agents"][0]["agent"], alias)
+                world = desktop.World({}, view, terminals)
+                field = desktop.field.Field([], view["agents"], "", "", world)
+                self.assertTrue(desktop.field.foreground_matches(field, str(desktop.READER), "p1", 2))
+
+    @unittest.skipUnless(sys.platform in {"darwin", "linux"}, "POSIX read-model launcher")
+    def test_field_readout_and_reader_use_the_desktop_protocol(self):
+        with tempfile.TemporaryDirectory() as tmp, wrapped_child("-lic", "-li") as (command, parent, child):
+            root = Path(tmp)
+            fixture = root / "world.json"
+            stub = root / "stub.py"
+            terminal = {"address": "t1", "pid": parent, "state": "live", "cwd": str(root),
+                        "status": {"app": "cursor-agent", "state": "working"},
+                        "foreground": {"pid": parent, "name": "bash", "argv": command}}
+            inventory = {"spaces": [{"id": "s1", "name": "Local", "tabs": [
+                {"id": "tab1", "name": "Cursor work", "terminals": [{"pane": "p1", "terminal": "t1"}]}]}]}
+            fixture.write_text(json.dumps({"inventory": inventory, "server": {"pid": os.getpid(),
+                                           "core": {"id": "fixture"}}, "terminals": [terminal]}))
+            stub.write_text("""import json, sys
+from pathlib import Path
+data = json.loads(Path(sys.argv[1]).read_text())
+if sys.argv[2:] == ["app", "ls"]:
+    print(json.dumps(data["inventory"]))
+else:
+    assert sys.argv[2:] == ["core", "connect"]
+    for line in sys.stdin:
+        request = json.loads(line)
+        result = {"server.status": data["server"], "terminal.list": {"terminals": data["terminals"]}}
+        print(json.dumps({"id": request["id"], "result": result[request["method"]]}))
+""")
+            for name, mode in (("herdr-app", "app"), ("hc", "core")):
+                launcher = root / name
+                launcher.write_text('#!/bin/sh\nexec "$FIXTURE_PY" "$FIXTURE_STUB" "$FIXTURE_WORLD" ' +
+                                    mode + ' "$@"\n')
+                launcher.chmod(0o700)
+            env = dict(os.environ, LANTERN_HC_BIN=str(root / "hc"), LANTERN_APP_BIN=str(root / "herdr-app"),
+                       FIXTURE_PY=sys.executable, FIXTURE_STUB=str(stub), FIXTURE_WORLD=str(fixture))
+            state = root / "state"
+            with self.subTest(command="refresh"):
+                reply = subprocess.run([sys.executable, str(desktop.ROOT / "bin/field_status.py"),
+                                        "--state-dir", str(state), "--herdr", str(desktop.READER),
+                                        "--plain", "refresh"], env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(reply.returncode, 0, reply.stderr)
+                rows = json.loads((state / "field-status-rows.json").read_text())["rows"]
+                self.assertEqual([(row["pane_id"], row["agent"]) for row in rows], [("p1", "cursor")])
+            with self.subTest(command="process-info"):
+                reply = subprocess.run([str(desktop.READER), "pane", "process-info", "--pane", "p1"],
+                                       env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(reply.returncode, 0, reply.stderr)
+                process, = json.loads(reply.stdout)["result"]["process_info"]["foreground_processes"]
+                self.assertEqual((process["pid"], process["argv"]), (child, command[4:]))
+
+    def test_native_wrapper_keeps_the_shell_when_the_child_is_ambiguous_or_missing(self):
+        launch = ["/bin/zsh", "-ic", '"$@"; exec "$0" -i', "/bin/zsh", "codex"]
+        foreground = {"pid": 101, "argv": launch, "cwd": str(Path.cwd())}
+        for children in (set(), {102, 103}):
+            with self.subTest(children=children), patch.object(desktop.runtime, "child_pids", return_value=children), \
+                    patch.object(desktop.runtime, "process_start", return_value="live"), \
+                    patch.object(desktop, "process_argv", return_value=["codex"]):
+                self.assertEqual(desktop.native_process({"foreground": foreground}), foreground)
+
+    def test_stale_stock_readout_launched_by_login_shell_is_replaced(self):
+        with self.readout_home() as home:
+            stale = home.stale("field")
+            stale["argv"][1:3] = ["-lic", '"$@"; exec "$0" -li']
+            self.assertEqual(desktop.ensure_views(home.record, home.state), [])
+            self.assertIn(("terminal.kill", {"terminal": stale["address"]}), home.mutations())
 
     def test_stale_stock_readout_is_replaced_after_stop_confirmation(self):
         for role, case in (("field", "old stamp"), ("usage", "old stamp"), ("system", "old stamp"), ("field", "missing stamp"),

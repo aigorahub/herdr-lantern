@@ -3333,6 +3333,15 @@ class DesktopScanTests(unittest.TestCase):
                 self.assertNotIn(provider, collector.cache)
                 self.assertEqual(collector.notices, {(provider, "Account unknown"): {"t0"}})
 
+    def test_desktop_wrapped_terminal_binds_the_child_account(self):
+        wrapped = ["/bin/zsh", "-lic", '"$@"; exec "$0" -li', "/bin/zsh", "codex", "resume"]
+        world = desktop_world(argv=wrapped)
+        collector = self.collector()
+        with logins(), patch.object(runtime, "child_pids", return_value={501}), \
+                patch.object(usage.desktop, "process_argv", return_value=wrapped[4:]):
+            self.scan_desktop_pair(collector, world, world)
+        self.assertEqual(set(collector.bindings), {"codex-501"})
+
     def test_desktop_confirmation_timeout_preserves_first_read_source_error(self):
         collector = self.collector()
         world = desktop_world(argv=["codex", "-p", "fugu"])

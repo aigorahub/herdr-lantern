@@ -147,6 +147,35 @@ sh "$root/bin/onboard" --config-dir "$onboard_cli" --state-dir "$onboard_cli/sta
     doctor >"$onboard_out" || true
 grep -q '^herdr:' "$onboard_out" || fail "onboard doctor should report herdr"
 grep -q '^python:' "$onboard_out" || fail "onboard doctor should report python"
+
+# Desktop chat has the app and core commands, even when legacy Herdr is absent.
+(
+    unset HERDR_PLUGIN_ROOT HERDR_PLUGIN_CONFIG_DIR HERDR_PLUGIN_STATE_DIR
+    export LANTERN_CONFIG_DIR="$onboard_cli/desktop config"
+    export LANTERN_DESKTOP_STATE_DIR="$onboard_cli/desktop state"
+    mkdir -p "$onboard_cli/bin"
+    for tool in hc herdr-app codex; do
+        printf '%s\n' '#!/bin/sh' 'exit 0' > "$onboard_cli/bin/$tool"
+        chmod +x "$onboard_cli/bin/$tool"
+    done
+    export PATH="$onboard_cli/bin:$PATH"
+    sh "$root/bin/onboard" apply --kind codex --model gpt-6.2-sol >"$onboard_out" ||
+        fail "desktop onboard apply"
+    [ -f "$LANTERN_CONFIG_DIR/helper.conf" ] && [ -f "$LANTERN_DESKTOP_STATE_DIR/onboarded" ] ||
+        fail "desktop onboard should write the selected config and state"
+    sh "$root/bin/onboard" show >"$onboard_out" || fail "desktop onboard show"
+    grep -q '^model: gpt-6.2-sol$' "$onboard_out" || fail "desktop onboard should read the saved model"
+    sh "$root/bin/onboard" plan >"$onboard_out" || fail "desktop onboard plan"
+    grep -q '^hc: found$' "$onboard_out" && grep -q '^herdr-app: found$' "$onboard_out" ||
+        fail "desktop onboard plan should report app and core"
+    sh "$root/bin/onboard" doctor >"$onboard_out" || fail "desktop onboard doctor"
+    grep -q '^hc: ok$' "$onboard_out" && grep -q '^herdr-app: ok$' "$onboard_out" ||
+        fail "desktop onboard doctor should verify app and core"
+    if grep -q '^herdr:' "$onboard_out"; then
+        fail "desktop onboard doctor should not require legacy Herdr"
+    fi
+)
+
 rm -f "$onboard_out"
 
 printf '%s\n' 'HELPER_AGENT="devin; rm -rf /"' >"$tmp"
@@ -2644,5 +2673,14 @@ $model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests
 $model_test_python "$root/tests/field_status.py" || fail "Field Status tests"
 $model_test_python "$root/tests/desktop.py" DesktopTests.test_desktop_prompt_includes_manager_rules_with_or_without_kata ||
     fail "desktop launch did not include the shipped manager rules"
+if $model_test_python "$root/bin/desktop.py" unknown-desktop-command >"$tmp" 2>"$err"; then
+    fail "lantern-app should reject an unknown command"
+fi
+grep -Fq '|install|' "$err" && grep -Fq '|system|' "$err" ||
+    fail "lantern-app usage should list install and system"
+if command -v cygpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+    $model_test_python "$root/tests/desktop.py" DesktopTests.test_windows_cmd_launchers_execute ||
+        fail "Windows desktop batch launchers"
+fi
 $model_test_python "$root/tests/plan_usage.py" || fail "Plan Usage tests"
 $model_test_python "$root/tests/session_cleanup.py" || fail "Lantern session cleanup tests"
