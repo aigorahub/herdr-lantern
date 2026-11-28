@@ -2644,5 +2644,9 @@ $model_test_python "$root/tests/codex_jobs.py" || fail "headless Codex job tests
 $model_test_python "$root/tests/field_status.py" || fail "Field Status tests"
 $model_test_python "$root/tests/desktop.py" DesktopTests.test_desktop_prompt_includes_manager_rules_with_or_without_kata ||
     fail "desktop launch did not include the shipped manager rules"
+if command -v cygpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+    $model_test_python "$root/tests/desktop.py" DesktopTests.test_windows_cmd_launchers_execute ||
+        fail "Windows desktop batch launchers"
+fi
 $model_test_python "$root/tests/plan_usage.py" || fail "Plan Usage tests"
 $model_test_python "$root/tests/session_cleanup.py" || fail "Lantern session cleanup tests"
