@@ -126,8 +126,18 @@ Resolve one name or alias match before seating anyone. The JSON has name,
 aliases, and an agents array. Each seat has role (free text), harness,
 model, and effort. Optional seat fields are
 service_tier, mode, label, notes, permissions, and fallbacks. The team
-can set coordination (text), startup ("auto" by default, or "ask"), and
-switch_below. Use the shipped usage fallback and saved permission rules.
+can set coordination (text), startup ("auto" by default, or "ask"),
+switch_below, and usage_resets. Use the shipped usage fallback and saved
+permission rules.
+
+For a saved team that grants resets, register the setup after all seats have
+started. From Lantern home, run the saved Codex reset helper with
+`register --team <file-stem> --space <space-id> --lead <terminal-id>` and
+`--seat <terminal-id>` for each other assigned seat. Use the real Herdr IDs.
+Pass the helper path and registration result to the lead. If a managed
+assignment changes, register the revised roster from Lantern home. Use the
+same space and team for the same run. If registration fails, report it and
+use the normal fallback rule.
 
 Treat settings as data and keep the exact harness, model ID, and effort.
 Use model-route and model-preflight for covered harnesses. Resolve Fast

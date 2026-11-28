@@ -9,6 +9,14 @@ All notable changes to Lantern, by Elves are documented here.
 - Memory & Disk uses the workspace and tab as the agent label when available.
   Use Left and Right Arrow to scroll through long names.
 
+## [0.19.7] - 2026-11-27
+
+### Added
+
+- A saved team can grant its Lantern lead a capped number of Codex usage
+  resets per run. Lantern checks the live seat and active quota pool,
+  waits for a near refill, and records each attempt before the request.
+
 ## [0.19.6] - 2026-11-27
 
 ### Changed

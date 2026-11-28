@@ -17,13 +17,15 @@ import tempfile
 import threading
 import time
 import unittest
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
+import codex_resets as resets
+import desktop
 import field_status as field
 import lantern_views as views
 import plan_usage as usage
@@ -50,6 +52,445 @@ except ImportError:
 # Codex and Fugu settings are TOML, which Python reads from 3.11 on.
 # OldPythonTests covers what older Python shows instead.
 needs_tomllib = unittest.skipIf(tomllib is None, "Codex settings need Python 3.11")
+
+
+@unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"), "Native reset process checks")
+class SavedResetTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        self.config = self.root / "config"
+        self.state = self.root / "desktop"
+        self.rpc = self.root / "rpc.jsonl"
+        self.mode = self.root / "mode.json"
+        self.mode.write_text("{}")
+        for p in (self.config / "teams", self.state):
+            p.mkdir(parents=True)
+        self.settings = self.config / "teams/team.json"
+        self.grant(1)
+        self.env = dict(os.environ, XDG_STATE_HOME=str(self.root / "xdg"),
+                        LANTERN_CONFIG_DIR=str(self.config), LANTERN_DESKTOP_STATE_DIR=str(self.state),
+                        CODEX_HOME=str(self.root))
+        self.apply(patch.dict(os.environ, self.env))
+        self.db = resets.state_root()
+        self.server = self.root / "fake-app-server"
+        self.server.write_text(f"#!{sys.executable}\n" + '''import json,sys,os
+from pathlib import Path
+root = Path(os.environ["CODEX_HOME"])
+mode = json.loads((root / "mode.json").read_text())
+reads = 0
+sent = False
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req["method"]
+    if method == "initialized":
+        continue
+    if method == "initialize":
+        result = {}
+    elif method == "account/read":
+        assert req["params"] == {"refreshToken": False}
+        result = {"account": {"type": "chatgpt"}}
+    elif method == "account/rateLimits/read":
+        reads += 1
+        result = json.loads((root / "limits.json").read_text())
+        if mode.get("switch") and reads >= 2:
+            result["accountId"] = "different"
+        if mode.get("post_null") and sent:
+            result["ordinaryUsageAllowed"] = None
+    elif method == "account/rateLimitResetCredit/consume":
+        sent = True
+        with (root / "rpc.jsonl").open("a") as log:
+            log.write(json.dumps(req["params"]) + "\\n")
+        with (root / "scopes.log").open("a") as log:
+            log.write(os.environ.get("RESET_TEST_SEAT", "") + "\\n")
+        if "after_reset" in mode:
+            path = root / "limits.json"
+            updated = json.loads(path.read_text())
+            updated["ordinaryUsageAllowed"] = True
+            updated["rateLimitsByLimitId"]["active"]["primary"]["usedPercent"] = mode["after_reset"]
+            path.write_text(json.dumps(updated))
+        if mode.get("drop"):
+            sys.exit(1)
+        result = {"outcome": mode.get("outcome", "reset")}
+    else:
+        raise AssertionError(method)
+    print(json.dumps({"id": req["id"], "result": result}), flush=True)
+''')
+        self.server.chmod(0o700)
+        pid = os.getpid()
+        self.checked = {"scope": {"provider": "codex", "executable": str(self.server), "env": self.env,
+                                  "files": [], "stamp": runtime.digest([])}, "hint": "codex",
+                        "process": {"pid": pid, "executable": runtime.process_executable(pid), "argv": ["codex"]},
+                        "start": runtime.process_start(pid)}
+        self.world = desktop.World({"key": "server", "lifetime": "instance"}, {"panes": []}, {})
+        self.seat("home", "lantern", "claude", os.getppid())
+        self.world.terminals["home"]["labels"] = {"lantern.desktop": "home"}
+        field.write_json(self.state / "home.json", {"terminal": "home", "instance": desktop.instance_id(self.state)})
+        for number in ("1", "2"):
+            self.seat("lead" + number, "space" + number, "claude", os.getppid())
+            self.seat("seat" + number, "space" + number, "codex", pid)
+        self.apply(patch.object(desktop, "read_world", return_value=self.world))
+        self.apply(patch.object(usage, "inspect_process", return_value=self.checked))
+        self.log = self.root / "rollout-fixture.jsonl"
+        self.apply(patch.object(resets, "rollout_path", return_value=self.log))
+        self.refill = int(time.time()) + 3600
+        self.write_limits()
+        self.turn(spent=True)
+
+    def apply(self, patcher):
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def grant(self, cap):
+        self.settings.write_text(json.dumps({"usage_resets": {"max_per_run": cap}}))
+
+    def seat(self, name, space, app, pid):
+        self.world.view["panes"].append({"terminal_id": name, "workspace_id": space, "pane_id": name, "agent": app})
+        self.world.terminals[name] = {"state": "live", "created_ms": 12, "pid": pid, "cwd": str(self.root),
+                                      "status": {"app": app, "state": "done"},
+                                      "foreground": {"pid": pid, "argv": [app], "cwd": str(self.root)}}
+
+    def write_limits(self, used=100, ordinary=False, refill=None, duration=10080, reached=None, controlled=False,
+                     account="fixture", credits=None):
+        active = {"normalModelSlug": "model", "primary": {"usedPercent": used, "windowDurationMins": duration,
+                                                           "resetsAt": refill or self.refill},
+                  "rateLimitReachedType": reached, "spendControlReached": controlled}
+        other = {"normalModelSlug": "other", "primary": {"usedPercent": 100, "windowDurationMins": 10080,
+                                                          "resetsAt": self.refill}}
+        value = {"accountId": account, "ordinaryUsageAllowed": ordinary,
+                 "rateLimitsByLimitId": {"active": active, "codex": other},
+                 "rateLimitResetCredits": {"availableCount": 2, "credits": credits}}
+        (self.root / "limits.json").write_text(json.dumps(value))
+
+    def turn(self, spent, complete=True, next_model=None, turn_id="turn"):
+        def row(kind, **data):
+            return {"type": "event_msg", "payload": {"type": kind, "turn_id": turn_id, **data}}
+        rows = [row("task_started"), {"type": "turn_context", "payload": {
+            "turn_id": turn_id, "model": "model", "cwd": str(self.root)}}]
+        if complete:
+            error = {"codex_error_info": "usage_limit_exceeded"} if spent else None
+            rows.append(row("task_complete", error=error))
+        if next_model:
+            rows.append(row("thread_settings_applied", thread_settings={
+                "model": next_model, "model_provider_id": "openai", "cwd": str(self.root)}))
+        self.log.write_text("".join(json.dumps(entry) + "\n" for entry in rows))
+
+    def run_cli(self, *args):
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            code = resets.main(args)
+        if code:
+            return {"outcome": "refused", "error": err.getvalue()}
+        return json.loads(out.getvalue())
+
+    def register(self, number="1"):
+        self.assertEqual(self.run_cli("register", "--team", "team", "--space", "space" + number,
+                                      "--lead", "lead" + number, "--seat", "seat" + number)["outcome"], "registered")
+
+    def attempt(self, stage="spent", *extra):
+        return self.run_cli("consume", "--seat", "seat1", "--stage", stage, *extra)
+
+    def calls(self):
+        return [json.loads(line) for line in self.rpc.read_text().splitlines()] if self.rpc.exists() else []
+
+    def clean_pushed_boundary(self):
+        self.worktree = self.root / "assigned"
+        self.worktree.mkdir()
+        git = ["git", "-C", str(self.worktree)]
+        for args in (["init", "-q"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+                                      "commit", "-q", "--allow-empty", "-m", "Handoff"],
+                     ["update-ref", "refs/remotes/origin/fixture", "HEAD"],
+                     ["config", "remote.origin.url", str(self.worktree)],
+                     ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]):
+            subprocess.run(git + args, check=True, capture_output=True)
+        branch = subprocess.check_output(git + ["branch", "--show-current"], text=True).strip()
+        subprocess.run(git + ["config", f"branch.{branch}.remote", "origin"], check=True)
+        subprocess.run(git + ["config", f"branch.{branch}.merge", "refs/heads/fixture"], check=True)
+
+    def early_attempt(self, seat="seat1"):
+        return self.run_cli("consume", "--seat", seat, "--stage", "low", "--worktree", str(self.worktree),
+                            "--reason", "Next packet uses 12%")
+
+    def test_live_report_and_premature_or_unverified_attempts_never_send(self):
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.register()
+        self.world.terminals["seat1"]["status"]["state"] = "working"
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.world.terminals["seat1"]["status"]["state"] = "done"
+        self.turn(spent=False)
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.turn(spent=True, next_model="other")
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.turn(spent=False)
+        self.clean_pushed_boundary()
+        self.write_limits(used=90, ordinary=True)
+        self.assertEqual(self.early_attempt()["outcome"], "window_not_limiting")
+        self.turn(spent=True)
+        self.write_limits(refill=int(time.time()) + 900)
+        self.assertEqual(self.attempt()["outcome"], "wait")
+        for options in ({"controlled": True}, {"reached": "workspace_owner_credits_depleted"}):
+            self.write_limits(**options)
+            self.assertEqual(self.attempt()["outcome"], "non_resettable")
+        self.write_limits(duration=300)
+        self.assertEqual(self.attempt()["outcome"], "fallback_first")
+        result = self.run_cli("status", "--seat", "seat1")
+        self.assertEqual(result["saved_resets"], {"count": 2, "expires_at": None, "expiry_known": False})
+        self.assertEqual(self.calls(), [])
+
+    def test_account_swap_and_foreign_lead_are_refused(self):
+        self.register()
+        self.mode.write_text('{"switch":true}')
+        self.assertIn("account changed", self.attempt()["error"])
+        self.mode.write_text("{}")
+        self.write_limits(refill=int(time.time()) + 900)
+        self.assertEqual(self.attempt()["outcome"], "wait")
+        self.write_limits(account="different")
+        self.assertIn("different Codex account", self.attempt()["error"])
+        self.world.terminals["lead1"]["foreground"]["pid"] = os.getpid()
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.assertEqual(self.calls(), [])
+
+    def test_two_runs_share_window_and_one_claim(self):
+        self.register("1")
+        self.register("2")
+        def attempt(number):
+            args = resets.argparse.Namespace(seat="seat" + number, stage="spent")
+            path = resets.run_path(self.db, self.world, "space" + number)
+            with sources.codex_session(self.checked["scope"], time.monotonic() + 15, threading.Event()) as request:
+                reading, _ = sources.codex_limits(request)
+                return resets.consume(request, self.world, self.checked, args, self.db, path, reading, {})
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = {result["outcome"] for result in executor.map(attempt, ("1", "2"))}
+        self.assertEqual(outcomes, {"reset", "already_attempted"})
+        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(set(self.calls()[0]), {"idempotencyKey"})
+
+    def test_lost_reply_retries_same_key_and_null_permission_cannot_resume(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.mode.write_text('{"outcome":"alreadyRedeemed","post_null":true}')
+        result = self.attempt()
+        self.assertEqual(result["outcome"], "alreadyRedeemed")
+        self.assertFalse(result["resume"])
+        self.assertIsNone(result["ordinary_usage_allowed"])
+        self.assertEqual(len(self.calls()), 2)
+        self.assertEqual(self.calls()[0], self.calls()[1])
+
+    def test_rolled_window_closes_lost_reply_without_freeing_its_reservation(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.mode.write_text("{}")
+        self.write_limits(refill=self.refill + 10080 * 60)
+        self.assertEqual(self.attempt()["outcome"], "expired")
+        self.assertEqual(self.attempt()["outcome"], "cap_reached")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_recovery_starts_a_new_episode_under_the_same_weekly_refill(self):
+        self.grant(2)
+        self.register()
+        self.mode.write_text('{"after_reset":20,"post_null":true}')
+        self.assertFalse(self.attempt()["resume"])
+        result = self.attempt()
+        self.assertEqual(result["outcome"], "cleared")
+        self.assertTrue(result["resume"])
+        self.mode.write_text('{"after_reset":20}')
+        self.write_limits(used=99, reached="rate_limit_reached")
+        self.turn(spent=True, turn_id="second-turn")
+        self.assertEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(*self.calls())
+
+    def test_cross_run_retry_uses_the_original_seat_and_key(self):
+        self.register("1")
+        self.register("2")
+        for seat in ("seat1", "seat2"):
+            self.world.terminals[seat]["foreground"]["argv"].append(seat)
+
+        def inspect(_, data):
+            argv = data["foreground_processes"][0]["argv"]
+            scope = dict(self.checked["scope"], env=dict(self.env, RESET_TEST_SEAT=argv[1]))
+            return dict(self.checked, process=dict(self.checked["process"], argv=argv), scope=scope)
+
+        with patch.object(usage, "inspect_process", side_effect=inspect):
+            self.mode.write_text('{"drop":true}')
+            self.assertEqual(self.attempt()["outcome"], "pending")
+            self.mode.write_text('{"outcome":"alreadyRedeemed","after_reset":30}')
+            result = self.run_cli("consume", "--seat", "seat2", "--stage", "spent")
+        self.assertEqual(result["outcome"], "alreadyRedeemed")
+        self.assertEqual(result["settled_seat"], "seat1")
+        self.assertFalse(result["resume"])
+        self.assertEqual(self.calls()[0], self.calls()[1])
+        self.assertEqual((self.root / "scopes.log").read_text().splitlines(), ["seat1", "seat1"])
+
+    def test_peer_server_leaves_the_original_key_pending(self):
+        self.register("1")
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        original = self.world.server.copy()
+        self.world.server.update(key="peer", lifetime="peer-instance")
+        self.register("2")
+        result = self.run_cli("consume", "--seat", "seat2", "--stage", "spent")
+        self.assertEqual(result["outcome"], "pending")
+        self.assertNotIn("settled_seat", result)
+        self.assertEqual(len(self.calls()), 1)
+        self.world.server.update(original)
+        self.mode.write_text('{"outcome":"alreadyRedeemed","after_reset":30}')
+        self.assertEqual(self.attempt()["outcome"], "alreadyRedeemed")
+        self.assertEqual(len(self.calls()), 2)
+        self.assertEqual(*self.calls())
+
+    def test_peer_server_can_expire_a_pending_key_after_refill(self):
+        self.register("1")
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.world.server.update(key="peer", lifetime="peer-instance")
+        self.register("2")
+        with patch.object(resets.time, "time", return_value=self.refill + 1):
+            result = self.run_cli("consume", "--seat", "seat2", "--stage", "spent")
+        self.assertEqual(result["outcome"], "expired")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_lower_cap_closes_pending_without_blocking_a_later_attempt(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.grant(0)
+        self.assertEqual(self.attempt()["outcome"], "void")
+        self.assertEqual(len(self.calls()), 1)
+        self.grant(2)
+        self.mode.write_text("{}")
+        self.assertEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(*self.calls())
+
+    def test_near_refill_closes_pending_and_then_waits(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.settings.write_text('{"usage_resets":{"max_per_run":1,"wait_horizon":90}}')
+        self.assertEqual(self.attempt()["outcome"], "void")
+        self.assertEqual(self.attempt()["outcome"], "wait")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_early_reset_requires_the_assigned_clean_worktree(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        with self.assertRaises(SystemExit) as refused:
+            self.attempt("low", "--reason", "Next packet uses 12%")
+        self.assertEqual(refused.exception.code, 2)
+        (self.worktree / "untracked").touch()
+        self.assertEqual(self.early_attempt()["outcome"], "refused")
+        self.assertEqual(self.calls(), [])
+
+    def test_early_reset_without_quota_improvement_cannot_resume(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":95}')
+        result = self.early_attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["ordinary_usage_allowed"])
+        self.assertFalse(result["resume"])
+
+    def test_early_reset_with_quota_improvement_resumes(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":94}')
+        result = self.early_attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["resume"])
+        self.assertEqual(self.early_attempt()["outcome"], "already_attempted")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_low_recovery_below_threshold_blocks_another_seat(self):
+        self.register("1")
+        self.register("2")
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":94}')
+        self.assertTrue(self.early_attempt()["resume"])
+        self.turn(spent=False, turn_id="peer-turn")
+        self.assertEqual(self.early_attempt("seat2")["outcome"], "already_attempted")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_spent_reset_without_confirmed_recovery_blocks_a_low_attempt(self):
+        self.register("1")
+        self.register("2")
+        self.clean_pushed_boundary()
+        self.write_limits(reached="rate_limit_reached")
+        self.mode.write_text('{"after_reset":94}')
+        spent = self.attempt()
+        self.assertEqual(spent["outcome"], "reset")
+        self.assertFalse(spent["resume"])
+        self.assertEqual(len(self.calls()), 1)
+        self.turn(spent=False, turn_id="peer-turn")
+        self.write_limits(used=94, ordinary=True)
+        self.assertEqual(self.early_attempt("seat2")["outcome"], "already_attempted")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_low_recovery_above_threshold_allows_another_low_episode(self):
+        self.grant(2)
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":85}')
+        self.assertTrue(self.early_attempt()["resume"])
+        self.write_limits(used=95, ordinary=True)
+        result = self.early_attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["resume"])
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(*self.calls())
+
+    def test_spent_reset_cannot_resume_while_backend_still_reports_limit(self):
+        self.register()
+        self.write_limits(reached="rate_limit_reached")
+        self.mode.write_text('{"after_reset":85}')
+        result = self.attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["ordinary_usage_allowed"])
+        self.assertFalse(result["resume"])
+
+    def test_spent_uses_per_pool_codex_reading_over_top_level_mirror(self):
+        self.register()
+        path = self.root / "limits.json"
+        value = json.loads(path.read_text())
+        pool = value["rateLimitsByLimitId"].pop("active")
+        pool.pop("normalModelSlug")
+        value["rateLimitsByLimitId"]["codex"] = pool
+        value["rateLimits"] = {"limitId": "codex", "spendControlReached": True, "primary": pool["primary"]}
+        path.write_text(json.dumps(value))
+        self.assertEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_early_nothing_to_reset_counts_and_spent_needs_a_free_slot(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True, credits=[{"status": "available", "expiresAt": self.refill}])
+        self.mode.write_text('{"outcome":"nothingToReset"}')
+        result = self.early_attempt()
+        self.assertTrue(result["reservation_kept"])
+        self.assertTrue(result["resume"])
+        self.assertFalse(result["saved_resets"]["expiry_known"])
+        self.turn(spent=True)
+        self.write_limits()
+        self.assertEqual(self.attempt()["outcome"], "cap_reached")
+        self.assertEqual(len(self.calls()), 1)
+        self.grant(2)
+        self.mode.write_text('{"outcome":"noCredit"}')
+        self.assertFalse(self.attempt()["reservation_kept"])
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(self.calls()[0], self.calls()[1])
 
 
 class TeamClaudeTests(unittest.TestCase):
