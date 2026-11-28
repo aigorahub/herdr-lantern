@@ -507,9 +507,17 @@ class DesktopTests(unittest.TestCase):
 42 1 90 {start} editor
 bad process information
 """)
-        ranked = system_resources.ranked_consumers(processes, {20: "codex (t1)", 30: "review (t2)"})
+        location = "Bookstore / Checkout migration for the new guest payments workflow"
+        terminals = [
+            {"pid": 20, "address": "t411", "status": {"app": "codex"}, "state": "live",
+             "labels": {"where": location}},
+            {"pid": 30, "address": "t2", "status": {"app": "codex"}, "state": "live", "name": "review"},
+        ]
+        with patch.object(desktop, "core", return_value={"terminals": terminals}):
+            roots = system_resources.agent_roots()
+        ranked = system_resources.ranked_consumers(processes, roots)
         self.assertEqual([(row.kib, system_resources.consumer_label(row, {})) for row in ranked[:5]],
-                         [(750, "review (t2)"), (748, "Example App (40)"), (711, "codex (t1)"),
+                         [(750, "review (t2)"), (748, "Example App (40)"), (711, location),
                           (120, "browser (41)"), (100, "launchd (1)")])
 
     def test_node_worker_shows_the_package_and_project_without_exposing_arguments(self):

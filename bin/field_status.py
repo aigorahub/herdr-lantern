@@ -56,10 +56,10 @@ class Field(NamedTuple):
     world: World | None
 
 
-def clean(value: object, limit: int = 90) -> str:
+def clean(value: object, limit: int | None = 90) -> str:
     text = CONTROL.sub(" ", str(value or ""))
     text = " ".join(text.split())
-    return text[: limit - 1] + "…" if len(text) > limit else text
+    return text[: limit - 1] + "…" if limit is not None and len(text) > limit else text
 
 
 def eastern(now: datetime) -> datetime:
