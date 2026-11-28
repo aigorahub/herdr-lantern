@@ -80,6 +80,7 @@ from pathlib import Path
 root = Path(os.environ["CODEX_HOME"])
 mode = json.loads((root / "mode.json").read_text())
 reads = 0
+sent = False
 for line in sys.stdin:
     req = json.loads(line)
     method = req["method"]
@@ -95,11 +96,20 @@ for line in sys.stdin:
         result = json.loads((root / "limits.json").read_text())
         if mode.get("switch") and reads >= 2:
             result["accountId"] = "different"
-        if mode.get("post_null") and reads >= 3:
+        if mode.get("post_null") and sent:
             result["ordinaryUsageAllowed"] = None
     elif method == "account/rateLimitResetCredit/consume":
+        sent = True
         with (root / "rpc.jsonl").open("a") as log:
             log.write(json.dumps(req["params"]) + "\\n")
+        with (root / "scopes.log").open("a") as log:
+            log.write(os.environ.get("RESET_TEST_SEAT", "") + "\\n")
+        if "after_reset" in mode:
+            path = root / "limits.json"
+            updated = json.loads(path.read_text())
+            updated["ordinaryUsageAllowed"] = True
+            updated["rateLimitsByLimitId"]["active"]["primary"]["usedPercent"] = mode["after_reset"]
+            path.write_text(json.dumps(updated))
         if mode.get("drop"):
             sys.exit(1)
         result = {"outcome": mode.get("outcome", "reset")}
@@ -153,11 +163,11 @@ for line in sys.stdin:
                  "rateLimitResetCredits": {"availableCount": 2, "credits": credits}}
         (self.root / "limits.json").write_text(json.dumps(value))
 
-    def turn(self, spent, complete=True, next_model=None):
+    def turn(self, spent, complete=True, next_model=None, turn_id="turn"):
         def row(kind, **data):
-            return {"type": "event_msg", "payload": {"type": kind, "turn_id": "turn", **data}}
+            return {"type": "event_msg", "payload": {"type": kind, "turn_id": turn_id, **data}}
         rows = [row("task_started"), {"type": "turn_context", "payload": {
-            "turn_id": "turn", "model": "model", "cwd": str(self.root)}}]
+            "turn_id": turn_id, "model": "model", "cwd": str(self.root)}}]
         if complete:
             error = {"codex_error_info": "usage_limit_exceeded"} if spent else None
             rows.append(row("task_complete", error=error))
@@ -184,17 +194,21 @@ for line in sys.stdin:
         return [json.loads(line) for line in self.rpc.read_text().splitlines()] if self.rpc.exists() else []
 
     def clean_pushed_boundary(self):
-        git = ["git", "-C", str(self.root)]
+        self.worktree = self.root / "assigned"
+        self.worktree.mkdir()
+        git = ["git", "-C", str(self.worktree)]
         for args in (["init", "-q"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
                                       "commit", "-q", "--allow-empty", "-m", "Handoff"],
                      ["update-ref", "refs/remotes/origin/fixture", "HEAD"],
-                     ["config", "remote.origin.url", str(self.root)],
+                     ["config", "remote.origin.url", str(self.worktree)],
                      ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]):
             subprocess.run(git + args, check=True, capture_output=True)
         branch = subprocess.check_output(git + ["branch", "--show-current"], text=True).strip()
         subprocess.run(git + ["config", f"branch.{branch}.remote", "origin"], check=True)
         subprocess.run(git + ["config", f"branch.{branch}.merge", "refs/heads/fixture"], check=True)
-        (self.root / ".git/info/exclude").write_text("*\n")
+
+    def early_attempt(self):
+        return self.attempt("low", "--worktree", str(self.worktree), "--reason", "Next packet uses 12%")
 
     def test_live_report_and_premature_or_unverified_attempts_never_send(self):
         self.assertEqual(self.attempt()["outcome"], "refused")
@@ -209,7 +223,7 @@ for line in sys.stdin:
         self.turn(spent=False)
         self.clean_pushed_boundary()
         self.write_limits(used=90, ordinary=True)
-        self.assertEqual(self.attempt("low", "--reason", "Next packet uses 12%")["outcome"], "window_not_limiting")
+        self.assertEqual(self.early_attempt()["outcome"], "window_not_limiting")
         self.turn(spent=True)
         self.write_limits(refill=int(time.time()) + 900)
         self.assertEqual(self.attempt()["outcome"], "wait")
@@ -272,13 +286,119 @@ for line in sys.stdin:
         self.assertEqual(self.attempt()["outcome"], "cap_reached")
         self.assertEqual(len(self.calls()), 1)
 
+    def test_recovery_starts_a_new_episode_under_the_same_weekly_refill(self):
+        self.grant(2)
+        self.register()
+        self.mode.write_text('{"after_reset":20,"post_null":true}')
+        self.assertFalse(self.attempt()["resume"])
+        result = self.attempt()
+        self.assertEqual(result["outcome"], "cleared")
+        self.assertTrue(result["resume"])
+        self.mode.write_text('{"after_reset":20}')
+        self.write_limits(used=99, reached="rate_limit_reached")
+        self.turn(spent=True, turn_id="second-turn")
+        self.assertEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(*self.calls())
+
+    def test_cross_run_retry_uses_the_original_seat_and_key(self):
+        self.register("1")
+        self.register("2")
+        for seat in ("seat1", "seat2"):
+            self.world.terminals[seat]["foreground"]["argv"].append(seat)
+
+        def inspect(_, data):
+            argv = data["foreground_processes"][0]["argv"]
+            scope = dict(self.checked["scope"], env=dict(self.env, RESET_TEST_SEAT=argv[1]))
+            return dict(self.checked, process=dict(self.checked["process"], argv=argv), scope=scope)
+
+        with patch.object(usage, "inspect_process", side_effect=inspect):
+            self.mode.write_text('{"drop":true}')
+            self.assertEqual(self.attempt()["outcome"], "pending")
+            self.mode.write_text('{"outcome":"alreadyRedeemed","after_reset":30}')
+            result = self.run_cli("consume", "--seat", "seat2", "--stage", "spent")
+        self.assertEqual(result["outcome"], "alreadyRedeemed")
+        self.assertEqual(result["settled_seat"], "seat1")
+        self.assertFalse(result["resume"])
+        self.assertEqual(self.calls()[0], self.calls()[1])
+        self.assertEqual((self.root / "scopes.log").read_text().splitlines(), ["seat1", "seat1"])
+
+    def test_lower_cap_closes_pending_without_blocking_a_later_attempt(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.grant(0)
+        self.assertEqual(self.attempt()["outcome"], "void")
+        self.assertEqual(len(self.calls()), 1)
+        self.grant(2)
+        self.mode.write_text("{}")
+        self.assertEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(*self.calls())
+
+    def test_near_refill_closes_pending_and_then_waits(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.settings.write_text('{"usage_resets":{"max_per_run":1,"wait_horizon":90}}')
+        self.assertEqual(self.attempt()["outcome"], "void")
+        self.assertEqual(self.attempt()["outcome"], "wait")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_early_reset_requires_the_assigned_clean_worktree(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        with self.assertRaises(SystemExit) as refused:
+            self.attempt("low", "--reason", "Next packet uses 12%")
+        self.assertEqual(refused.exception.code, 2)
+        (self.worktree / "untracked").touch()
+        self.assertEqual(self.early_attempt()["outcome"], "refused")
+        self.assertEqual(self.calls(), [])
+
+    def test_early_reset_without_quota_improvement_cannot_resume(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":95}')
+        result = self.early_attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["ordinary_usage_allowed"])
+        self.assertFalse(result["resume"])
+
+    def test_early_reset_with_quota_improvement_resumes(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True)
+        self.mode.write_text('{"after_reset":94}')
+        result = self.early_attempt()
+        self.assertEqual(result["outcome"], "reset")
+        self.assertTrue(result["resume"])
+        self.assertEqual(self.early_attempt()["outcome"], "already_attempted")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_spent_uses_per_pool_codex_reading_over_top_level_mirror(self):
+        self.register()
+        path = self.root / "limits.json"
+        value = json.loads(path.read_text())
+        pool = value["rateLimitsByLimitId"].pop("active")
+        pool.pop("normalModelSlug")
+        value["rateLimitsByLimitId"]["codex"] = pool
+        value["rateLimits"] = {"limitId": "codex", "spendControlReached": True, "primary": pool["primary"]}
+        path.write_text(json.dumps(value))
+        self.assertEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(len(self.calls()), 1)
+
     def test_early_nothing_to_reset_counts_and_spent_needs_a_free_slot(self):
         self.register()
         self.clean_pushed_boundary()
         self.turn(spent=False)
         self.write_limits(used=95, ordinary=True, credits=[{"status": "available", "expiresAt": self.refill}])
         self.mode.write_text('{"outcome":"nothingToReset"}')
-        result = self.attempt("low", "--reason", "Next packet uses 8%")
+        result = self.early_attempt()
         self.assertTrue(result["reservation_kept"])
         self.assertTrue(result["resume"])
         self.assertFalse(result["saved_resets"]["expiry_known"])

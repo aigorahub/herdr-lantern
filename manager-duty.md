@@ -90,9 +90,10 @@ to read the balance.
 Check reset eligibility when a Codex turn stops at a verified usage limit.
 Run `consume --seat <terminal-id> --stage spent`. An early check is
 permitted only after a healthy turn ends and the work is clean and pushed.
-Have the next packet ready. Use `--stage low --reason "<one line>"` to
-record why the packet will exhaust the active quota before refill. Leave
-healthy working turns alone.
+Have the next packet ready. Use
+`--stage low --worktree <assigned-worktree-root> --reason "<one line>"`.
+Pass the worker's assigned Git worktree. Record why the packet will
+exhaust the active quota before refill. Leave healthy working turns alone.
 
 If the helper returns `wait`, wait until its refill time and check again.
 The team can set `usage_resets.wait_horizon` in minutes. It defaults to
@@ -103,11 +104,12 @@ cross provider routes using the rule above. Use
 If a reset is unavailable or cannot recover the seat, apply the saved
 fallback rule or report the block.
 
-If the result is `pending`, recheck through the same lead and seat. Let
-the helper settle the saved attempt. After `expired` or `void`, check
-again if the current seat still meets a trigger. Report `unresolved`
-for operator review. Resume the same session only when the helper reports
-`resume`.
+If the result is `pending`, recheck so the helper can settle the saved
+attempt against its original assignment. If the result names a
+`settled_seat`, give the result to that seat's lead and check the current
+seat again. After `expired` or `void`, check again if the current seat
+still meets a trigger. Report `unresolved` for operator review. Resume
+the same session only when the helper reports `resume`.
 Keep one active assignment. Record the outcome, confirmed resets used,
 saved resets left and next expiry in the execution log, a board status
 entry, and the final report. Report an unknown value when Codex does not

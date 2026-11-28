@@ -767,7 +767,8 @@ Its private audit ledger is in the Lantern `resets` directory under
 A seat with `"permissions": "yolo"` authorizes its verified CLI bypass flag.
 Without that field, normal permission tiers apply. A fallback inherits the
 seat's permission setting and cannot raise it. A saved team grants no
-permanent broad access or authority to merge, deploy, or publish.
+permanent broad access or authority to merge, deploy, publish, or take other
+financial action.
 Managers grant routine permissions within the assigned
 task and role. [Shipped manager rules](manager-duty.md)
 

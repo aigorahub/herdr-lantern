@@ -166,8 +166,6 @@ def assignment(world: desktop.World, path: Path, seat: str) -> tuple[dict, dict,
     if not run or run["server"] != world.server:
         raise Refusal("No active Lantern reset context")
     grant = team_grant(Path(run["team"]))
-    if not grant["cap"]:
-        raise Refusal("Saved resets are disabled for this team")
     for address in (run["lead"], seat):
         row, term = terminal(world, address)
         if row["workspace_id"] != run["space"] or seat_identity(term) != run["seats"].get(address):
@@ -257,18 +255,20 @@ def turn_evidence(path: Path) -> dict:
                 elif kind == "turn_aborted":
                     turn.update(ended=True, error=True, spent=False)
         elif event.get("type") == "turn_context" and turn.get("id") and body.get("turn_id") == turn["id"]:
-            turn.update(model=body.get("model"), cwd=body.get("cwd"))
-            active = {"model": turn["model"], "model_provider_id": (active.get("model_provider_id") or "openai"),
-                      "cwd": turn["cwd"]}
+            turn["model"] = body.get("model")
+            active = {"model": turn["model"], "model_provider_id": active.get("model_provider_id") or "openai"}
     return dict(turn, active=active)
 
 
-def pushed_head(cwd: str) -> str:
+def pushed_head(worktree: Path) -> str:
     def git(*argv: str) -> str:
-        return subprocess.check_output(["git", "-c", "core.fsmonitor=false", "-C", cwd, *argv], timeout=3, text=True,
+        return subprocess.check_output(["git", "-c", "core.fsmonitor=false", "-C", str(worktree), *argv],
+                                       timeout=3, text=True,
                                        stderr=subprocess.DEVNULL).strip()
 
     try:
+        if Path(git("rev-parse", "--show-toplevel")).resolve() != worktree:
+            raise Refusal("Use the root of the assigned Git worktree")
         git("merge-base", "--is-ancestor", "HEAD", "@{upstream}")
         if not git("status", "--porcelain"):
             return git("rev-parse", "HEAD")
@@ -291,9 +291,9 @@ def evidence(checked: dict, term: dict, stage: str, boundary: dict) -> dict:
     if stage == "spent" and (not turn.get("spent") or turn.get("model") != model):
         raise Refusal("The latest Codex turn has no verified usage limit error")
     if stage == "low":
-        if turn.get("error") or not boundary.get("reason") or not active.get("cwd"):
+        if turn.get("error") or not boundary.get("reason") or not boundary.get("worktree"):
             raise Refusal("A finished healthy turn and the next packet reason are required")
-        commit = pushed_head(active["cwd"])
+        commit = pushed_head(Path(boundary["worktree"]))
         if boundary.get("commit", commit) != commit:
             raise Refusal("The pushed handoff commit changed")
         boundary["commit"] = commit
@@ -312,9 +312,9 @@ def active_pool(limits: dict, model: str) -> tuple[str, dict]:
                if isinstance(pool, dict) and pool.get("normalModelSlug") == model]
     if len(matches) == 1:
         return matches[0]
-    if (not matches and isinstance(top, dict) and top.get("limitId") in (None, "codex")
-            and not top.get("normalModelSlug")):
-        return "codex", top
+    default = pools.get("codex")
+    if not matches and isinstance(default, dict) and not default.get("normalModelSlug"):
+        return "codex", default
     raise Refusal("The active Codex model pool is unknown")
 
 
@@ -336,9 +336,8 @@ def trigger(limits: dict, pool: dict, stage: str) -> str:
 
 
 def limiting_window(pool: dict, stage: str, threshold: float, now: float) -> dict | None:
-    threshold = threshold if stage == "low" else 0
     candidates = [item for item in windows(pool)
-                  if (item["remaining"] < threshold if stage == "low" else item["remaining"] == 0)]
+                  if (item["remaining"] < threshold if stage == "low" else item["remaining"] <= 1)]
     if not candidates:
         return None
     if any(item["minutes"] not in (300, 10080) or not item["reset_at"] or item["reset_at"] <= now
@@ -369,10 +368,10 @@ def response(intent: dict, reading: dict, limits: dict, pool: dict) -> dict:
 
 
 def preflight(seat: str, stage: str, boundary: dict, world: desktop.World, checked: dict,
-              path: Path, account: str, expected: dict) -> tuple[desktop.World, dict]:
+              path: Path, account: str, expected: dict, *, retry: bool = False) -> tuple[desktop.World, dict]:
     latest = scope_current(world, seat, checked)
     run, grant, lead = assignment(latest, path, seat)
-    if run["account"] != account or not owns(lead):
+    if run["account"] != account or (not retry and not owns(lead)):
         raise Refusal("The registered lead or Codex account changed")
     if evidence(checked, latest.terminals[seat], stage, boundary) != expected:
         raise Refusal("The Codex turn changed")
@@ -406,81 +405,122 @@ def send_reset(request, path: Path, ledger: dict, intent: dict, reading: dict, l
     except (sources.SourceError, Refusal, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return dict(response(intent, {}, {}, {}), resume=False)
     intent["balance_after"] = reading_after.get("resets")
-    intent["recovery_confirmed"] = recovered(intent, limits_after, pool_after)
+    intent["recovery_confirmed"] = outcome in CONFIRMED and recovered(intent, limits_after, pool_after)
     save_record(path, ledger)
     return response(intent, reading_after, limits_after, pool_after)
 
 
-def reconcile(request, world: desktop.World, root: Path, run_path_now: Path, target: str,
-              checked: dict, reading: dict, limits: dict, path: Path, ledger: dict) -> dict | None:
-    pending = [entry for entry in ledger["intents"] if entry["status"] in WAITING]
-    if not pending:
+def reserved_slots(ledger: dict, run: str) -> int:
+    return sum(entry["run"] == run and entry["status"] != "noCredit" for entry in ledger["intents"])
+
+
+def attempted_this_episode(ledger: dict, pool: str, window: dict, stage: str, expected: dict) -> bool:
+    for entry in reversed(ledger["intents"]):
+        if (entry["pool"] != pool or entry["window"] != window["id"]
+                or entry["resets_at"] != window["reset_at"] or entry["status"] in ("void", "expired")):
+            continue
+        if entry.get("recovery_confirmed") and entry["status"] in CONFIRMED | {"restored"}:
+            # Recovery can leave the pool below the early threshold. The
+            # same turn cannot prove a new episode at that level.
+            return entry["stage"] == stage and entry["evidence"] == expected
+        if entry["stage"] == stage:
+            return True
+    return False
+
+
+def settle_pending(world: desktop.World, original: Path, path: Path, ledger: dict, intent: dict,
+                   reading: dict, limits: dict) -> dict:
+    def close(outcome: str, pool: dict) -> dict:
+        intent["status"] = outcome
+        intent["result_at"] = time.time()
+        intent["recovery_confirmed"] = outcome == "restored"
+        save_record(path, ledger)
+        return dict(response(intent, reading, limits, pool), resume=outcome == "restored")
+
+    if time.time() >= intent["resets_at"]:
+        return close("expired", {})
+    run = read_record(original, {})
+    if not run:
+        return close("void", {})
+    try:
+        grant = team_grant(Path(run["team"]))
+    except (Refusal, ValueError):
+        return close("void", {})
+    if not grant["cap"] or reserved_slots(ledger, original.name) > grant["cap"]:
+        return close("void", {})
+    if run["server"]["key"] != world.server["key"]:
+        # This core cannot verify an assignment on another server.
+        return close("unresolved", {})
+    seat, stage, boundary, expected = (intent[key] for key in ("seat", "stage", "boundary", "evidence"))
+    account = reading["account"]
+    try:
+        original_run, _, _ = assignment(world, original, seat)
+        if original_run["account"] != account:
+            return close("void", {})
+        checked, _ = seat_scope(world, seat)
+        latest = scope_current(world, seat, checked)
+        scope = checked["scope"]
+        with sources.codex_session(scope, time.monotonic() + 24, threading.Event()) as request:
+            fresh, snapshot = sources.codex_limits(request)
+            if fresh["account"] != account:
+                return close("void", {})
+            reading, limits = fresh, snapshot
+            try:
+                pool_id, pool = active_pool(limits, expected["model"])
+            except Refusal:
+                return close("unresolved", {})
+            item = next((item for item in windows(pool) if item["id"] == intent["window"]), None)
+            if pool_id != intent["pool"] or not item or item["reset_at"] is None:
+                return close("unresolved", {})
+            if recovered(intent, limits, pool):
+                return close("restored", pool)
+            if item["reset_at"] != intent["resets_at"] or time.time() >= intent["resets_at"]:
+                return close("expired", pool)
+            state = trigger(limits, pool, stage)
+            if state != "eligible":
+                return close("unresolved" if state == "unknown" else "void", pool)
+            latest, grant = preflight(seat, stage, boundary, latest, checked, original, account,
+                                      expected, retry=True)
+            now = time.time()
+            if now >= intent["resets_at"]:
+                return close("expired", pool)
+            current = limiting_window(pool, stage, grant["threshold"], now)
+            if (reserved_slots(ledger, original.name) > grant["cap"] or not current
+                    or current["id"] != intent["window"] or current["reset_at"] - now <= grant["horizon"]
+                    or (current["minutes"] == 300 and not boundary.get("no_fallback"))):
+                return close("void", pool)
+            if intent["retries"] >= 1:
+                return close("unresolved", pool)
+
+            # The caller was authorized before taking the account lock.
+            # Only the original assignment and existing key can be replayed.
+            intent["retries"] += 1
+            save_record(path, ledger)
+            return send_reset(request, path, ledger, intent, reading, limits, pool, scope,
+                              lambda: scope_current(latest, seat, checked))
+    except Refusal:
+        return close("void", {})
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+        if intent["status"] != "pending":
+            raise
+        return close("unresolved", {})
+
+
+def reconcile(world: desktop.World, root: Path, run_file: Path, target: str, cap: int,
+              reading: dict, limits: dict, path: Path, ledger: dict) -> dict | None:
+    intent = next((entry for entry in ledger["intents"] if entry["status"] in WAITING), None)
+    if intent is None:
         return None
-    intent = pending[0]
     if intent["status"] == "unresolved":
         return dict(summary(reading, limits), outcome="unresolved", resume=False)
     original = root / "runs" / intent["run"]
-    try:
-        pool_id, pool = active_pool(limits, intent["evidence"]["model"])
-    except Refusal:
-        pool_id, pool = None, {}
-    item = next((item for item in windows(pool) if item["id"] == intent["window"]), None)
-    if time.time() >= intent["resets_at"]:
-        intent["status"] = "expired"
-    elif (pool_id == intent["pool"] and item and item["reset_at"] is not None
-          and item["reset_at"] != intent["resets_at"]):
-        intent["status"] = "restored" if recovered(intent, limits, pool) else "expired"
-    else:
-        run = read_record(original, {})
-        if run and run["server"]["key"] != world.server["key"]:
-            # A different live Herdr server may own the intent. Only its
-            # lead can prove the original assignment and retry it.
-            return dict(summary(reading, limits), outcome="pending", resume=False)
-        try:
-            original_run, grant, lead = assignment(world, original, intent["seat"])
-        except Refusal:
-            intent["status"] = "void"
-        else:
-            if original_run["account"] != reading["account"]:
-                intent["status"] = "void"
-            elif pool_id != intent["pool"] or not item or item["reset_at"] is None:
-                return dict(summary(reading, limits), outcome="pending", resume=False)
-            elif recovered(intent, limits, pool):
-                intent["status"] = "restored"
-            elif trigger(limits, pool, intent["stage"]) in ("non_resettable", "cleared"):
-                intent["status"] = "void"
-            elif item and intent["stage"] == "low" and item["remaining"] >= grant["threshold"]:
-                intent["status"] = "restored" if recovered(intent, limits, pool) else "void"
-            elif not owns(lead) or original != run_path_now or intent["seat"] != target:
-                return dict(summary(reading, limits), outcome="pending", resume=False)
-            else:
-                try:
-                    latest, grant = preflight(target, intent["stage"], intent["boundary"], world, checked,
-                                              original, reading["account"], intent["evidence"])
-                except Refusal:
-                    intent["status"] = "void"
-                else:
-                    current = limiting_window(pool, intent["stage"], grant["threshold"], time.time())
-                    reserved = sum(entry["run"] == intent["run"] and entry["status"] != "noCredit"
-                                   for entry in ledger["intents"])
-                    if (current is None or current["id"] != item["id"] or reserved > grant["cap"]
-                            or trigger(limits, pool, intent["stage"]) != "eligible"):
-                        return dict(summary(reading, limits), outcome="pending", resume=False)
-                    if (current["reset_at"] - time.time() <= grant["horizon"]
-                            or (current["minutes"] == 300 and not intent["boundary"].get("no_fallback"))):
-                        return dict(summary(reading, limits), outcome="pending", resume=False)
-                    if intent["retries"] >= 1:
-                        intent["status"] = "unresolved"
-                    else:
-                        intent["retries"] += 1
-                        save_record(path, ledger)
-                        return send_reset(request, path, ledger, intent, reading, limits, pool, checked["scope"],
-                                          lambda: scope_current(latest, target, checked))
-    intent["result_at"] = time.time()
-    save_record(path, ledger)
-    return dict(response(intent, reading, limits, pool),
-                resume=intent["status"] == "restored" and original == run_path_now and intent["seat"] == target
-                and recovered(intent, limits, pool))
+    if not cap and original != run_file:
+        return dict(summary(reading, limits), outcome="disabled", resume=False)
+    with lock(original.with_suffix(".lock")):
+        result = settle_pending(world, original, path, ledger, intent, reading, limits)
+    if original != run_file or intent["seat"] != target:
+        result.update(resume=False, settled_seat=intent["seat"])
+    return result
 
 
 def consume(request, world: desktop.World, checked: dict, args, root: Path, run_file: Path,
@@ -499,12 +539,16 @@ def consume(request, world: desktop.World, checked: dict, args, root: Path, run_
             if run["account"] not in (None, account):
                 raise Refusal("This run is pinned to a different Codex account")
             if run["account"] is None:
+                if not grant["cap"]:
+                    return dict(summary(reading, limits), outcome="disabled", resume=False)
                 run["account"] = account
                 save_record(run_file, run)
         ledger = read_record(path, {"intents": []})
-        result = reconcile(request, world, root, run_file, args.seat, checked, reading, limits, path, ledger)
+        result = reconcile(world, root, run_file, args.seat, grant["cap"], reading, limits, path, ledger)
         if result is not None:
             return result
+        if not grant["cap"]:
+            return dict(summary(reading, limits), outcome="disabled", resume=False)
         expected = evidence(checked, world.terminals[args.seat], args.stage, boundary)
         pool_id, pool = active_pool(limits, expected["model"])
         state = trigger(limits, pool, args.stage)
@@ -513,8 +557,11 @@ def consume(request, world: desktop.World, checked: dict, args, root: Path, run_
                  and entry["stage"] == args.stage and entry["evidence"] == expected]
         last = prior[-1] if prior else None
         resume = last is None or recovered(last, limits, pool)
-        reserved = sum(entry["run"] == run_file.name and entry["status"] != "noCredit"
-                       for entry in ledger["intents"])
+        if last and last["status"] in CONFIRMED and resume and not last.get("recovery_confirmed"):
+            last["recovery_confirmed"] = True
+            last["balance_after"] = reading.get("resets")
+            save_record(path, ledger)
+        reserved = reserved_slots(ledger, run_file.name)
         base = dict(summary(reading, limits), stage=args.stage, pool=pool_id, resume=False,
                     reserved=reserved, max_per_run=grant["cap"])
         if state != "eligible":
@@ -529,9 +576,7 @@ def consume(request, world: desktop.World, checked: dict, args, root: Path, run_
             return dict(base, outcome="wait")
         if item["minutes"] == 300 and not boundary.get("no_fallback"):
             return dict(base, outcome="fallback_first")
-        if any(entry["pool"] == pool_id and entry["stage"] == args.stage
-               and entry["window"] == item["id"] and entry["resets_at"] == item["reset_at"]
-               for entry in ledger["intents"]):
+        if attempted_this_episode(ledger, pool_id, item, args.stage, expected):
             return dict(base, outcome="already_attempted", resume=last is not None and resume)
         if reserved >= grant["cap"]:
             return dict(base, outcome="cap_reached")
@@ -564,9 +609,12 @@ def main(argv=None) -> int:
     spend.add_argument("--seat", required=True)
     spend.add_argument("--stage", choices=("low", "spent"), required=True)
     spend.add_argument("--reason", help="For low, why the ready packet will exhaust quota before refill")
+    spend.add_argument("--worktree", type=Path, help="For low, the root of the worker's assigned Git worktree")
     spend.add_argument("--no-qualified-fallback", action="store_true",
                        help="Lead verified that no saved cross-provider fallback qualifies")
     args = parser.parse_args(argv)
+    if args.command == "consume" and args.stage == "low" and args.worktree is None:
+        spend.error("--worktree is required with --stage low")
     try:
         world = desktop.read_world()
         if args.command == "register":
@@ -585,6 +633,8 @@ def main(argv=None) -> int:
                 if len(reason) > 400 or not all(ch.isprintable() for ch in reason):
                     raise Refusal("The next packet reason must fit on one line")
                 boundary = {"reason": reason.strip(), "no_fallback": args.no_qualified_fallback}
+                if args.stage == "low":
+                    boundary["worktree"] = str(args.worktree.expanduser().resolve())
             with sources.codex_session(checked["scope"], time.monotonic() + 24, threading.Event()) as request:
                 reading, limits = sources.codex_limits(request)
                 if args.command == "status":
