@@ -4,8 +4,14 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+## [0.19.8] - 2026-11-27
+
 ### Changed
 
+- A saved team now grants its lead one Codex usage reset per run by default.
+  Set `usage_resets.max_per_run` to 0 to turn resets off.
+- `switch_below` now defaults to 1, so a seat switches or resets only when
+  less than 1% of its usage is left.
 - Memory & Disk uses the workspace and tab as the agent label when available.
   Use Left and Right Arrow to scroll through long names.
 

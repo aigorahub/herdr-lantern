@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.7** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.8** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -712,7 +712,7 @@ affected launch unless it meets the saved usage fallback rule.
   "name": "implementation",
   "aliases": ["build team"],
   "startup": "ask",
-  "switch_below": 10,
+  "switch_below": 1,
   "agents": [
     {"role": "lead", "harness": "claude", "model": "claude-opus-5-5", "effort": "high"},
     {
@@ -738,7 +738,7 @@ hyphens. Start it with a letter or digit. A seat can also specify
 The default is `auto`. The team receives its roster and the lead receives
 the guidance and manager rules. The team waits for a task.
 
-`switch_below` is the percent of weekly or 5-hour usage left, default 10.
+`switch_below` is the percent of weekly or 5-hour usage left, default 1.
 A manager can switch a seat when its usage is below that threshold or a
 verified usage limit stops it. The manager chooses the first listed
 fallback with more than the threshold left in a different provider pool.
@@ -747,9 +747,9 @@ A fallback gives an exact harness, model, and effort. It can also set
 no qualifying saved fallback, the manager reports and keeps the seat. A
 switch starts a new seat at a safe boundary and preserves the old session.
 
-To let the saved team's lead spend Codex usage resets, add
-`"usage_resets": {"max_per_run": 1, "wait_horizon": 20}` at team level.
-Omit the setting or use a zero cap to keep resets off. The wait horizon is
+A saved team's lead can spend one Codex usage reset per run by default.
+To change the cap, add `"usage_resets": {"max_per_run": 2, "wait_horizon": 20}`
+at team level. Use a zero cap to keep resets off. The wait horizon is
 in minutes. Lantern home records the roster when it opens the team. The
 lead can read the balance with `python3 bin/codex_resets.py status --seat <id>`.
 Use the helper from the installed Lantern folder.

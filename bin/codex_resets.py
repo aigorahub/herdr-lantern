@@ -116,9 +116,9 @@ def team_grant(path: Path) -> dict:
     reset = team.get("usage_resets", {})
     if not isinstance(reset, dict):
         raise Refusal("Invalid team reset setting")
-    cap = reset.get("max_per_run", 0)
+    cap = reset.get("max_per_run", 1)
     horizon = sources.number(reset.get("wait_horizon", 20))
-    threshold = sources.number(team.get("switch_below", 10))
+    threshold = sources.number(team.get("switch_below", 1))
     if (type(cap) is not int or cap < 0 or horizon is None or horizon < 0
             or threshold is None or not 0 <= threshold <= 100):
         raise Refusal("Invalid team reset setting")
