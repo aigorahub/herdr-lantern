@@ -24,6 +24,9 @@ APP_AGENT_NAMES = {
     "grok-build": "grok",
     "antigravity-cli": "agy",
     "antigravity": "agy",
+    "agent": "cursor",
+    "cursor-agent": "cursor",
+    "oh-my-pi": "omp",
 }
 
 

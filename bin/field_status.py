@@ -43,6 +43,7 @@ AGENT_PROGRAMS = {
     "cursor": {"agent", "cursor-agent"},
     "devin": {"devin"},
     "pi": {"pi"},
+    "omp": {"omp", "oh-my-pi"},
     "gemini": {"gemini"},
 }
 SHELL_PROGRAMS = {"sh", "bash", "zsh", "dash", "fish", "nu", "pwsh", "powershell", "cmd"}

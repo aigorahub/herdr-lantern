@@ -25,6 +25,29 @@ def terminal_missing():
     return desktop.CoreError({"data": {"kind": "not_found"}})
 
 
+@contextmanager
+def wrapped_child(flags, interactive):
+    shell, sleep = shutil.which("bash"), shutil.which("sleep")
+    command = [shell, flags, '"$@"; exec "$0" ' + interactive, shell, sleep, "30"]
+    with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, start_new_session=True) as parent:
+        try:
+            children = []
+            deadline = time.monotonic() + 3
+            while not children and time.monotonic() < deadline:
+                children = [pid for pid in desktop.runtime.child_pids(parent.pid)
+                            if desktop.process_argv(pid) == command[4:]]
+                if not children:
+                    time.sleep(0.02)
+            child, = children
+            yield command, parent.pid, child
+        finally:
+            try:
+                os.killpg(parent.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 class ReadoutHome:
     def __init__(self, state, roles):
         self.state = state
@@ -444,30 +467,72 @@ class DesktopTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform in {"darwin", "linux"}, "POSIX process arguments")
     def test_native_wrapper_uses_the_real_direct_child(self):
-        shell, sleep = shutil.which("bash"), shutil.which("sleep")
         for flags, interactive in (("-ic", "-i"), ("-lic", "-li")):
-            command = [shell, flags, '"$@"; exec "$0" ' + interactive, shell, sleep, "30"]
-            with self.subTest(flags=flags), subprocess.Popen(
-                    command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    start_new_session=True) as parent:
-                try:
-                    children = []
-                    deadline = time.monotonic() + 3
-                    while not children and time.monotonic() < deadline:
-                        children = [pid for pid in desktop.runtime.child_pids(parent.pid)
-                                    if desktop.process_argv(pid) == command[4:]]
-                        if not children:
-                            time.sleep(0.02)
-                    child, = children
-                    fg = {"pid": parent.pid, "argv": command}
-                    result = desktop.native_process({"foreground": fg, "cwd": str(Path.cwd())})
-                    self.assertEqual((result["pid"], result["argv"]), (child, command[4:]))
-                    self.assertEqual(fg["argv"], command)
-                finally:
-                    try:
-                        os.killpg(parent.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+            with self.subTest(flags=flags), wrapped_child(flags, interactive) as (command, parent, child):
+                fg = {"pid": parent, "argv": command}
+                result = desktop.native_process({"foreground": fg, "cwd": str(Path.cwd())})
+                self.assertEqual((result["pid"], result["argv"]), (child, command[4:]))
+                self.assertEqual(fg["argv"], command)
+
+    def test_desktop_app_aliases_and_omp_reap_match_the_agent(self):
+        cwd = str(Path.cwd())
+        for app, alias in (("agent", "cursor"), ("cursor-agent", "cursor"), ("oh-my-pi", "omp"), ("omp", "omp")):
+            with self.subTest(app=app):
+                terminals = self.terminals()
+                terminals["t1"].update(pid=100, cwd=cwd, status={"app": app, "state": "done"},
+                                       foreground={"pid": 101, "argv": [app]})
+                view = desktop.snapshot(self.inventory(), terminals, {})
+                self.assertEqual(view["agents"][0]["agent"], alias)
+                world = desktop.World({}, view, terminals)
+                field = desktop.field.Field([], view["agents"], "", "", world)
+                self.assertTrue(desktop.field.foreground_matches(field, str(desktop.READER), "p1", 2))
+
+    @unittest.skipUnless(sys.platform in {"darwin", "linux"}, "POSIX read-model launcher")
+    def test_field_readout_and_reader_use_the_desktop_protocol(self):
+        with tempfile.TemporaryDirectory() as tmp, wrapped_child("-lic", "-li") as (command, parent, child):
+            root = Path(tmp)
+            fixture = root / "world.json"
+            stub = root / "stub.py"
+            terminal = {"address": "t1", "pid": parent, "state": "live", "cwd": str(root),
+                        "status": {"app": "cursor-agent", "state": "working"},
+                        "foreground": {"pid": parent, "name": "bash", "argv": command}}
+            inventory = {"spaces": [{"id": "s1", "name": "Local", "tabs": [
+                {"id": "tab1", "name": "Cursor work", "terminals": [{"pane": "p1", "terminal": "t1"}]}]}]}
+            fixture.write_text(json.dumps({"inventory": inventory, "server": {"pid": os.getpid(),
+                                           "core": {"id": "fixture"}}, "terminals": [terminal]}))
+            stub.write_text("""import json, sys
+from pathlib import Path
+data = json.loads(Path(sys.argv[1]).read_text())
+if sys.argv[2:] == ["app", "ls"]:
+    print(json.dumps(data["inventory"]))
+else:
+    assert sys.argv[2:] == ["core", "connect"]
+    for line in sys.stdin:
+        request = json.loads(line)
+        result = {"server.status": data["server"], "terminal.list": {"terminals": data["terminals"]}}
+        print(json.dumps({"id": request["id"], "result": result[request["method"]]}))
+""")
+            for name, mode in (("herdr-app", "app"), ("hc", "core")):
+                launcher = root / name
+                launcher.write_text('#!/bin/sh\nexec "$FIXTURE_PY" "$FIXTURE_STUB" "$FIXTURE_WORLD" ' +
+                                    mode + ' "$@"\n')
+                launcher.chmod(0o700)
+            env = dict(os.environ, LANTERN_HC_BIN=str(root / "hc"), LANTERN_APP_BIN=str(root / "herdr-app"),
+                       FIXTURE_PY=sys.executable, FIXTURE_STUB=str(stub), FIXTURE_WORLD=str(fixture))
+            state = root / "state"
+            with self.subTest(command="refresh"):
+                reply = subprocess.run([sys.executable, str(desktop.ROOT / "bin/field_status.py"),
+                                        "--state-dir", str(state), "--herdr", str(desktop.READER),
+                                        "--plain", "refresh"], env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(reply.returncode, 0, reply.stderr)
+                rows = json.loads((state / "field-status-rows.json").read_text())["rows"]
+                self.assertEqual([(row["pane_id"], row["agent"]) for row in rows], [("p1", "cursor")])
+            with self.subTest(command="process-info"):
+                reply = subprocess.run([str(desktop.READER), "pane", "process-info", "--pane", "p1"],
+                                       env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(reply.returncode, 0, reply.stderr)
+                process, = json.loads(reply.stdout)["result"]["process_info"]["foreground_processes"]
+                self.assertEqual((process["pid"], process["argv"]), (child, command[4:]))
 
     def test_native_wrapper_keeps_the_shell_when_the_child_is_ambiguous_or_missing(self):
         launch = ["/bin/zsh", "-ic", '"$@"; exec "$0" -i', "/bin/zsh", "codex"]
