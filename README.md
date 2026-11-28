@@ -58,6 +58,11 @@ On macOS or Linux, `sh bin/lantern-app install` adds `lantern-app` to
 `~/.local/bin`. With that folder on your `PATH`, run `lantern-app open` from
 any folder.
 
+Windows desktop support is experimental. Keep Python and Git Bash on your
+`PATH`. From Command Prompt in the checkout, run `bin\lantern-app.cmd install`.
+With `%USERPROFILE%\.local\bin` on your `PATH`, run `lantern-app.cmd open`.
+Use `bin\lantern-app-read.cmd` for the Windows read model.
+
 This opens a native Lantern chat in the first space. The right column has
 three equal panes in this order:
 
@@ -117,11 +122,13 @@ its parent's tab; Field Status doesn't show it.
 These tools are part of the legacy plugin workflow and aren't supported for
 native desktop sessions: `hsh` (including `hsh morning` and `hsh evening`),
 `evening.sh`, `bin/lantern_session.py`, `bin/team_observer.py`, and
-`bin/agent_switch.py start`. `bin/onboard` also runs from the legacy plugin,
-which supplies its config folder; the spawn defaults it saves in `helper.conf`
-are the ones the desktop app reads by default. The desktop app keeps its own
-state. Legacy Field Status notes, Keep pins and team mailbox state aren't
-migrated to it.
+`bin/agent_switch.py start`. From desktop chat, use `sh bin/onboard show`,
+`sh bin/onboard apply`, or `sh bin/onboard doctor`, using the script from
+the Lantern checkout. Desktop onboarding uses `LANTERN_CONFIG_DIR` and
+`LANTERN_DESKTOP_STATE_DIR`. It checks for `hc` and `herdr-app`. The legacy
+plugin supplies its own config and state paths. Both read spawn defaults
+from the shared `helper.conf` by default. Legacy Field Status notes, Keep
+pins and team mailbox state stay with the legacy plugin.
 
 For an optional same-chat recurring monitor, set `HELPER_KATA_PROJECT` in
 `helper.conf` to a Kata project enrolled in herdr-kata with a

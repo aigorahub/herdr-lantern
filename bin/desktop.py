@@ -1037,7 +1037,7 @@ def main() -> int:
                 os.environ["HERDR_PANE_ID"] = record["pane"]
             watch_readout(watcher_args(command, state_dir(), sys.executable))
         else:
-            raise RuntimeError("Usage: lantern-app [open|snapshot|field|usage]")
+            raise RuntimeError("Usage: lantern-app [open|install|snapshot|chat|field|system|usage|read-model]")
         return 0
     except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         print("lantern-app: " + field.clean(exc, 400), file=sys.stderr)

@@ -25,6 +25,13 @@ usage() {
 
 config_dir=${HERDR_PLUGIN_CONFIG_DIR:-}
 state_dir=${HERDR_PLUGIN_STATE_DIR:-}
+desktop=no
+if [ -z "${HERDR_PLUGIN_ROOT:-}${HERDR_PLUGIN_CONFIG_DIR:-}${HERDR_PLUGIN_STATE_DIR:-}" ] &&
+    [ -n "${LANTERN_CONFIG_DIR:-}${LANTERN_DESKTOP_STATE_DIR:-}" ]; then
+    desktop=yes
+    config_dir=${LANTERN_CONFIG_DIR:-}
+    state_dir=${LANTERN_DESKTOP_STATE_DIR:-${LANTERN_HERD_STATE_DIR:-}}
+fi
 while [ $# -gt 0 ]; do
     case $1 in
     --config-dir)
@@ -44,9 +51,15 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$config_dir" ] || {
-    printf '%s\n' "onboard: HERDR_PLUGIN_CONFIG_DIR is not set" >&2
+    printf '%s\n' "onboard: set HERDR_PLUGIN_CONFIG_DIR or LANTERN_CONFIG_DIR" >&2
     exit 2
 }
+if [ "$desktop" = yes ]; then
+    config_dir=$(helper_posix_path "$config_dir")
+    if [ -n "$state_dir" ]; then
+        state_dir=$(helper_posix_path "$state_dir")
+    fi
+fi
 state_dir=${state_dir:-$config_dir/state}
 conf=$config_dir/helper.conf
 
@@ -66,20 +79,30 @@ load_conf() {
     HELPER_SPAWN_KIND=${HELPER_SPAWN_KIND:-claude}
 }
 
+backend_tools() {
+    if [ "$desktop" = yes ]; then
+        printf '%s\n' hc herdr-app
+    else
+        printf '%s\n' herdr
+    fi
+}
+
 cmd_plan() {
     load_conf || exit 1
     helpers=$(helper_list_helpers)
     onboarded=no
     [ -f "$state_dir/onboarded" ] && onboarded=yes
-    herdr_state=missing
-    if command -v herdr >/dev/null 2>&1; then
-        herdr_state=found
-    fi
     python_cmd=$(helper_detect_python 2>/dev/null) || python_cmd=
     printf '%s\n' "lantern onboard plan" \
-        "helpers: ${helpers:-none}" \
-        "herdr: $herdr_state" \
-        "python: ${python_cmd:-missing}" \
+        "helpers: ${helpers:-none}"
+    for tool in $(backend_tools); do
+        tool_state=missing
+        if command -v "$tool" >/dev/null 2>&1; then
+            tool_state=found
+        fi
+        printf '%s\n' "$tool: $tool_state"
+    done
+    printf '%s\n' "python: ${python_cmd:-missing}" \
         "onboarded: $onboarded" \
         "spawn_kind: $HELPER_SPAWN_KIND" \
         "spawn_model: ${HELPER_SPAWN_MODEL:-}" \
@@ -185,12 +208,14 @@ cmd_apply() {
 
 cmd_doctor() {
     failed=0
-    if command -v herdr >/dev/null 2>&1; then
-        printf '%s\n' "herdr: ok"
-    else
-        printf '%s\n' "herdr: missing — install Herdr from https://herdr.dev first"
-        failed=1
-    fi
+    for tool in $(backend_tools); do
+        if command -v "$tool" >/dev/null 2>&1; then
+            printf '%s\n' "$tool: ok"
+        else
+            printf '%s\n' "$tool: missing — install Herdr from https://herdr.dev first"
+            failed=1
+        fi
+    done
     if python_cmd=$(helper_detect_python 2>/dev/null); then
         printf '%s\n' "python: $python_cmd"
     else
