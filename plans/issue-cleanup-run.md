@@ -20,7 +20,7 @@ Plan: `plans/issue-cleanup.md`. Branch: `chore/issue-cleanup`. Worktree: `/Users
 
 ## Next action
 
-Sol implements S1 to S5 from the packet.
+Merge after full CI on the release head, then release v0.20.0 and close the five issues.
 
 ## Ledger
 
@@ -30,3 +30,5 @@ Sol implements S1 to S5 from the packet.
 - S3 #92.4 and #92.6: Field Status and the read-model launcher consume the desktop protocol over stub app and core programs. On 4ac9846 the Cursor and omp alias assertions, omp foreground match, refresh agent identity, and login wrapper child PID assertions fail. Smoke, Desktop, Field Status, and Python 3.9 compilation passed.
 - S4 #92.5: Added the Windows batch launchers, native Python child launches, cmd quoting, and in-process watcher identity for replacement. On 4ac9846 the install file, hook quoting, helper exit code and reuse, watcher receipt, and stale watcher replacement assertions fail. Local smoke, Desktop, and Python 3.9 compilation passed. Windows CI now runs both batch launchers against a stub core. Live Windows Herdr desktop remains unverified.
 - S5 #92.1 and #92.3: Desktop onboarding reads its config and state paths and checks hc and herdr-app. On 4ac9846 the desktop apply smoke fails because it requires HERDR_PLUGIN_CONFIG_DIR, and launcher usage omits install and system. Updated desktop spawn instructions and corrected the Windows and parked sub-agent docs. Smoke, Desktop, Teams, Agent Switch, and Python 3.9 compilation passed.
+- Review: full review at 64ef484 by t4kt, Neon and Carbon. Neon and Carbon were clear. The lead found contradictory platform text in three docs (blocking). F1 fixed the docs and F2 made chat file reads and writes UTF-8 (Neon and Carbon advisory A2), in 8315da3. The lead cleared F1, and Neon and Carbon cleared the delta.
+- S6: Version 0.20.0 and CHANGELOG by the lead.
