@@ -219,6 +219,11 @@ for line in sys.stdin:
         self.assertEqual((grant["cap"], grant["threshold"]), (1, 1))
         self.grant(0)
         self.assertEqual(resets.team_grant(self.settings)["cap"], 0)
+        self.grant(1)
+        self.register()
+        self.settings.unlink()
+        self.assertNotEqual(self.attempt()["outcome"], "reset")
+        self.assertEqual(self.calls(), [])
 
     def test_live_report_and_premature_or_unverified_attempts_never_send(self):
         self.assertEqual(self.attempt()["outcome"], "refused")

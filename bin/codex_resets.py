@@ -112,6 +112,10 @@ def run_path(root: Path, world: desktop.World, space: str) -> Path:
 
 
 def team_grant(path: Path) -> dict:
+    # Resets default to on, so a removed team file must refuse rather than
+    # read as an empty team that grants the default cap.
+    if path.is_symlink() or not path.is_file():
+        raise Refusal("Saved team file is missing")
     team = read_record(path, {})
     reset = team.get("usage_resets", {})
     if not isinstance(reset, dict):
@@ -136,8 +140,6 @@ def register(args, world: desktop.World, root: Path) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_. -]*", args.team):
         raise Refusal("Invalid team name")
     team = desktop.config_dir().resolve() / "teams" / (args.team + ".json")
-    if not team.is_file():
-        raise Refusal("Saved team file is missing")
     grant = team_grant(team)
     if not grant["cap"]:
         return {"outcome": "disabled"}
