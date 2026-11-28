@@ -17,13 +17,15 @@ import tempfile
 import threading
 import time
 import unittest
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
+import codex_resets as resets
+import desktop
 import field_status as field
 import lantern_views as views
 import plan_usage as usage
@@ -50,6 +52,229 @@ except ImportError:
 # Codex and Fugu settings are TOML, which Python reads from 3.11 on.
 # OldPythonTests covers what older Python shows instead.
 needs_tomllib = unittest.skipIf(tomllib is None, "Codex settings need Python 3.11")
+
+
+@unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"), "Native reset process checks")
+class SavedResetTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        self.config = self.root / "config"
+        self.state = self.root / "desktop"
+        self.rpc = self.root / "rpc.jsonl"
+        self.mode = self.root / "mode.json"
+        self.mode.write_text("{}")
+        for p in (self.config / "teams", self.state):
+            p.mkdir(parents=True)
+        self.settings = self.config / "teams/team.json"
+        self.grant(1)
+        self.env = dict(os.environ, XDG_STATE_HOME=str(self.root / "xdg"),
+                        LANTERN_CONFIG_DIR=str(self.config), LANTERN_DESKTOP_STATE_DIR=str(self.state),
+                        CODEX_HOME=str(self.root))
+        self.apply(patch.dict(os.environ, self.env))
+        self.db = resets.state_root()
+        self.server = self.root / "fake-app-server"
+        self.server.write_text(f"#!{sys.executable}\n" + '''import json,sys,os
+from pathlib import Path
+root = Path(os.environ["CODEX_HOME"])
+mode = json.loads((root / "mode.json").read_text())
+reads = 0
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req["method"]
+    if method == "initialized":
+        continue
+    if method == "initialize":
+        result = {}
+    elif method == "account/read":
+        assert req["params"] == {"refreshToken": False}
+        result = {"account": {"type": "chatgpt"}}
+    elif method == "account/rateLimits/read":
+        reads += 1
+        result = json.loads((root / "limits.json").read_text())
+        if mode.get("switch") and reads >= 2:
+            result["accountId"] = "different"
+        if mode.get("post_null") and reads >= 3:
+            result["ordinaryUsageAllowed"] = None
+    elif method == "account/rateLimitResetCredit/consume":
+        with (root / "rpc.jsonl").open("a") as log:
+            log.write(json.dumps(req["params"]) + "\\n")
+        if mode.get("drop"):
+            sys.exit(1)
+        result = {"outcome": mode.get("outcome", "reset")}
+    else:
+        raise AssertionError(method)
+    print(json.dumps({"id": req["id"], "result": result}), flush=True)
+''')
+        self.server.chmod(0o700)
+        pid = os.getpid()
+        self.checked = {"scope": {"provider": "codex", "executable": str(self.server), "env": self.env,
+                                  "files": [], "stamp": runtime.digest([])}, "hint": "codex",
+                        "process": {"pid": pid, "executable": runtime.process_executable(pid), "argv": ["codex"]},
+                        "start": runtime.process_start(pid)}
+        self.world = desktop.World({"key": "server", "lifetime": "instance"}, {"panes": []}, {})
+        self.seat("home", "lantern", "claude", os.getppid())
+        self.world.terminals["home"]["labels"] = {"lantern.desktop": "home"}
+        field.write_json(self.state / "home.json", {"terminal": "home", "instance": desktop.instance_id(self.state)})
+        for number in ("1", "2"):
+            self.seat("lead" + number, "space" + number, "claude", os.getppid())
+            self.seat("seat" + number, "space" + number, "codex", pid)
+        self.apply(patch.object(desktop, "read_world", return_value=self.world))
+        self.apply(patch.object(usage, "inspect_process", return_value=self.checked))
+        self.log = self.root / "rollout-fixture.jsonl"
+        self.apply(patch.object(resets, "rollout_path", return_value=self.log))
+        self.refill = int(time.time()) + 3600
+        self.write_limits()
+        self.turn(spent=True)
+
+    def apply(self, patcher):
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def grant(self, cap):
+        self.settings.write_text(json.dumps({"usage_resets": {"max_per_run": cap}}))
+
+    def seat(self, name, space, app, pid):
+        self.world.view["panes"].append({"terminal_id": name, "workspace_id": space, "pane_id": name, "agent": app})
+        self.world.terminals[name] = {"state": "live", "created_ms": 12, "pid": pid, "cwd": str(self.root),
+                                      "status": {"app": app, "state": "done"},
+                                      "foreground": {"pid": pid, "argv": [app], "cwd": str(self.root)}}
+
+    def write_limits(self, used=100, ordinary=False, refill=None, duration=10080, reached=None, controlled=False,
+                     account="fixture", credits=None):
+        active = {"normalModelSlug": "model", "primary": {"usedPercent": used, "windowDurationMins": duration,
+                                                           "resetsAt": refill or self.refill},
+                  "rateLimitReachedType": reached, "spendControlReached": controlled}
+        other = {"normalModelSlug": "other", "primary": {"usedPercent": 100, "windowDurationMins": 10080,
+                                                          "resetsAt": self.refill}}
+        value = {"accountId": account, "ordinaryUsageAllowed": ordinary,
+                 "rateLimitsByLimitId": {"active": active, "codex": other},
+                 "rateLimitResetCredits": {"availableCount": 2, "credits": credits}}
+        (self.root / "limits.json").write_text(json.dumps(value))
+
+    def turn(self, spent, complete=True):
+        def row(kind, **data):
+            return {"type": "event_msg", "payload": {"type": kind, "turn_id": "turn", **data}}
+        rows = [row("task_started"), {"type": "turn_context", "payload": {
+            "turn_id": "turn", "model": "model", "cwd": str(self.root)}}]
+        if complete:
+            error = {"codex_error_info": "usage_limit_exceeded"} if spent else None
+            rows.append(row("task_complete", error=error))
+        self.log.write_text("".join(json.dumps(entry) + "\n" for entry in rows))
+
+    def run_cli(self, *args):
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            code = resets.main(args)
+        if code:
+            return {"outcome": "refused", "error": err.getvalue()}
+        return json.loads(out.getvalue())
+
+    def register(self, number="1"):
+        self.assertEqual(self.run_cli("register", "--team", "team", "--space", "space" + number,
+                                      "--lead", "lead" + number, "--seat", "seat" + number)["outcome"], "registered")
+
+    def attempt(self, stage="spent", *extra):
+        return self.run_cli("consume", "--seat", "seat1", "--stage", stage, *extra)
+
+    def calls(self):
+        return [json.loads(line) for line in self.rpc.read_text().splitlines()] if self.rpc.exists() else []
+
+    def clean_pushed_boundary(self):
+        git = ["git", "-C", str(self.root)]
+        for args in (["init", "-q"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+                                      "commit", "-q", "--allow-empty", "-m", "Handoff"],
+                     ["update-ref", "refs/remotes/origin/fixture", "HEAD"],
+                     ["config", "remote.origin.url", str(self.root)],
+                     ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]):
+            subprocess.run(git + args, check=True, capture_output=True)
+        branch = subprocess.check_output(git + ["branch", "--show-current"], text=True).strip()
+        subprocess.run(git + ["config", f"branch.{branch}.remote", "origin"], check=True)
+        subprocess.run(git + ["config", f"branch.{branch}.merge", "refs/heads/fixture"], check=True)
+        (self.root / ".git/info/exclude").write_text("*\n")
+
+    def test_live_report_and_premature_or_unverified_attempts_never_send(self):
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.register()
+        self.world.terminals["seat1"]["status"]["state"] = "working"
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.world.terminals["seat1"]["status"]["state"] = "done"
+        self.turn(spent=False)
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.clean_pushed_boundary()
+        self.write_limits(used=90, ordinary=True)
+        self.assertEqual(self.attempt("low", "--reason", "Next packet uses 12%")["outcome"], "window_not_limiting")
+        self.turn(spent=True)
+        self.write_limits(refill=int(time.time()) + 900)
+        self.assertEqual(self.attempt()["outcome"], "wait")
+        for options in ({"controlled": True}, {"reached": "workspace_owner_credits_depleted"}):
+            self.write_limits(**options)
+            self.assertEqual(self.attempt()["outcome"], "non_resettable")
+        self.write_limits(duration=300)
+        self.assertEqual(self.attempt()["outcome"], "fallback_first")
+        result = self.run_cli("status", "--seat", "seat1")
+        self.assertEqual(result["saved_resets"], {"count": 2, "expires_at": None, "expiry_known": False})
+        self.assertEqual(self.calls(), [])
+
+    def test_account_swap_and_foreign_lead_are_refused(self):
+        self.register()
+        self.mode.write_text('{"switch":true}')
+        self.assertIn("account changed", self.attempt()["error"])
+        self.mode.write_text("{}")
+        self.write_limits(refill=int(time.time()) + 900)
+        self.assertEqual(self.attempt()["outcome"], "wait")
+        self.write_limits(account="different")
+        self.assertIn("different Codex account", self.attempt()["error"])
+        self.world.terminals["lead1"]["foreground"]["pid"] = os.getpid()
+        self.assertEqual(self.attempt()["outcome"], "refused")
+        self.assertEqual(self.calls(), [])
+
+    def test_two_runs_share_window_and_one_claim(self):
+        self.register("1")
+        self.register("2")
+        def attempt(number):
+            args = resets.argparse.Namespace(seat="seat" + number, stage="spent")
+            path = resets.run_path(self.db, self.world, "space" + number)
+            with sources.codex_session(self.checked["scope"], time.monotonic() + 15, threading.Event()) as request:
+                reading, _ = sources.codex_limits(request)
+                return resets.consume(request, self.world, self.checked, args, self.db, path, reading, {})
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = {result["outcome"] for result in executor.map(attempt, ("1", "2"))}
+        self.assertEqual(outcomes, {"reset", "already_attempted"})
+        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(set(self.calls()[0]), {"idempotencyKey"})
+
+    def test_lost_reply_retries_same_key_and_null_permission_cannot_resume(self):
+        self.register()
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.mode.write_text('{"outcome":"alreadyRedeemed","post_null":true}')
+        result = self.attempt()
+        self.assertEqual(result["outcome"], "alreadyRedeemed")
+        self.assertFalse(result["resume"])
+        self.assertIsNone(result["ordinary_usage_allowed"])
+        self.assertEqual(len(self.calls()), 2)
+        self.assertEqual(self.calls()[0], self.calls()[1])
+
+    def test_early_nothing_to_reset_counts_and_spent_needs_a_free_slot(self):
+        self.register()
+        self.clean_pushed_boundary()
+        self.turn(spent=False)
+        self.write_limits(used=95, ordinary=True, credits=[{"status": "available", "expiresAt": self.refill}])
+        self.mode.write_text('{"outcome":"nothingToReset"}')
+        result = self.attempt("low", "--reason", "Next packet uses 8%")
+        self.assertTrue(result["reservation_kept"])
+        self.assertTrue(result["resume"])
+        self.assertFalse(result["saved_resets"]["expiry_known"])
+        self.turn(spent=True)
+        self.write_limits()
+        self.assertEqual(self.attempt()["outcome"], "cap_reached")
+        self.assertEqual(len(self.calls()), 1)
+        self.grant(2)
+        self.mode.write_text('{"outcome":"noCredit"}')
+        self.assertFalse(self.attempt()["reservation_kept"])
+        self.assertEqual(len(self.calls()), 2)
+        self.assertNotEqual(self.calls()[0], self.calls()[1])
 
 
 class TeamClaudeTests(unittest.TestCase):

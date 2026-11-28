@@ -104,8 +104,10 @@ If a reset is unavailable or cannot recover the seat, apply the saved
 fallback rule or report the block.
 
 If the result is `pending`, recheck through the same lead and seat. Let
-the helper settle the saved attempt. Report `unresolved` for operator
-review. Resume the same session only when the helper reports `resume`.
+the helper settle the saved attempt. After `expired` or `void`, check
+again if the current seat still meets a trigger. Report `unresolved`
+for operator review. Resume the same session only when the helper reports
+`resume`.
 Keep one active assignment. Record the outcome, confirmed resets used,
 saved resets left and next expiry in the execution log, a board status
 entry, and the final report. Report an unknown value when Codex does not

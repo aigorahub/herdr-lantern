@@ -119,7 +119,7 @@ def team_grant(path: Path) -> dict:
     cap = reset.get("max_per_run", 0)
     horizon = sources.number(reset.get("wait_horizon", 20))
     threshold = sources.number(team.get("switch_below", 10))
-    if (type(cap) is not int or cap < 0 or horizon is None or not 0 <= horizon <= 1440
+    if (type(cap) is not int or cap < 0 or horizon is None or horizon < 0
             or threshold is None or not 0 <= threshold <= 100):
         raise Refusal("Invalid team reset setting")
     return {"cap": cap, "horizon": horizon * 60, "threshold": threshold}
@@ -260,13 +260,13 @@ def turn_evidence(path: Path) -> dict:
 
 def pushed_head(cwd: str) -> str:
     def git(*argv: str) -> str:
-        return subprocess.check_output(["git", "-C", cwd, *argv], timeout=3, text=True,
+        return subprocess.check_output(["git", "-c", "core.fsmonitor=false", "-C", cwd, *argv], timeout=3, text=True,
                                        stderr=subprocess.DEVNULL).strip()
 
     try:
-        head, upstream = git("rev-parse", "HEAD", "@{upstream}").splitlines()
-        if head == upstream and not git("status", "--porcelain"):
-            return head
+        git("merge-base", "--is-ancestor", "HEAD", "@{upstream}")
+        if not git("status", "--porcelain"):
+            return git("rev-parse", "HEAD")
     except (ValueError, subprocess.SubprocessError):
         pass
     raise Refusal("The seat does not have a clean, pushed worktree")
@@ -436,7 +436,7 @@ def reconcile(request, world: desktop.World, root: Path, run_path_now: Path, tar
                 intent["status"] = "void"
             elif pool_id != intent["pool"] or not item or item["reset_at"] is None:
                 return dict(summary(reading, limits), outcome="pending", resume=False)
-            elif pool_id == intent["pool"] and recovered(intent, limits, pool):
+            elif recovered(intent, limits, pool):
                 intent["status"] = "restored"
             elif trigger(limits, pool, intent["stage"]) in ("non_resettable", "cleared"):
                 intent["status"] = "void"
@@ -452,8 +452,9 @@ def reconcile(request, world: desktop.World, root: Path, run_path_now: Path, tar
                     intent["status"] = "void"
                 else:
                     current = limiting_window(pool, intent["stage"], grant["threshold"], time.time())
-                    if (pool_id != intent["pool"] or current is None or current["id"] != item["id"]
-                            or current["reset_at"] != intent["resets_at"]
+                    reserved = sum(entry["run"] == intent["run"] and entry["status"] != "noCredit"
+                                   for entry in ledger["intents"])
+                    if (current is None or current["id"] != item["id"] or reserved > grant["cap"]
                             or trigger(limits, pool, intent["stage"]) != "eligible"):
                         return dict(summary(reading, limits), outcome="pending", resume=False)
                     if (current["reset_at"] - time.time() <= grant["horizon"]
