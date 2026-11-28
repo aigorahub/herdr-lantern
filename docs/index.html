@@ -376,7 +376,7 @@
       <p class="note">The chat runs in the plugin state workdir. Home is only where the workspace sits and the search root the helper is told about (<code>HELPER_CWD</code>). Your repositories keep their own workspaces. When the helper CLI exits, its chat tab closes. The readout panes can remain open. Herdr reuses workspace and pane ids after a restart, so Lantern checks the remembered ids before it trusts them: keep the <code>🔥 lantern</code> label if you want that workspace reused after the chat closes.</p>
 
       <h2>Herdr desktop app</h2>
-      <p>The Herdr desktop app (<code>hc</code> and <code>herdr-app</code>) has a separate Lantern entry point; the legacy plugin stays supported. Supported on macOS and Linux only for now; on Windows, keep using the legacy plugin.</p>
+      <p>The Herdr desktop app (<code>hc</code> and <code>herdr-app</code>) has a separate Lantern entry point. The desktop app is supported on macOS and Linux. Windows desktop support is experimental. The legacy plugin stays supported on every platform.</p>
       <ol class="steps">
         <li>
           <div>
@@ -390,7 +390,7 @@
           </div>
         </li>
       </ol>
-      <p class="note">Windows desktop support is experimental. Keep Python and Git Bash on your <code>PATH</code>. Run <code>bin\lantern-app.cmd install</code> and then <code>lantern-app.cmd open</code> from your <code>PATH</code>. The Windows reader is <code>bin\lantern-app-read.cmd</code>.</p>
+      <p class="note">On Windows, keep Python and Git Bash on your <code>PATH</code>. Run <code>bin\lantern-app.cmd install</code> and then <code>lantern-app.cmd open</code> from your <code>PATH</code>. The Windows reader is <code>bin\lantern-app-read.cmd</code>.</p>
       <p class="note">This opens a native chat with three equal panes on the right: Field Status, Memory &amp; Disk, and Plan Usage. Memory &amp; Disk shows RAM pressure, swap use, memory consumers and their growth, and free disk space. Field Status and Plan Usage show agents in local tabs. Plan Usage also counts sub-agents parked outside a tab under their parent’s tab.</p>
       <p class="note"><code>hsh</code>, <code>evening.sh</code>, <code>bin/lantern_session.py</code>, <code>bin/team_observer.py</code> and <code>bin/agent_switch.py start</code> stay with the legacy plugin. From desktop chat, use <code>sh bin/onboard show</code>, <code>sh bin/onboard apply</code> or <code>sh bin/onboard doctor</code> from the Lantern checkout. Desktop onboarding uses the desktop config and state paths. Legacy notes, Keep pins and mailbox state stay with the legacy plugin.</p>
     </div>

@@ -43,10 +43,8 @@ for context. Use the current instructions below for setup.
 ## Herdr desktop app
 
 The desktop app uses `hc` and `herdr-app`. It has a separate Lantern entry
-point. The legacy plugin and its commands stay supported.
-
-The desktop app is supported on macOS and Linux only for now. On Windows,
-keep using the legacy plugin.
+point. The desktop app is supported on macOS and Linux. Windows desktop
+support is experimental. The legacy plugin stays supported on every platform.
 
 From this checkout, with the app open:
 
@@ -58,8 +56,8 @@ On macOS or Linux, `sh bin/lantern-app install` adds `lantern-app` to
 `~/.local/bin`. With that folder on your `PATH`, run `lantern-app open` from
 any folder.
 
-Windows desktop support is experimental. Keep Python and Git Bash on your
-`PATH`. From Command Prompt in the checkout, run `bin\lantern-app.cmd install`.
+On Windows, keep Python and Git Bash on your `PATH`. From Command Prompt in
+the checkout, run `bin\lantern-app.cmd install`.
 With `%USERPROFILE%\.local\bin` on your `PATH`, run `lantern-app.cmd open`.
 Use `bin\lantern-app-read.cmd` for the Windows read model.
 

@@ -453,7 +453,7 @@ def helper_argv(config: dict[str, str], prompt: str) -> list[str]:
 def install_claude_hooks(work: Path) -> None:
     folder = runtime.private_dir(work / ".claude")
     path = folder / "settings.local.json"
-    settings = json.loads(path.read_text()) if path.exists() else {}
+    settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     hooks = settings.setdefault("hooks", {})
     argv = [sys.executable, str(ROOT / "bin/agent_status.py")]
     command = cmd_command_line(argv) if os.name == "nt" else shlex.join(argv)
@@ -474,7 +474,7 @@ def chat() -> int | None:
     config = read_config(preferences / "helper.conf")
     state = state_dir()
     work = runtime.private_dir(state / "workdir")
-    prompt = (ROOT / "desktop-prompt.md").read_text()
+    prompt = (ROOT / "desktop-prompt.md").read_text(encoding="utf-8")
     prompt += "\nSaved settings: " + json.dumps({k: v for k, v in config.items() if k not in {"HELPER_EXTRA_ARGS", "HELPER_KATA_PROJECT"}})
     prompt += f"\nModel routing: {ROOT / 'bin/model-route'}\nPreflight: {ROOT / 'bin/model-preflight'}\n"
     prompt += f"\nLantern config directory (LANTERN_CONFIG_DIR): {preferences}\n"
@@ -482,11 +482,11 @@ def chat() -> int | None:
     prompt += "\n" + (ROOT / "guidance.md").read_text(encoding="utf-8") + "\n"
     prompt += "\n" + (ROOT / "manager-duty.md").read_text(encoding="utf-8") + "\n"
     if config.get("HELPER_KATA_PROJECT"):
-        prompt += "\n" + (ROOT / "kata-monitor.md").read_text()
+        prompt += "\n" + (ROOT / "kata-monitor.md").read_text(encoding="utf-8")
         prompt += "\nKata project and wake target: " + json.dumps({"project": config["HELPER_KATA_PROJECT"],
                                                                    "target": "lantern-" + instance_id(state)[:16]}) + "\n"
     for filename in ("CLAUDE.md", "AGENTS.md", "GEMINI.md"):
-        (work / filename).write_text(prompt)
+        (work / filename).write_text(prompt, encoding="utf-8")
     kind, binary = helper_command(config)
     # The full instructions live in the workdir files. A batch command
     # line cannot carry the multiline prompt through cmd.exe.

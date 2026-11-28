@@ -436,9 +436,22 @@ class DesktopTests(unittest.TestCase):
     def test_windows_chat_waits_for_a_one_line_batch_helper_command(self):
         with tempfile.TemporaryDirectory() as tmp, desktop_platform("nt"):
             state = Path(tmp)
+            root = state / "fixture"
+            root.mkdir()
+            for name in ("desktop-prompt.md", "manager-duty.md"):
+                shutil.copyfile(desktop.ROOT / name, root / name)
+            guidance = "Équipe 林"
+            (root / "guidance.md").write_text(guidance, encoding="utf-8")
+            config = state / "équipe config"
             binary = str(state / "Codex Shell.cmd")
-            with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": tmp, "LANTERN_CONFIG_DIR": tmp,
+            write_text = Path.write_text
+
+            def write_with_ansi_default(path, data, encoding=None):
+                return write_text(path, data, encoding=encoding or "cp1252")
+
+            with patch.dict(os.environ, {"LANTERN_DESKTOP_STATE_DIR": tmp, "LANTERN_CONFIG_DIR": str(config),
                                          "COMSPEC": "fixture-cmd.exe"}), \
+                    patch.object(desktop, "ROOT", root), patch.object(Path, "write_text", write_with_ansi_default), \
                     patch.object(desktop, "helper_command", return_value=("codex", binary)), \
                     patch.object(desktop.os, "chdir"), patch.object(desktop.os, "execv") as replace, \
                     patch.object(desktop.subprocess, "run",
@@ -449,7 +462,11 @@ class DesktopTests(unittest.TestCase):
                 self.assertTrue(command.startswith('fixture-cmd.exe /d /s /c ""' + binary + '" '))
                 self.assertNotIn("\n", command)
                 self.assertTrue(os.environ["LANTERN_DESKTOP_COMMAND"].endswith("lantern-app.cmd"))
-                self.assertIn("manager", (state / "workdir/AGENTS.md").read_text().lower())
+                for name in ("CLAUDE.md", "AGENTS.md", "GEMINI.md"):
+                    instructions = (state / "workdir" / name).read_text(encoding="utf-8")
+                    self.assertIn("manager", instructions.lower())
+                    self.assertIn(guidance, instructions)
+                    self.assertIn(str(config.resolve()), instructions)
 
     def test_windows_reopen_reuses_batch_helper_names(self):
         for suffix in (".cmd", ".bat"):
