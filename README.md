@@ -2,7 +2,7 @@
 
 ![Lantern, illuminating your herd](assets/lantern-banner.jpeg)
 
-**v0.19.6** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
+**v0.19.7** is a [Herdr](https://herdr.dev) plugin (`aigora.lantern`).
 
 From the team that brought you [Elves](https://github.com/aigorahub/elves).
 
@@ -747,11 +747,29 @@ A fallback gives an exact harness, model, and effort. It can also set
 no qualifying saved fallback, the manager reports and keeps the seat. A
 switch starts a new seat at a safe boundary and preserves the old session.
 
+To let the saved team's lead spend Codex usage resets, add
+`"usage_resets": {"max_per_run": 1, "wait_horizon": 20}` at team level.
+Omit the setting or use a zero cap to keep resets off. The wait horizon is
+in minutes. Lantern home records the roster when it opens the team. The
+lead can read the balance with `python3 bin/codex_resets.py status --seat <id>`.
+Use the helper from the installed Lantern folder.
+
+For a weekly limit, Lantern waits for a near refill, then checks for a
+reset before fallback. For a 5 hour limit alone, it checks the saved
+fallbacks first after the wait. Early checks require a clean, pushed
+boundary and a reason for the next packet. One slot is reserved for each
+attempt that might have spent a credit, including `nothingToReset`.
+Set the cap to 2 or more to leave room for a later spent stage.
+The helper verifies active native Codex sessions on macOS and Linux.
+Its private audit ledger is in the Lantern `resets` directory under
+`XDG_STATE_HOME` (default `~/.local/state`).
+
 A seat with `"permissions": "yolo"` authorizes its verified CLI bypass flag.
 Without that field, normal permission tiers apply. A fallback inherits the
 seat's permission setting and cannot raise it. A saved team grants no
-permanent broad access or authority to merge, deploy, publish, or take
-financial action. Managers grant routine permissions within the assigned
+permanent broad access or authority to merge, deploy, publish, or take other
+financial action.
+Managers grant routine permissions within the assigned
 task and role. [Shipped manager rules](manager-duty.md)
 
 ### Saved workflows

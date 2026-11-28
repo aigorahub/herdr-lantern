@@ -424,6 +424,7 @@ def chat() -> None:
     prompt += "\nSaved settings: " + json.dumps({k: v for k, v in config.items() if k not in {"HELPER_EXTRA_ARGS", "HELPER_KATA_PROJECT"}})
     prompt += f"\nModel routing: {ROOT / 'bin/model-route'}\nPreflight: {ROOT / 'bin/model-preflight'}\n"
     prompt += f"\nLantern config directory (LANTERN_CONFIG_DIR): {preferences}\n"
+    prompt += f"\nSaved Codex reset helper: {ROOT / 'bin/codex_resets.py'}\n"
     prompt += "\n" + (ROOT / "guidance.md").read_text(encoding="utf-8") + "\n"
     prompt += "\n" + (ROOT / "manager-duty.md").read_text(encoding="utf-8") + "\n"
     if config.get("HELPER_KATA_PROJECT"):
