@@ -6,6 +6,8 @@ from itertools import count
 from pathlib import Path
 import json
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -434,11 +436,54 @@ class DesktopTests(unittest.TestCase):
 
     def test_native_process_retains_actual_arguments_and_fills_its_working_directory(self):
         cwd = str(Path.cwd())
-        fg = {"pid": 3, "argv": ["/bin/zsh", "-ic", '\"$@\"; exec "$0" -i', "/bin/zsh", "grok", "--model", "grok-4.7"]}
+        fg = {"pid": 3, "argv": ["grok", "--model", "grok-4.7"]}
         result = desktop.native_process({"foreground": fg, "cwd": cwd})
         self.assertEqual(result["argv"], ["grok", "--model", "grok-4.7"])
         self.assertEqual(result["cwd"], cwd)
-        self.assertEqual(fg["argv"][0], "/bin/zsh")
+        self.assertNotIn("cwd", fg)
+
+    @unittest.skipUnless(sys.platform in {"darwin", "linux"}, "POSIX process arguments")
+    def test_native_wrapper_uses_the_real_direct_child(self):
+        shell, sleep = shutil.which("bash"), shutil.which("sleep")
+        for flags, interactive in (("-ic", "-i"), ("-lic", "-li")):
+            command = [shell, flags, '"$@"; exec "$0" ' + interactive, shell, sleep, "30"]
+            with self.subTest(flags=flags), subprocess.Popen(
+                    command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True) as parent:
+                try:
+                    children = []
+                    deadline = time.monotonic() + 3
+                    while not children and time.monotonic() < deadline:
+                        children = [pid for pid in desktop.runtime.child_pids(parent.pid)
+                                    if desktop.process_argv(pid) == command[4:]]
+                        if not children:
+                            time.sleep(0.02)
+                    child, = children
+                    fg = {"pid": parent.pid, "argv": command}
+                    result = desktop.native_process({"foreground": fg, "cwd": str(Path.cwd())})
+                    self.assertEqual((result["pid"], result["argv"]), (child, command[4:]))
+                    self.assertEqual(fg["argv"], command)
+                finally:
+                    try:
+                        os.killpg(parent.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_native_wrapper_keeps_the_shell_when_the_child_is_ambiguous_or_missing(self):
+        launch = ["/bin/zsh", "-ic", '"$@"; exec "$0" -i', "/bin/zsh", "codex"]
+        foreground = {"pid": 101, "argv": launch, "cwd": str(Path.cwd())}
+        for children in (set(), {102, 103}):
+            with self.subTest(children=children), patch.object(desktop.runtime, "child_pids", return_value=children), \
+                    patch.object(desktop.runtime, "process_start", return_value="live"), \
+                    patch.object(desktop, "process_argv", return_value=["codex"]):
+                self.assertEqual(desktop.native_process({"foreground": foreground}), foreground)
+
+    def test_stale_stock_readout_launched_by_login_shell_is_replaced(self):
+        with self.readout_home() as home:
+            stale = home.stale("field")
+            stale["argv"][1:3] = ["-lic", '"$@"; exec "$0" -li']
+            self.assertEqual(desktop.ensure_views(home.record, home.state), [])
+            self.assertIn(("terminal.kill", {"terminal": stale["address"]}), home.mutations())
 
     def test_stale_stock_readout_is_replaced_after_stop_confirmation(self):
         for role, case in (("field", "old stamp"), ("usage", "old stamp"), ("system", "old stamp"), ("field", "missing stamp"),

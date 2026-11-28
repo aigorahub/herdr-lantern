@@ -283,15 +283,37 @@ def snapshot(inventory: dict, terminals: dict[str, dict], sources: dict[str, dic
     return result
 
 
+def wrapped_argv(argv: object) -> list[str] | None:
+    if (isinstance(argv, list) and len(argv) >= 5 and all(isinstance(arg, str) for arg in argv)
+            and argv[0] == argv[3] and Path(argv[0]).name in {"sh", "bash", "zsh"}
+            and argv[1:3] in (["-ic", '"$@"; exec "$0" -i'], ["-lic", '"$@"; exec "$0" -li'])):
+        return argv[4:]
+    return None
+
+
+def wrapped_child(parent: object, argv: list[str]) -> int | None:
+    if type(parent) is not int or parent <= 0:
+        return None
+    try:
+        matches = []
+        for pid in runtime.child_pids(parent):
+            start = runtime.process_start(pid)
+            if start and process_argv(pid) == argv and runtime.process_start(pid) == start:
+                matches.append(pid)
+        if len(matches) == 1:
+            return matches[0]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def native_process(terminal: dict) -> dict:
     fg = dict(terminal.get("foreground") or {})
     if not fg:
         return fg
-    argv = fg.get("argv") or []
-    # Accept the app's fixed exec wrapper without parsing arbitrary shell code.
-    if (len(argv) >= 5 and argv[1:3] == ["-ic", '\"$@\"; exec "$0" -i']
-            and argv[0] == argv[3] and Path(argv[0]).name in {"sh", "bash", "zsh"}):
-        fg["argv"] = argv[4:]
+    argv = wrapped_argv(fg.get("argv"))
+    if argv and (pid := wrapped_child(fg.get("pid"), argv)) is not None:
+        fg.update(pid=pid, argv=argv, name=Path(argv[0]).name)
     cwd = fg.get("cwd") or terminal.get("cwd")
     if not isinstance(cwd, str) or not Path(cwd).is_absolute():
         raise RuntimeError("Native process working directory unavailable")
@@ -550,11 +572,10 @@ def process_argv(pid) -> list[str] | None:
 def original_launch(terminal: dict, state: Path, role: str) -> bool:
     """The wrapper execs an interactive shell once its launched command returns."""
     launch = terminal.get("argv")
-    if not (isinstance(launch, list) and len(launch) == 8 and all(isinstance(arg, str) for arg in launch)
-            and launch[1:3] == ["-ic", '"$@"; exec "$0" -i'] and launch[0] == launch[3]
-            and Path(launch[0]).name in {"sh", "bash", "zsh"} and Path(launch[4]).name == "sh"
-            and same_path(launch[5], ROOT / "bin" / "lantern-app") and launch[6] == role
-            and same_path(launch[7], state)):
+    argv = wrapped_argv(launch)
+    if not (argv and len(argv) == 4 and Path(argv[0]).name == "sh"
+            and same_path(argv[1], ROOT / "bin" / "lantern-app") and argv[2] == role
+            and same_path(argv[3], state)):
         return False
     return process_argv(terminal.get("pid")) == launch
 
