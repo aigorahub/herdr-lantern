@@ -4,6 +4,11 @@ All notable changes to Lantern, by Elves are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Memory & Disk uses the workspace and tab as the agent label when available.
+  Use Left and Right Arrow to scroll through long names.
+
 ## [0.19.7] - 2026-11-27
 
 ### Added

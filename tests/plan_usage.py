@@ -1557,8 +1557,22 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(page("Short\n", 20, 40, 10), ("Short", 0))
         self.assertEqual(len(page(output, 0, 20, 1)[0].splitlines()), 1)
         self.assertEqual(fit("你好abcdef", 6), "你好ab")
+        self.assertEqual(fit("你好abcdef", 4, column=1), " 好a")
+        self.assertEqual(fit("e\u0301xyz", 2, column=1), "xy")
+        self.assertEqual(fit("❤️❤️❤️❤️ tab", 4), "❤️❤️")
+        self.assertEqual(fit("❤️ tab", 4, column=1), "  ta")
         self.assertEqual(fit("\033[31mabcdef\033[0m", 3), "\033[31mabc\033[0m")
         self.assertEqual(page("abcdef\n", 0, 3, 10), ("abc", 0))
+
+        name = "abcdefghijklmnopqrstu"
+        screen = Readout(horizontal=True)
+        screen.size = os.terminal_size((5, 8))
+        screen.max_column = len(name) - screen.size.columns
+        seen = set()
+        for _ in name:
+            seen.update(fit(name, screen.size.columns, column=screen.column))
+            screen.key("\033[C")
+        self.assertEqual(seen, set(name))
 
     @unittest.skipIf(os.name == "nt", "requires a Unix pseudoterminal")
     def test_readout_live_terminal_scroll_and_close_restore_terminal(self):
@@ -1569,12 +1583,12 @@ class UsageTests(unittest.TestCase):
         import termios
         master, slave = pty.openpty()
         # A real pane has a size. Python before 3.11 keeps a 0x0 size instead of the default.
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 40, 0, 0))
         code = r'''import sys
 sys.path.insert(0, sys.argv[1])
 from terminal_readout import Readout
-with Readout() as r:
-    r.draw("\n".join(str(i) for i in range(100)))
+with Readout(horizontal=True) as r:
+    r.draw("\n".join(f"{i:02} Bookstore / Guest payments migration complete" for i in range(100)))
     while not r.stop.is_set():
         r.wait(.1)
 '''
@@ -1582,16 +1596,30 @@ with Readout() as r:
         output = b""
         try:
             deadline = time.monotonic() + 5
-            while b"Up/Down" not in output and time.monotonic() < deadline:
+            while b"Arrow keys scroll" not in output and time.monotonic() < deadline:
                 if select.select([master], [], [], .1)[0]:
                     output += os.read(master, 8192)
-            self.assertIn(b"Up/Down", output)
+            self.assertIn(b"Arrow keys scroll", output)
             os.write(master, b"G")
             deadline = time.monotonic() + 5
             while b"99" not in output and time.monotonic() < deadline:
                 if select.select([master], [], [], .1)[0]:
                     output += os.read(master, 8192)
             self.assertIn(b"99", output)
+            self.assertNotIn(b"migration complete", output)
+            os.write(master, b"\x1b[C\x1b[C")
+            deadline = time.monotonic() + 5
+            while b"migration complete" not in output and time.monotonic() < deadline:
+                if select.select([master], [], [], .1)[0]:
+                    output += os.read(master, 8192)
+            self.assertIn(b"migration complete", output)
+            left = len(output)
+            os.write(master, b"\x1bOD\x1bOD")
+            deadline = time.monotonic() + 5
+            while b"99 Bookstore" not in output[left:] and time.monotonic() < deadline:
+                if select.select([master], [], [], .1)[0]:
+                    output += os.read(master, 8192)
+            self.assertIn(b"99 Bookstore", output[left:])
             os.write(master, b"q")
             proc.wait(timeout=5)
             while select.select([master], [], [], .1)[0]:

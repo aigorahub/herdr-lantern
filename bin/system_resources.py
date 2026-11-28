@@ -126,7 +126,7 @@ def parse_processes(data: str) -> dict[int, Process]:
         except ValueError:
             continue
         if pid > 0 and parent >= 0 and kib >= 0:
-            processes[pid] = Process(parent, kib, clean(Path(fields[8]).name), " ".join(fields[3:8]))
+            processes[pid] = Process(parent, kib, clean(Path(fields[8]).name, None), " ".join(fields[3:8]))
     return processes
 
 
@@ -138,10 +138,12 @@ def agent_roots() -> dict[int, str]:
         pid = terminal.get("pid")
         if (terminal.get("state") == "live" and not terminal.get("machine") and app
                 and type(pid) is int and pid > 0 and not desktop.bridge(terminal)):
-            name = terminal.get("name") or desktop.APP_AGENT_NAMES.get(app, app)
-            label = f"{clean(name, 24)} ({clean(terminal['address'], 24)})"
-            where = clean((terminal.get("labels") or {}).get("where"), 60)
-            roots[pid] = f"{label} · {where}" if where else label
+            where = clean((terminal.get("labels") or {}).get("where"), None)
+            if where:
+                roots[pid] = where
+            else:
+                name = terminal.get("name") or desktop.APP_AGENT_NAMES.get(app, app)
+                roots[pid] = f"{clean(name, None)} ({clean(terminal['address'], 24)})"
     return roots
 
 
@@ -240,8 +242,8 @@ def consumer_label(row: Consumer, folders: dict[int, Path]) -> str:
     folder = folders.get(row.pid)
     if is_runtime(name):
         argv = desktop.process_argv(row.pid) or []
-        name = clean(entry_point(name, argv, folder), 36) or name
-    project = clean(folder.name, 32) if folder and folder != Path.home() else ""
+        name = clean(entry_point(name, argv, folder), None) or name
+    project = clean(folder.name, None) if folder and folder != Path.home() else ""
     if project:
         name = f"{name} · {project}"
     return f"{name} ({row.pid})"
@@ -324,7 +326,7 @@ def main() -> None:
         parser.error("watch requires --state-dir")
     record_watcher(args.state_dir, "system")
     history = MemoryHistory()
-    with Readout() as screen:
+    with Readout(horizontal=True) as screen:
         while not screen.stop.is_set():
             sample = snapshot(history)
             if sample != screen.output:
