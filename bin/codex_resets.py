@@ -433,12 +433,15 @@ def attempted_this_episode(ledger: dict, pool: str, window: dict, stage: str, ex
         if (entry["pool"] != pool or entry["window"] != window["id"]
                 or entry["resets_at"] != window["reset_at"] or entry["status"] in ("void", "expired")):
             continue
-        if entry.get("recovery_confirmed") and entry["status"] in CONFIRMED | {"restored"}:
+        if entry["status"] in CONFIRMED | {"restored"}:
             if stage == "low":
-                # A new turn can still be in the same low quota episode.
+                # A confirmed debit is enough to block a low attempt until
+                # the account proves recovery and a new drop.
                 remaining_after = sources.number(entry.get("remaining_after"))
-                return not (remaining_after is not None and window["remaining"] < threshold <= remaining_after)
-            return entry["stage"] == stage and entry["evidence"] == expected
+                return not (entry.get("recovery_confirmed") and remaining_after is not None
+                            and window["remaining"] < threshold <= remaining_after)
+            if entry.get("recovery_confirmed"):
+                return entry["stage"] == stage and entry["evidence"] == expected
         if entry["stage"] == stage:
             return True
     return False
@@ -454,12 +457,12 @@ def settle_pending(world: desktop.World, original: Path, path: Path, ledger: dic
         save_record(path, ledger)
         return dict(response(intent, reading, limits, pool), resume=outcome == "restored")
 
+    if time.time() >= intent["resets_at"]:
+        return close("expired", {})
     run = read_record(original, {})
     if run and run["server"]["key"] != world.server["key"]:
         # This core cannot verify an assignment on another server.
         return dict(summary(reading, limits), outcome="pending", resume=False)
-    if time.time() >= intent["resets_at"]:
-        return close("expired", {})
     if not run:
         return close("void", {})
     try:

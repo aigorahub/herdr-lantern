@@ -341,6 +341,17 @@ for line in sys.stdin:
         self.assertEqual(len(self.calls()), 2)
         self.assertEqual(*self.calls())
 
+    def test_peer_server_can_expire_a_pending_key_after_refill(self):
+        self.register("1")
+        self.mode.write_text('{"drop":true}')
+        self.assertEqual(self.attempt()["outcome"], "pending")
+        self.world.server.update(key="peer", lifetime="peer-instance")
+        self.register("2")
+        with patch.object(resets.time, "time", return_value=self.refill + 1):
+            result = self.run_cli("consume", "--seat", "seat2", "--stage", "spent")
+        self.assertEqual(result["outcome"], "expired")
+        self.assertEqual(len(self.calls()), 1)
+
     def test_lower_cap_closes_pending_without_blocking_a_later_attempt(self):
         self.register()
         self.mode.write_text('{"drop":true}')
@@ -407,6 +418,21 @@ for line in sys.stdin:
         self.mode.write_text('{"after_reset":94}')
         self.assertTrue(self.early_attempt()["resume"])
         self.turn(spent=False, turn_id="peer-turn")
+        self.assertEqual(self.early_attempt("seat2")["outcome"], "already_attempted")
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_spent_reset_without_confirmed_recovery_blocks_a_low_attempt(self):
+        self.register("1")
+        self.register("2")
+        self.clean_pushed_boundary()
+        self.write_limits(reached="rate_limit_reached")
+        self.mode.write_text('{"after_reset":94}')
+        spent = self.attempt()
+        self.assertEqual(spent["outcome"], "reset")
+        self.assertFalse(spent["resume"])
+        self.assertEqual(len(self.calls()), 1)
+        self.turn(spent=False, turn_id="peer-turn")
+        self.write_limits(used=94, ordinary=True)
         self.assertEqual(self.early_attempt("seat2")["outcome"], "already_attempted")
         self.assertEqual(len(self.calls()), 1)
 
